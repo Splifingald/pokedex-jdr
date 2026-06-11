@@ -3,8 +3,10 @@ import Papa from 'papaparse'
 import type { CsvRow } from '../types'
 import { CSV_REQUIRED_HEADERS } from '../types'
 
+// L'import CSV passe par une Netlify Function côté serveur
+// → la clé service_role Supabase n'est jamais exposée dans le bundle JS
+const IMPORT_URL = '/.netlify/functions/import-pokemon'
 const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET as string
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
 
 interface Props {
   onImportSuccess: () => void
@@ -38,7 +40,6 @@ function mapCsvRow(row: CsvRow) {
 export function AdminPanel({ onImportSuccess, onClose, onLogout }: Props) {
   const [status, setStatus] = useState<'idle' | 'parsing' | 'importing' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
-  const [, setPreview] = useState<number | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -47,7 +48,6 @@ export function AdminPanel({ onImportSuccess, onClose, onLogout }: Props) {
 
     setStatus('parsing')
     setMessage('')
-    setPreview(null)
 
     Papa.parse<CsvRow>(file, {
       header: true,
@@ -63,7 +63,6 @@ export function AdminPanel({ onImportSuccess, onClose, onLogout }: Props) {
         }
 
         const rows = results.data.map(mapCsvRow).filter((r) => r.nom && r.numero)
-        setPreview(rows.length)
 
         if (rows.length === 0) {
           setStatus('error')
@@ -72,10 +71,10 @@ export function AdminPanel({ onImportSuccess, onClose, onLogout }: Props) {
         }
 
         setStatus('importing')
-        setMessage(`Import de ${rows.length} pokémon...`)
+        setMessage(`Import de ${rows.length} pokémon…`)
 
         try {
-          const res = await fetch(`${SUPABASE_URL}/functions/v1/import-pokemon`, {
+          const res = await fetch(IMPORT_URL, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -87,7 +86,7 @@ export function AdminPanel({ onImportSuccess, onClose, onLogout }: Props) {
           const data = await res.json()
 
           if (!res.ok) {
-            throw new Error(data.error ?? `Erreur ${res.status}`)
+            throw new Error(data.error ?? `Erreur serveur ${res.status}`)
           }
 
           setStatus('success')
@@ -104,7 +103,6 @@ export function AdminPanel({ onImportSuccess, onClose, onLogout }: Props) {
       },
     })
 
-    // Reset input pour permettre de re-sélectionner le même fichier
     e.target.value = ''
   }
 
@@ -119,7 +117,6 @@ export function AdminPanel({ onImportSuccess, onClose, onLogout }: Props) {
           <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">✕</button>
         </div>
 
-        {/* Import CSV */}
         <div className="mb-5">
           <p className="text-gray-400 text-sm mb-3">
             Importer un fichier CSV pour mettre à jour le Pokédex.<br />
@@ -130,29 +127,21 @@ export function AdminPanel({ onImportSuccess, onClose, onLogout }: Props) {
             disabled={status === 'importing' || status === 'parsing'}
             className="w-full py-3 bg-red-700 border-2 border-red-500 text-white rounded hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-bold"
           >
-            {status === 'parsing' || status === 'importing' ? '⏳ En cours...' : '📂 Importer CSV'}
+            {status === 'parsing' || status === 'importing' ? '⏳ En cours…' : '📂 Importer CSV'}
           </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".csv"
-            onChange={handleFile}
-            className="hidden"
-          />
+          <input ref={fileRef} type="file" accept=".csv" onChange={handleFile} className="hidden" />
         </div>
 
-        {/* Status */}
         {message && (
           <div className={`text-sm p-3 rounded mb-4 ${
             status === 'success' ? 'bg-green-900/50 text-green-300 border border-green-700' :
-            status === 'error' ? 'bg-red-900/50 text-red-300 border border-red-700' :
+            status === 'error'   ? 'bg-red-900/50 text-red-300 border border-red-700' :
             'bg-gray-800 text-gray-300'
           }`}>
             {message}
           </div>
         )}
 
-        {/* Déconnexion */}
         <button
           onClick={onLogout}
           className="w-full py-2 border border-gray-700 text-gray-500 rounded hover:text-gray-300 hover:border-gray-500 transition-colors text-sm"

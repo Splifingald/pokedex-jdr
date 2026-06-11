@@ -7,6 +7,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('Variables Supabase manquantes. Copiez .env.example en .env.local et remplissez les valeurs.')
 }
 
+// Clé anon publique — RLS actif, lecture seule sur pokemon
 export const supabase = createClient(
   supabaseUrl ?? 'https://placeholder.supabase.co',
   supabaseAnonKey ?? 'placeholder'
