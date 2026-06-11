@@ -5,6 +5,7 @@ interface Props {
   onTypeFilterChange: (t: string) => void
   availableTypes: string[]
   onManualDiscover: () => void
+  onScanDiscover: () => void
 }
 
 export function SearchBar({
@@ -14,6 +15,7 @@ export function SearchBar({
   onTypeFilterChange,
   availableTypes,
   onManualDiscover,
+  onScanDiscover,
 }: Props) {
   return (
     <div className="px-3 py-2 bg-gray-800 border-b border-gray-700 flex flex-col gap-2 shrink-0">
@@ -37,6 +39,15 @@ export function SearchBar({
             </button>
           )}
         </div>
+
+        {/* Bouton scanner */}
+        <button
+          onClick={onScanDiscover}
+          title="Scanner une carte"
+          className="w-9 h-9 bg-gray-700 border border-gray-600 text-white rounded flex items-center justify-center text-base hover:bg-gray-600 transition-colors shrink-0"
+        >
+          📷
+        </button>
 
         {/* Bouton + pour découverte manuelle */}
         <button

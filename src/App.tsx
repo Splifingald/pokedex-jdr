@@ -8,6 +8,7 @@ import { PasswordModal } from './components/PasswordModal'
 import { AdminPanel } from './components/AdminPanel'
 import { SearchBar } from './components/SearchBar'
 import { ManualDiscoveryModal } from './components/ManualDiscoveryModal'
+import { ScannerModal } from './components/ScannerModal'
 
 export default function App() {
   const { pokemon, discovered, loading, error, discoverPokemon, undiscoverPokemon, refetch } = usePokemon()
@@ -18,6 +19,7 @@ export default function App() {
   const [showPasswordModal, setShowPasswordModal] = useState(false)
   const [showAdminPanel, setShowAdminPanel] = useState(false)
   const [showManualModal, setShowManualModal] = useState(false)
+  const [showScannerModal, setShowScannerModal] = useState(false)
 
   // Filtres de recherche
   const [search, setSearch] = useState('')
@@ -149,6 +151,7 @@ export default function App() {
             onTypeFilterChange={setTypeFilter}
             availableTypes={availableTypes}
             onManualDiscover={() => setShowManualModal(true)}
+            onScanDiscover={() => setShowScannerModal(true)}
           />
 
           {loading ? (
@@ -227,6 +230,15 @@ export default function App() {
           discovered={discovered}
           onDiscover={handleManualDiscover}
           onClose={() => setShowManualModal(false)}
+        />
+      )}
+
+      {showScannerModal && (
+        <ScannerModal
+          pokemon={pokemon}
+          discovered={discovered}
+          onDiscover={handleManualDiscover}
+          onClose={() => setShowScannerModal(false)}
         />
       )}
     </div>
