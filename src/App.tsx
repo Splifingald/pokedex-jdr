@@ -1,0 +1,173 @@
+import { useState, useEffect } from 'react'
+import { usePokemon } from './hooks/usePokemon'
+import type { Pokemon } from './types'
+import { PokemonList } from './components/PokemonList'
+import { PokemonCard } from './components/PokemonCard'
+import { DiscoveryModal } from './components/DiscoveryModal'
+import { PasswordModal } from './components/PasswordModal'
+import { AdminPanel } from './components/AdminPanel'
+
+export default function App() {
+  const { pokemon, discovered, loading, error, discoverPokemon, refetch } = usePokemon()
+
+  const [selected, setSelected] = useState<Pokemon | null>(null)
+  const [pendingDiscovery, setPendingDiscovery] = useState<Pokemon | null>(null)
+  const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem('adminMode') === 'true')
+  const [showPasswordModal, setShowPasswordModal] = useState(false)
+  const [showAdminPanel, setShowAdminPanel] = useState(false)
+
+  // Réinitialise la sélection si les données rechargent
+  useEffect(() => {
+    if (selected) {
+      const updated = pokemon.find((p) => p.id === selected.id)
+      if (updated) setSelected(updated)
+    }
+  }, [pokemon])
+
+  const handleAdminTriggerClick = () => {
+    if (isAdmin) {
+      setShowAdminPanel(true)
+    } else {
+      setShowPasswordModal(true)
+    }
+  }
+
+  const handlePasswordSuccess = () => {
+    setIsAdmin(true)
+    setShowPasswordModal(false)
+    setShowAdminPanel(true)
+  }
+
+  const handleLogout = () => {
+    sessionStorage.removeItem('adminMode')
+    setIsAdmin(false)
+    setShowAdminPanel(false)
+  }
+
+  const handleDiscoveryConfirm = async () => {
+    if (!pendingDiscovery) return
+    await discoverPokemon(pendingDiscovery.nom)
+    setSelected(pendingDiscovery)
+    setPendingDiscovery(null)
+  }
+
+  return (
+    <div className="flex flex-col h-full bg-gray-900">
+      {/* Header Pokédex */}
+      <header className="shrink-0 flex items-center px-4 py-2 bg-red-700 border-b-4 border-red-900 shadow-lg relative">
+        {/* Bouton admin invisible (coin haut-gauche) */}
+        <button
+          onClick={handleAdminTriggerClick}
+          className="absolute top-0 left-0 w-12 h-12 z-50 opacity-0 cursor-default"
+          aria-hidden="true"
+          tabIndex={-1}
+        />
+
+        {/* Déco Pokédex : lumière bleue + lampes */}
+        <div className="flex items-center gap-2 mr-4 shrink-0">
+          <div className="w-8 h-8 rounded-full bg-blue-400 border-2 border-white shadow-[0_0_8px_#60a5fa]" />
+          <div className="w-3 h-3 rounded-full bg-red-300 border border-white" />
+          <div className="w-3 h-3 rounded-full bg-yellow-300 border border-white" />
+          <div className="w-3 h-3 rounded-full bg-green-400 border border-white" />
+        </div>
+
+        <h1 className="text-white text-2xl tracking-widest">POKÉDEX</h1>
+
+        {isAdmin && (
+          <button
+            onClick={() => setShowAdminPanel(true)}
+            className="ml-auto text-yellow-300 text-sm border border-yellow-600 rounded px-2 py-1 hover:bg-yellow-900/30 transition-colors"
+          >
+            🛠 Admin
+          </button>
+        )}
+      </header>
+
+      {/* Corps principal */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Panneau liste */}
+        <div
+          className={`bg-gray-900 border-r border-gray-700 flex flex-col
+            ${selected ? 'hidden md:flex' : 'flex'}
+            w-full md:w-80 lg:w-96 shrink-0
+          `}
+        >
+          {/* Barre de statut */}
+          <div className="px-4 py-2 bg-gray-800 border-b border-gray-700 flex items-center justify-between shrink-0">
+            <span className="text-gray-400 text-xs">
+              {loading ? 'Chargement...' : `${pokemon.length} Pokémon`}
+            </span>
+            <span className="text-gray-500 text-xs">
+              {discovered.size} découverts
+            </span>
+          </div>
+
+          {loading ? (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-gray-500 text-center">
+                <div className="text-4xl mb-3 animate-spin">⊙</div>
+                <p className="text-sm">Chargement...</p>
+              </div>
+            </div>
+          ) : error ? (
+            <div className="flex-1 flex items-center justify-center p-6">
+              <div className="text-red-400 text-center text-sm">
+                <div className="text-3xl mb-2">⚠️</div>
+                <p>{error}</p>
+              </div>
+            </div>
+          ) : (
+            <PokemonList
+              pokemon={pokemon}
+              discovered={discovered}
+              isAdmin={isAdmin}
+              selectedId={selected?.id ?? null}
+              onSelectDiscovered={setSelected}
+              onSelectUndiscovered={setPendingDiscovery}
+            />
+          )}
+        </div>
+
+        {/* Panneau détail */}
+        <div className="flex-1 overflow-hidden">
+          {selected ? (
+            <PokemonCard
+              pokemon={selected}
+              isAdmin={isAdmin}
+              onBack={() => setSelected(null)}
+            />
+          ) : (
+            <div className="hidden md:flex h-full items-center justify-center text-gray-700 flex-col gap-4 select-none">
+              <div className="text-8xl opacity-20">⊙</div>
+              <p className="text-lg opacity-30">Sélectionnez un Pokémon</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Modals */}
+      {pendingDiscovery && (
+        <DiscoveryModal
+          numero={pendingDiscovery.numero}
+          onConfirm={handleDiscoveryConfirm}
+          onCancel={() => setPendingDiscovery(null)}
+        />
+      )}
+
+      {showPasswordModal && (
+        <PasswordModal
+          onSuccess={handlePasswordSuccess}
+          onCancel={() => setShowPasswordModal(false)}
+        />
+      )}
+
+      {showAdminPanel && (
+        <AdminPanel
+          onImportSuccess={() => { refetch(); setShowAdminPanel(false) }}
+          onClose={() => setShowAdminPanel(false)}
+          onLogout={handleLogout}
+        />
+      )}
+    </div>
+  )
+}

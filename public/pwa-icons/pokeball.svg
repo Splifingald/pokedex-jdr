@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Fond rouge -->
+  <circle cx="256" cy="256" r="240" fill="#DC0A2D"/>
+  <!-- Demi-cercle blanc bas -->
+  <path d="M16 256 A240 240 0 0 0 496 256 Z" fill="white"/>
+  <!-- Bande noire centrale -->
+  <rect x="16" y="236" width="480" height="40" fill="#1a1a1a"/>
+  <!-- Bouton central blanc -->
+  <circle cx="256" cy="256" r="56" fill="white" stroke="#1a1a1a" stroke-width="12"/>
+  <!-- Bouton central intérieur -->
+  <circle cx="256" cy="256" r="28" fill="#DC0A2D" stroke="#1a1a1a" stroke-width="4"/>
+</svg>
