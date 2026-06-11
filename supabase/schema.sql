@@ -3,6 +3,13 @@
 -- À exécuter dans : Supabase Dashboard > SQL Editor
 -- ============================================================
 
+-- ============================================================
+-- MISE À JOUR : exécuter ces commandes si la table existe déjà
+-- ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS cache boolean NOT NULL DEFAULT false;
+-- ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS code text;
+-- CREATE POLICY "Public delete discovered" ON discovered_pokemon FOR DELETE TO anon USING (true);
+-- ============================================================
+
 -- Table principale des pokémon
 CREATE TABLE IF NOT EXISTS pokemon (
   id                    bigserial PRIMARY KEY,
@@ -23,7 +30,9 @@ CREATE TABLE IF NOT EXISTS pokemon (
   chances_capture       text,
   localisation_1        text,
   localisation_2        text,
-  localisation_3        text
+  localisation_3        text,
+  cache                 boolean NOT NULL DEFAULT false,
+  code                  text
 );
 
 -- Table des découvertes (état global partagé)
@@ -59,3 +68,9 @@ CREATE POLICY "Public insert discovered"
   ON discovered_pokemon FOR INSERT
   TO anon
   WITH CHECK (true);
+
+-- Permettre d'annuler une découverte (bouton "Marquer comme non découvert")
+CREATE POLICY "Public delete discovered"
+  ON discovered_pokemon FOR DELETE
+  TO anon
+  USING (true);

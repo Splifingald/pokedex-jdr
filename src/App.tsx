@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { usePokemon } from './hooks/usePokemon'
 import type { Pokemon } from './types'
 import { PokemonList } from './components/PokemonList'
@@ -6,17 +6,42 @@ import { PokemonCard } from './components/PokemonCard'
 import { DiscoveryModal } from './components/DiscoveryModal'
 import { PasswordModal } from './components/PasswordModal'
 import { AdminPanel } from './components/AdminPanel'
+import { SearchBar } from './components/SearchBar'
+import { ManualDiscoveryModal } from './components/ManualDiscoveryModal'
 
 export default function App() {
-  const { pokemon, discovered, loading, error, discoverPokemon, refetch } = usePokemon()
+  const { pokemon, discovered, loading, error, discoverPokemon, undiscoverPokemon, refetch } = usePokemon()
 
   const [selected, setSelected] = useState<Pokemon | null>(null)
   const [pendingDiscovery, setPendingDiscovery] = useState<Pokemon | null>(null)
   const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem('adminMode') === 'true')
   const [showPasswordModal, setShowPasswordModal] = useState(false)
   const [showAdminPanel, setShowAdminPanel] = useState(false)
+  const [showManualModal, setShowManualModal] = useState(false)
 
-  // Réinitialise la sélection si les données rechargent
+  // Filtres de recherche
+  const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
+
+  // Types uniques disponibles dans le pokédex
+  const availableTypes = useMemo(() => {
+    const visible = isAdmin ? pokemon : pokemon.filter((p) => !p.cache)
+    const types = [...new Set(visible.map((p) => p.type))].sort()
+    return types
+  }, [pokemon, isAdmin])
+
+  // Liste filtrée
+  const filteredPokemon = useMemo(() => {
+    return pokemon.filter((p) => {
+      if (p.cache && !isAdmin) return false
+      const q = search.toLowerCase()
+      if (q && !p.nom.toLowerCase().includes(q) && !p.numero.includes(q)) return false
+      if (typeFilter && p.type !== typeFilter) return false
+      return true
+    })
+  }, [pokemon, search, typeFilter, isAdmin])
+
+  // Sync la fiche sélectionnée si les données rechargent
   useEffect(() => {
     if (selected) {
       const updated = pokemon.find((p) => p.id === selected.id)
@@ -51,11 +76,24 @@ export default function App() {
     setPendingDiscovery(null)
   }
 
+  const handleManualDiscover = async (p: Pokemon) => {
+    await discoverPokemon(p.nom)
+    setSelected(p)
+  }
+
+  const handleUndiscover = async () => {
+    if (!selected) return
+    await undiscoverPokemon(selected.nom)
+    // On ferme la fiche sur mobile, on reste sur desktop
+    if (window.innerWidth < 768) setSelected(null)
+  }
+
+  const visibleCount = pokemon.filter((p) => !p.cache || isAdmin).length
+
   return (
     <div className="flex flex-col h-full bg-gray-900">
       {/* Header Pokédex */}
       <header className="shrink-0 flex items-center px-4 py-2 bg-red-700 border-b-4 border-red-900 shadow-lg relative">
-        {/* Bouton admin invisible (coin haut-gauche) */}
         <button
           onClick={handleAdminTriggerClick}
           className="absolute top-0 left-0 w-12 h-12 z-50 opacity-0 cursor-default"
@@ -63,7 +101,6 @@ export default function App() {
           tabIndex={-1}
         />
 
-        {/* Déco Pokédex : lumière bleue + lampes */}
         <div className="flex items-center gap-2 mr-4 shrink-0">
           <div className="w-8 h-8 rounded-full bg-blue-400 border-2 border-white shadow-[0_0_8px_#60a5fa]" />
           <div className="w-3 h-3 rounded-full bg-red-300 border border-white" />
@@ -93,20 +130,28 @@ export default function App() {
           `}
         >
           {/* Barre de statut */}
-          <div className="px-4 py-2 bg-gray-800 border-b border-gray-700 flex items-center justify-between shrink-0">
+          <div className="px-4 py-1.5 bg-gray-800 border-b border-gray-700 flex items-center justify-between shrink-0">
             <span className="text-gray-400 text-xs">
-              {loading ? 'Chargement...' : `${pokemon.length} Pokémon`}
+              {loading ? 'Chargement…' : `${filteredPokemon.length} / ${visibleCount} Pokémon`}
             </span>
-            <span className="text-gray-500 text-xs">
-              {discovered.size} découverts
-            </span>
+            <span className="text-gray-500 text-xs">{discovered.size} découverts</span>
           </div>
+
+          {/* Barre de recherche */}
+          <SearchBar
+            search={search}
+            onSearchChange={setSearch}
+            typeFilter={typeFilter}
+            onTypeFilterChange={setTypeFilter}
+            availableTypes={availableTypes}
+            onManualDiscover={() => setShowManualModal(true)}
+          />
 
           {loading ? (
             <div className="flex-1 flex items-center justify-center">
               <div className="text-gray-500 text-center">
                 <div className="text-4xl mb-3 animate-spin">⊙</div>
-                <p className="text-sm">Chargement...</p>
+                <p className="text-sm">Chargement…</p>
               </div>
             </div>
           ) : error ? (
@@ -118,12 +163,13 @@ export default function App() {
             </div>
           ) : (
             <PokemonList
-              pokemon={pokemon}
+              pokemon={filteredPokemon}
               discovered={discovered}
               isAdmin={isAdmin}
               selectedId={selected?.id ?? null}
               onSelectDiscovered={setSelected}
               onSelectUndiscovered={setPendingDiscovery}
+              totalCount={visibleCount}
             />
           )}
         </div>
@@ -134,7 +180,9 @@ export default function App() {
             <PokemonCard
               pokemon={selected}
               isAdmin={isAdmin}
+              isDiscovered={discovered.has(selected.nom)}
               onBack={() => setSelected(null)}
+              onUndiscover={handleUndiscover}
             />
           ) : (
             <div className="hidden md:flex h-full items-center justify-center text-gray-700 flex-col gap-4 select-none">
@@ -166,6 +214,15 @@ export default function App() {
           onImportSuccess={() => { refetch(); setShowAdminPanel(false) }}
           onClose={() => setShowAdminPanel(false)}
           onLogout={handleLogout}
+        />
+      )}
+
+      {showManualModal && (
+        <ManualDiscoveryModal
+          pokemon={pokemon}
+          discovered={discovered}
+          onDiscover={handleManualDiscover}
+          onClose={() => setShowManualModal(false)}
         />
       )}
     </div>

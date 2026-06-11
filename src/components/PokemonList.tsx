@@ -8,6 +8,7 @@ interface Props {
   selectedId: number | null
   onSelectDiscovered: (p: Pokemon) => void
   onSelectUndiscovered: (p: Pokemon) => void
+  totalCount: number // total avant filtres, pour afficher "X / Y"
 }
 
 export function PokemonList({
@@ -17,8 +18,9 @@ export function PokemonList({
   selectedId,
   onSelectDiscovered,
   onSelectUndiscovered,
+  totalCount,
 }: Props) {
-  if (pokemon.length === 0) {
+  if (totalCount === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-gray-500 gap-4 p-8">
         <span className="text-5xl">📋</span>
@@ -30,8 +32,17 @@ export function PokemonList({
     )
   }
 
+  if (pokemon.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-gray-500 gap-4 p-8">
+        <span className="text-4xl">🔍</span>
+        <p className="text-center text-sm">Aucun résultat.</p>
+      </div>
+    )
+  }
+
   return (
-    <div className="overflow-y-auto h-full">
+    <div className="overflow-y-auto flex-1">
       {pokemon.map((p) => (
         <PokemonListItem
           key={p.id}

@@ -18,6 +18,8 @@ export interface Pokemon {
   localisation_1: string | null
   localisation_2: string | null
   localisation_3: string | null
+  cache: boolean
+  code: string | null
 }
 
 export interface CsvRow {
@@ -39,6 +41,8 @@ export interface CsvRow {
   'Localisation 1': string
   'Localisation 2': string
   'Localisation 3': string
+  'Caché': string
+  'Code': string
 }
 
 export const CSV_REQUIRED_HEADERS: (keyof CsvRow)[] = [

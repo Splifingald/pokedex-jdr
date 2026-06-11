@@ -34,6 +34,8 @@ function mapCsvRow(row: CsvRow) {
     localisation_1:       row['Localisation 1']?.trim() || null,
     localisation_2:       row['Localisation 2']?.trim() || null,
     localisation_3:       row['Localisation 3']?.trim() || null,
+    cache:                row['Caché']?.trim().toLowerCase() === 'oui',
+    code:                 row['Code']?.trim() || null,
   }
 }
 
