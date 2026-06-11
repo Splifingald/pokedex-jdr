@@ -32,14 +32,17 @@ export default function App() {
 
   // Liste filtrée
   const filteredPokemon = useMemo(() => {
+    const hasFilter = search !== '' || typeFilter !== ''
     return pokemon.filter((p) => {
-      if (p.cache && !isAdmin) return false
+      // Hors admin : caché non découvert → toujours invisible
+      // Hors admin + filtre actif : non découvert → invisible (recherche sur découverts seulement)
+      if (!isAdmin && !discovered.has(p.nom) && (p.cache || hasFilter)) return false
       const q = search.toLowerCase()
       if (q && !p.nom.toLowerCase().includes(q) && !p.numero.includes(q)) return false
       if (typeFilter && p.type !== typeFilter) return false
       return true
     })
-  }, [pokemon, search, typeFilter, isAdmin])
+  }, [pokemon, search, typeFilter, isAdmin, discovered])
 
   // Sync la fiche sélectionnée si les données rechargent
   useEffect(() => {
@@ -88,7 +91,8 @@ export default function App() {
     if (window.innerWidth < 768) setSelected(null)
   }
 
-  const visibleCount = pokemon.filter((p) => !p.cache || isAdmin).length
+  // Pokémon "visibles" : non-cachés + admin voit tout + cachés découverts
+  const visibleCount = pokemon.filter((p) => !p.cache || isAdmin || discovered.has(p.nom)).length
 
   return (
     <div className="flex flex-col h-full bg-gray-900">

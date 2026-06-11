@@ -41,7 +41,18 @@ export const PokemonListItem = memo(function PokemonListItem({
           ) : (
             <div className="w-10 h-10 shrink-0 rounded bg-gray-700 flex items-center justify-center text-gray-500 text-xs">?</div>
           )}
-          <span className="text-white text-sm truncate">{pokemon.nom}</span>
+          <span className="text-white text-sm truncate flex-1 min-w-0">{pokemon.nom}</span>
+          {isAdmin && pokemon.cache && (
+            <span className="ml-2 shrink-0 text-xs bg-purple-900 text-purple-300 border border-purple-700 rounded px-1 py-0.5 leading-none">CACHÉ</span>
+          )}
+          {isAdmin && (
+            <span
+              title={isDiscovered ? 'Découvert par les joueurs' : 'Pas encore découvert'}
+              className={`ml-1 shrink-0 text-sm select-none transition-opacity ${isDiscovered ? 'opacity-100' : 'opacity-20'}`}
+            >
+              👁
+            </span>
+          )}
         </>
       ) : (
         <>
