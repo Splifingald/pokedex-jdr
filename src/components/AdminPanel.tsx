@@ -62,7 +62,7 @@ function mapAttackCsvRow(row: AttackCsvRow) {
     cible:         row['Cible']?.trim() || null,
     distance:      row['Distance']?.trim() ? parseInt(row['Distance']) : null,
     precision:     row['Précision']?.trim() ? parseInt(row['Précision']) : null,
-    degats_moyens: row['Dégâts moyens']?.trim() ? parseFloat(row['Dégâts moyens']) : null,
+    degats_moyens: row['Dégâts moyens']?.trim() ? parseFloat(row['Dégâts moyens'].replace(',', '.')) : null,
     effet:         row['Effet']?.trim() || null,
   }
 }
@@ -82,6 +82,9 @@ export function AdminPanel({ onImportSuccess, onClose, onLogout }: Props) {
     Papa.parse<Record<string, string>>(file, {
       header: true,
       skipEmptyLines: true,
+      // Certains exports Excel préfixent le premier en-tête d'un BOM UTF-8 (﻿),
+      // ce qui casse la comparaison exacte des noms de colonnes plus bas
+      transformHeader: (h) => h.replace(/^﻿/, '').trim(),
       complete: async (results) => {
         const fields = results.meta.fields ?? []
         // Une colonne "Attaque" (sans suffixe numérique) n'existe que dans le CSV d'attaques
