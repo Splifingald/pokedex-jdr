@@ -8,7 +8,7 @@ interface Props {
   onClose: () => void
 }
 
-type Phase = 'camera' | 'captured' | 'scanning' | 'result' | 'nomatch' | 'error'
+type Phase = 'camera' | 'scanning' | 'result' | 'nomatch' | 'error'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -137,19 +137,6 @@ export function ScannerModal({ pokemon, discovered, onDiscover, onClose }: Props
     streamRef.current = null
   }, [])
 
-  const capture = useCallback(() => {
-    const v = videoRef.current
-    if (!v) return
-    const canvas = document.createElement('canvas')
-    canvas.width = v.videoWidth
-    canvas.height = v.videoHeight
-    canvas.getContext('2d')!.drawImage(v, 0, 0)
-    const url = canvas.toDataURL('image/jpeg', 0.92)
-    stopCamera()
-    setCapturedUrl(url)
-    setPhase('captured')
-  }, [stopCamera])
-
   const runOCR = useCallback(
     async (imageUrl: string) => {
       setPhase('scanning')
@@ -183,6 +170,19 @@ export function ScannerModal({ pokemon, discovered, onDiscover, onClose }: Props
     },
     [pokemon, discovered],
   )
+
+  const capture = useCallback(() => {
+    const v = videoRef.current
+    if (!v) return
+    const canvas = document.createElement('canvas')
+    canvas.width = v.videoWidth
+    canvas.height = v.videoHeight
+    canvas.getContext('2d')!.drawImage(v, 0, 0)
+    const url = canvas.toDataURL('image/jpeg', 0.92)
+    stopCamera()
+    setCapturedUrl(url)
+    runOCR(url) // démarre l'analyse immédiatement
+  }, [stopCamera, runOCR])
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -310,30 +310,6 @@ export function ScannerModal({ pokemon, discovered, onDiscover, onClose }: Props
         </>
       )}
 
-      {/* ── APERÇU ───────────────────────────────────────────────── */}
-      {phase === 'captured' && capturedUrl && (
-        <>
-          <img
-            src={capturedUrl}
-            alt="Capture"
-            className="absolute inset-0 w-full h-full object-cover"
-          />
-          <div className="absolute bottom-0 left-0 right-0 flex justify-center gap-4 pb-10 pt-6 bg-gradient-to-t from-black/80 to-transparent">
-            <button
-              onClick={retry}
-              className="px-5 py-3 border-2 border-white/40 text-white rounded-xl text-sm"
-            >
-              ↩ Reprendre
-            </button>
-            <button
-              onClick={() => runOCR(capturedUrl)}
-              className="px-7 py-3 bg-red-700 border-2 border-red-500 text-white rounded-xl font-bold"
-            >
-              🔍 Analyser
-            </button>
-          </div>
-        </>
-      )}
 
       {/* ── ANALYSE ──────────────────────────────────────────────── */}
       {phase === 'scanning' && (

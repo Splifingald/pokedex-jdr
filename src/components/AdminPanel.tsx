@@ -1,11 +1,12 @@
 import { useState, useRef } from 'react'
 import Papa from 'papaparse'
-import type { CsvRow } from '../types'
-import { CSV_REQUIRED_HEADERS } from '../types'
+import type { CsvRow, AttackCsvRow } from '../types'
+import { CSV_REQUIRED_HEADERS, ATTACK_CSV_REQUIRED_HEADERS } from '../types'
 
 // L'import CSV passe par une Netlify Function côté serveur
 // → la clé service_role Supabase n'est jamais exposée dans le bundle JS
-const IMPORT_URL = '/.netlify/functions/import-pokemon'
+const IMPORT_POKEMON_URL = '/.netlify/functions/import-pokemon'
+const IMPORT_ATTACKS_URL = '/.netlify/functions/import-attacks'
 const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET as string
 
 interface Props {
@@ -36,6 +37,33 @@ function mapCsvRow(row: CsvRow) {
     localisation_3:       row['Localisation 3']?.trim() || null,
     cache:                row['Caché']?.trim().toLowerCase() === 'oui',
     code:                 row['Code']?.trim() || null,
+    audio_url:            row['Audio']?.trim() || null,
+    transport:            row['Transport']?.trim() || null,
+    transport_value:      row['Transport value']?.trim() ? parseInt(row['Transport value']) : null,
+    attaque_1:            row['Attaque 1']?.trim() || null,
+    attaque_2:            row['Attaque 2']?.trim() || null,
+    attaque_3:            row['Attaque 3']?.trim() || null,
+    attaque_4:            row['Attaque 4']?.trim() || null,
+    attaque_5:            row['Attaque 5']?.trim() || null,
+    attaque_6:            row['Attaque 6']?.trim() || null,
+    attaque_7:            row['Attaque 7']?.trim() || null,
+    attaque_8:            row['Attaque 8']?.trim() || null,
+    attaque_9:            row['Attaque 9']?.trim() || null,
+    attaque_10:           row['Attaque 10']?.trim() || null,
+  }
+}
+
+function mapAttackCsvRow(row: AttackCsvRow) {
+  return {
+    nom:           row['Attaque']?.trim() ?? '',
+    type:          row['Type']?.trim() ?? '',
+    degats_base:   row['Dégâts de base']?.trim() ? parseInt(row['Dégâts de base']) : null,
+    degats_de:     row['Dégâts dé']?.trim() ? parseInt(row['Dégâts dé']) : null,
+    cible:         row['Cible']?.trim() || null,
+    distance:      row['Distance']?.trim() ? parseInt(row['Distance']) : null,
+    precision:     row['Précision']?.trim() ? parseInt(row['Précision']) : null,
+    degats_moyens: row['Dégâts moyens']?.trim() ? parseFloat(row['Dégâts moyens']) : null,
+    effet:         row['Effet']?.trim() || null,
   }
 }
 
@@ -51,12 +79,62 @@ export function AdminPanel({ onImportSuccess, onClose, onLogout }: Props) {
     setStatus('parsing')
     setMessage('')
 
-    Papa.parse<CsvRow>(file, {
+    Papa.parse<Record<string, string>>(file, {
       header: true,
       skipEmptyLines: true,
       complete: async (results) => {
-        // Validation des en-têtes
         const fields = results.meta.fields ?? []
+        // Une colonne "Attaque" (sans suffixe numérique) n'existe que dans le CSV d'attaques
+        const isAttacksCsv = fields.includes('Attaque')
+
+        if (isAttacksCsv) {
+          const missing = ATTACK_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
+          if (missing.length > 0) {
+            setStatus('error')
+            setMessage(`Colonnes manquantes : ${missing.join(', ')}`)
+            return
+          }
+
+          const rows = (results.data as unknown as AttackCsvRow[])
+            .map(mapAttackCsvRow)
+            .filter((r) => r.nom)
+
+          if (rows.length === 0) {
+            setStatus('error')
+            setMessage('Aucune ligne valide trouvée dans le CSV.')
+            return
+          }
+
+          setStatus('importing')
+          setMessage(`Import de ${rows.length} attaques…`)
+
+          try {
+            const res = await fetch(IMPORT_ATTACKS_URL, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${ADMIN_SECRET}`,
+              },
+              body: JSON.stringify({ rows }),
+            })
+
+            const data = await res.json()
+
+            if (!res.ok) {
+              throw new Error(data.error ?? `Erreur serveur ${res.status}`)
+            }
+
+            setStatus('success')
+            setMessage(`✅ ${data.imported} attaques importées avec succès !`)
+            onImportSuccess()
+          } catch (err) {
+            setStatus('error')
+            setMessage(err instanceof Error ? err.message : 'Erreur inconnue')
+          }
+          return
+        }
+
+        // Validation des en-têtes (CSV pokémon)
         const missing = CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
         if (missing.length > 0) {
           setStatus('error')
@@ -64,7 +142,9 @@ export function AdminPanel({ onImportSuccess, onClose, onLogout }: Props) {
           return
         }
 
-        const rows = results.data.map(mapCsvRow).filter((r) => r.nom && r.numero)
+        const rows = (results.data as unknown as CsvRow[])
+          .map(mapCsvRow)
+          .filter((r) => r.nom && r.numero)
 
         if (rows.length === 0) {
           setStatus('error')
@@ -76,7 +156,7 @@ export function AdminPanel({ onImportSuccess, onClose, onLogout }: Props) {
         setMessage(`Import de ${rows.length} pokémon…`)
 
         try {
-          const res = await fetch(IMPORT_URL, {
+          const res = await fetch(IMPORT_POKEMON_URL, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -121,8 +201,8 @@ export function AdminPanel({ onImportSuccess, onClose, onLogout }: Props) {
 
         <div className="mb-5">
           <p className="text-gray-400 text-sm mb-3">
-            Importer un fichier CSV pour mettre à jour le Pokédex.<br />
-            <span className="text-yellow-600 text-xs">⚠ Remplace toute la liste existante.</span>
+            Importer un CSV Pokémon ou un CSV Attaques (détecté automatiquement).<br />
+            <span className="text-yellow-600 text-xs">⚠ Remplace toute la liste existante correspondante.</span>
           </p>
           <button
             onClick={() => fileRef.current?.click()}

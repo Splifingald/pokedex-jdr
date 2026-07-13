@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { usePokemon } from './hooks/usePokemon'
+import { useAttacks } from './hooks/useAttacks'
 import type { Pokemon } from './types'
 import { PokemonList } from './components/PokemonList'
 import { PokemonCard } from './components/PokemonCard'
@@ -12,6 +13,7 @@ import { ScannerModal } from './components/ScannerModal'
 
 export default function App() {
   const { pokemon, discovered, loading, error, discoverPokemon, undiscoverPokemon, refetch } = usePokemon()
+  const { byName: attacksByName, refetch: refetchAttacks } = useAttacks()
 
   const [selected, setSelected] = useState<Pokemon | null>(null)
   const [pendingDiscovery, setPendingDiscovery] = useState<Pokemon | null>(null)
@@ -188,6 +190,7 @@ export default function App() {
               pokemon={selected}
               isAdmin={isAdmin}
               isDiscovered={discovered.has(selected.nom)}
+              attacksByName={attacksByName}
               onBack={() => setSelected(null)}
               onUndiscover={handleUndiscover}
             />
@@ -218,7 +221,7 @@ export default function App() {
 
       {showAdminPanel && (
         <AdminPanel
-          onImportSuccess={() => { refetch(); setShowAdminPanel(false) }}
+          onImportSuccess={() => { refetch(); refetchAttacks(); setShowAdminPanel(false) }}
           onClose={() => setShowAdminPanel(false)}
           onLogout={handleLogout}
         />

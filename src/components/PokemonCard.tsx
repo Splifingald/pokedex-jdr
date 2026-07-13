@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import type { Pokemon } from '../types'
+import { useState, useRef, useEffect } from 'react'
+import type { Pokemon, Attack } from '../types'
 import { TypeBadge } from './TypeBadge'
 import { ImageLightbox } from './ImageLightbox'
 
@@ -7,8 +7,15 @@ interface Props {
   pokemon: Pokemon
   isAdmin: boolean
   isDiscovered: boolean
+  attacksByName: Map<string, Attack>
   onBack: () => void
   onUndiscover: () => void
+}
+
+const TRANSPORT_ICONS: Record<string, string> = {
+  Vol: '🕊️',
+  Nage: '🏊',
+  Sol: '🐾',
 }
 
 function StatRow({ icon, label, value }: { icon: string; label: string; value: React.ReactNode }) {
@@ -21,8 +28,45 @@ function StatRow({ icon, label, value }: { icon: string; label: string; value: R
   )
 }
 
-export function PokemonCard({ pokemon, isAdmin, isDiscovered, onBack, onUndiscover }: Props) {
+export function PokemonCard({ pokemon, isAdmin, isDiscovered, attacksByName, onBack, onUndiscover }: Props) {
   const [lightboxOpen, setLightboxOpen] = useState(false)
+
+  // ── Lecteur audio ─────────────────────────────────────────────
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [audioState, setAudioState] = useState<'idle' | 'playing' | 'paused'>('idle')
+  const [progress, setProgress] = useState(0)   // 0–1
+  const [duration, setDuration] = useState(0)
+
+  // Pause automatique à la fermeture de la fiche
+  useEffect(() => {
+    return () => { audioRef.current?.pause() }
+  }, [])
+
+  // Réinitialise le player si on change de pokémon
+  useEffect(() => {
+    audioRef.current?.pause()
+    setAudioState('idle')
+    setProgress(0)
+    setDuration(0)
+  }, [pokemon.id])
+
+  function fmt(sec: number) {
+    const m = Math.floor(sec / 60)
+    const s = Math.floor(sec % 60)
+    return `${m}:${s.toString().padStart(2, '0')}`
+  }
+
+  function toggleAudio() {
+    const a = audioRef.current
+    if (!a) return
+    if (audioState === 'playing') {
+      a.pause()
+      setAudioState('paused')
+    } else {
+      a.play()
+      setAudioState('playing')
+    }
+  }
 
   const superEfficace = [
     pokemon.super_efficace_1,
@@ -36,6 +80,21 @@ export function PokemonCard({ pokemon, isAdmin, isDiscovered, onBack, onUndiscov
     pokemon.localisation_2,
     pokemon.localisation_3,
   ].filter(Boolean) as string[]
+
+  const attaques = [
+    pokemon.attaque_1,
+    pokemon.attaque_2,
+    pokemon.attaque_3,
+    pokemon.attaque_4,
+    pokemon.attaque_5,
+    pokemon.attaque_6,
+    pokemon.attaque_7,
+    pokemon.attaque_8,
+    pokemon.attaque_9,
+    pokemon.attaque_10,
+  ].filter(Boolean) as string[]
+
+  const canShowAttaques = isAdmin || isDiscovered
 
   return (
     <>
@@ -85,11 +144,68 @@ export function PokemonCard({ pokemon, isAdmin, isDiscovered, onBack, onUndiscov
           )}
         </div>
 
+        {/* ── Lecteur audio ── */}
+        {pokemon.audio_url && (
+          <>
+            <audio
+              ref={audioRef}
+              src={pokemon.audio_url}
+              onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+              onTimeUpdate={(e) => {
+                const a = e.currentTarget
+                setProgress(a.duration ? a.currentTime / a.duration : 0)
+              }}
+              onEnded={() => { setAudioState('idle'); setProgress(0) }}
+            />
+            <div className="mx-4 my-3 px-3 py-2 bg-red-950/60 border border-red-900/50 rounded-lg flex items-center gap-3">
+              <span className="text-lg shrink-0">🔊</span>
+              <span className="text-gray-300 text-xs shrink-0">Description</span>
+
+              {/* Barre de progression cliquable */}
+              <div
+                className="flex-1 h-1.5 bg-gray-700 rounded-full overflow-hidden cursor-pointer"
+                onClick={(e) => {
+                  const a = audioRef.current
+                  if (!a || !a.duration) return
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  a.currentTime = ((e.clientX - rect.left) / rect.width) * a.duration
+                }}
+              >
+                <div
+                  className="h-full bg-red-500 rounded-full transition-all duration-100"
+                  style={{ width: `${progress * 100}%` }}
+                />
+              </div>
+
+              {/* Durée */}
+              <span className="text-gray-500 text-xs shrink-0 w-8 text-right">
+                {audioState === 'idle' ? fmt(duration) : fmt((audioRef.current?.currentTime ?? 0))}
+              </span>
+
+              {/* Bouton play/pause */}
+              <button
+                onClick={toggleAudio}
+                className="w-8 h-8 rounded-full bg-red-700 hover:bg-red-600 flex items-center justify-center shrink-0 transition-colors"
+              >
+                {audioState === 'playing' ? '⏸' : '▶'}
+              </button>
+            </div>
+          </>
+        )}
+
         {/* Stats */}
         <div className="px-4 py-2 flex-1">
           <StatRow icon="❤️" label="PV de base" value={pokemon.pv_base} />
           <StatRow icon="⚔️" label="Dégâts de base" value={pokemon.degats_base} />
           <StatRow icon="👟" label="Distance" value={`${pokemon.distance_deplacement} cases`} />
+
+          {pokemon.transport && (
+            <StatRow
+              icon={TRANSPORT_ICONS[pokemon.transport] ?? '🚚'}
+              label="Transport"
+              value={`${pokemon.transport}${pokemon.transport_value != null ? ` (${pokemon.transport_value})` : ''}`}
+            />
+          )}
 
           <StatRow
             icon="✨"
@@ -106,6 +222,30 @@ export function PokemonCard({ pokemon, isAdmin, isDiscovered, onBack, onUndiscov
               )
             }
           />
+
+          {canShowAttaques && attaques.length > 0 && (
+            <StatRow
+              icon="🥊"
+              label="Attaques"
+              value={
+                <div className="flex flex-wrap gap-1">
+                  {attaques.map((nom) => {
+                    const atk = attacksByName.get(nom)
+                    return atk ? (
+                      <TypeBadge key={nom} type={atk.type} label={atk.nom} small />
+                    ) : (
+                      <span
+                        key={nom}
+                        className="text-xs text-gray-500 border border-gray-700 rounded px-1.5 py-0.5"
+                      >
+                        {nom}
+                      </span>
+                    )
+                  })}
+                </div>
+              }
+            />
+          )}
 
           {(pokemon.nom_talent || pokemon.description_talent) && (
             <div className="flex items-start gap-3 py-2 border-b border-gray-700">
