@@ -5,6 +5,12 @@
   font-family: 'Jersey 25', system-ui, sans-serif;
 }
 
+/* Échelle globale du texte (~130%) : appliqué uniquement sur html pour éviter
+   un cumul en cascade si on l'ajoutait aussi sur body/#root */
+html {
+  font-size: 130%;
+}
+
 * {
   box-sizing: border-box;
 }

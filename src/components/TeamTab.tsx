@@ -1,8 +1,10 @@
 import { useState, useMemo } from 'react'
-import type { Player, Pokemon, Attack } from '../types'
+import type { Player, Pokemon, Attack, PlayerPokemon } from '../types'
 import { usePlayerPokemon } from '../hooks/usePlayerPokemon'
 import { useAdminParameters } from '../hooks/useAdminParameters'
 import { useToast } from '../context/ToastContext'
+import { restoreLocalHp } from '../hooks/useLocalHp'
+import { getMaxHp } from '../lib/maxHp'
 import { PokemonOwnedCard } from './PokemonOwnedCard'
 import { PokemonSearchInput } from './PokemonSearchInput'
 import { PokemonDetailView } from './PokemonDetailView'
@@ -18,7 +20,7 @@ interface Props {
 }
 
 export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByName, attacksByName }: Props) {
-  const { roster, loading, addOwnedPokemon, updateXp, toggleInTeam, addMove, removeMove } = usePlayerPokemon(player.id)
+  const { roster, loading, addOwnedPokemon, updateXp, toggleInTeam, addMove, removeMove, updateMaxHpOverride, deleteOwnedPokemon } = usePlayerPokemon(player.id)
   const { parameters } = useAdminParameters()
   const { showToast } = useToast()
 
@@ -48,6 +50,20 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
     showToast(`${pp?.pokemon_nom ?? 'Pokémon'} ${inTeam ? "ajouté à l'équipe" : 'mis au PC'} !`)
   }
 
+  const handleDeleteOwned = async (id: number) => {
+    const pp = roster.find((r) => r.id === id)
+    await deleteOwnedPokemon(id)
+    setSelectedId(null)
+    showToast(`${pp?.pokemon_nom ?? 'Pokémon'} supprimé.`)
+  }
+
+  const handleRestoreAll = (list: PlayerPokemon[]) => {
+    list.forEach((pp) => {
+      restoreLocalHp(pp.id, getMaxHp(pp, pokemonByName.get(pp.pokemon_nom)))
+    })
+    showToast('Pokémon soignés !')
+  }
+
   if (selected) {
     const pokemon = pokemonByName.get(selected.pokemon_nom)
 
@@ -74,7 +90,9 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
         maxMoves={parameters.max_moves}
         onUpdateXp={updateXp}
         onToggleInTeam={handleToggleInTeam}
+        onUpdateMaxHpOverride={updateMaxHpOverride}
         onManageMoves={() => setManagingMoves(true)}
+        onDelete={handleDeleteOwned}
         onBack={() => setSelectedId(null)}
       />
     )
@@ -90,9 +108,19 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
         />
       </div>
 
-      <h2 className="text-white text-lg mb-3">
-        Équipe ({team.length} / {parameters.max_team_size})
-      </h2>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-white text-lg">
+          Équipe ({team.length} / {parameters.max_team_size})
+        </h2>
+        {team.length > 0 && (
+          <button
+            onClick={() => handleRestoreAll(team)}
+            className="text-xs px-2.5 py-1 rounded bg-green-700 border border-green-500 text-white hover:bg-green-600 transition-colors font-bold"
+          >
+            ❤️ Tout soigner
+          </button>
+        )}
+      </div>
       {loading ? (
         <p className="text-gray-500 text-sm">Chargement…</p>
       ) : team.length === 0 ? (
@@ -111,7 +139,17 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
         </div>
       )}
 
-      <h2 className="text-white text-lg mb-3">PC ({box.length})</h2>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-white text-lg">PC ({box.length})</h2>
+        {box.length > 0 && (
+          <button
+            onClick={() => handleRestoreAll(box)}
+            className="text-xs px-2.5 py-1 rounded bg-green-700 border border-green-500 text-white hover:bg-green-600 transition-colors font-bold"
+          >
+            ❤️ Tout soigner
+          </button>
+        )}
+      </div>
       {box.length === 0 ? (
         <p className="text-gray-500 text-sm">Aucun pokémon dans le PC.</p>
       ) : (

@@ -2,6 +2,7 @@ import type { PlayerPokemon, Pokemon } from '../types'
 import { TypeBadge } from './TypeBadge'
 import { HpGauge } from './HpGauge'
 import { useLocalHp } from '../hooks/useLocalHp'
+import { getMaxHp } from '../lib/maxHp'
 
 interface Props {
   playerPokemon: PlayerPokemon
@@ -11,7 +12,7 @@ interface Props {
 }
 
 export function PokemonOwnedCard({ playerPokemon, pokemon, showHp, onClick }: Props) {
-  const maxHp = pokemon?.pv_base ?? 0
+  const maxHp = getMaxHp(playerPokemon, pokemon)
   const [hp] = useLocalHp(playerPokemon.id, maxHp)
   const isKo = showHp && hp <= 0
 

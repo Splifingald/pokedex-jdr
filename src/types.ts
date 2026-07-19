@@ -132,6 +132,7 @@ export interface PlayerPokemon {
   xp: number
   moves: string[]
   in_team: boolean
+  max_hp_override: number | null
   created_at: string
 }
 

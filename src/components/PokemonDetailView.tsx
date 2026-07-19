@@ -1,9 +1,12 @@
+import { useState } from 'react'
 import type { PlayerPokemon, Pokemon } from '../types'
 import { PokemonDetailHeader } from './PokemonDetailHeader'
 import { StatRow } from './StatRow'
 import { TypeBadge } from './TypeBadge'
 import { AudioDescriptionPlayer } from './AudioDescriptionPlayer'
+import { ConfirmPopup } from './ConfirmPopup'
 import { useLocalHp } from '../hooks/useLocalHp'
+import { getMaxHp } from '../lib/maxHp'
 
 interface Props {
   playerPokemon: PlayerPokemon
@@ -12,7 +15,9 @@ interface Props {
   maxMoves: number
   onUpdateXp: (id: number, xp: number) => void
   onToggleInTeam: (id: number, inTeam: boolean) => void
+  onUpdateMaxHpOverride: (id: number, maxHp: number) => void
   onManageMoves: () => void
+  onDelete: (id: number) => void
   onBack: () => void
 }
 
@@ -22,9 +27,10 @@ const TRANSPORT_ICONS: Record<string, string> = {
   Sol: '🐾',
 }
 
-export function PokemonDetailView({ playerPokemon, pokemon, teamFull, maxMoves, onUpdateXp, onToggleInTeam, onManageMoves, onBack }: Props) {
-  const maxHp = pokemon?.pv_base ?? 0
+export function PokemonDetailView({ playerPokemon, pokemon, teamFull, maxMoves, onUpdateXp, onToggleInTeam, onUpdateMaxHpOverride, onManageMoves, onDelete, onBack }: Props) {
+  const maxHp = getMaxHp(playerPokemon, pokemon)
   const [hp, setHp] = useLocalHp(playerPokemon.id, maxHp)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   const superEfficace = pokemon
     ? [pokemon.super_efficace_1, pokemon.super_efficace_2, pokemon.super_efficace_3, pokemon.super_efficace_4].filter(Boolean) as string[]
@@ -42,6 +48,7 @@ export function PokemonDetailView({ playerPokemon, pokemon, teamFull, maxMoves, 
         hp={hp}
         maxHp={maxHp}
         onHpChange={setHp}
+        onMaxHpChange={(value) => onUpdateMaxHpOverride(playerPokemon.id, value)}
         xp={playerPokemon.xp}
         onXpChange={(xp) => onUpdateXp(playerPokemon.id, xp)}
         onBack={onBack}
@@ -145,8 +152,26 @@ export function PokemonDetailView({ playerPokemon, pokemon, teamFull, maxMoves, 
               </button>
             </div>
           )}
+
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="w-full py-2 mt-3 text-xs text-gray-500 border border-gray-800 rounded hover:text-red-400 hover:border-red-900 transition-colors"
+          >
+            🗑 Supprimer ce pokémon
+          </button>
         </div>
       </div>
+
+      {showDeleteConfirm && (
+        <ConfirmPopup
+          title="Supprimer ce pokémon ?"
+          message={`${playerPokemon.pokemon_nom} sera définitivement retiré de votre roster.`}
+          confirmLabel="Supprimer"
+          danger
+          onConfirm={() => { onDelete(playerPokemon.id); setShowDeleteConfirm(false) }}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
     </div>
   )
 }

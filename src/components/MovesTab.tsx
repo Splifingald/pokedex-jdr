@@ -4,6 +4,7 @@ import { OwnedPokemonHeader } from './OwnedPokemonHeader'
 import { MoveSearchInput } from './MoveSearchInput'
 import { TypeBadge } from './TypeBadge'
 import { useLocalHp } from '../hooks/useLocalHp'
+import { getMaxHp } from '../lib/maxHp'
 
 interface Props {
   playerPokemon: PlayerPokemon
@@ -26,7 +27,7 @@ function MoveStat({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 export function MovesTab({ playerPokemon, pokemon, maxMoves, attacksByName, onUpdateXp, onAddMove, onRemoveMove, onBack }: Props) {
-  const maxHp = pokemon?.pv_base ?? 0
+  const maxHp = getMaxHp(playerPokemon, pokemon)
   const [hp, setHp] = useLocalHp(playerPokemon.id, maxHp)
 
   const searchOptions = useMemo(

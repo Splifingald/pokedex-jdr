@@ -9,6 +9,7 @@ interface Props {
   hp: number
   maxHp: number
   onHpChange: (value: number) => void
+  onMaxHpChange: (value: number) => void
   xp: number
   onXpChange: (value: number) => void
   onBack: () => void
@@ -23,6 +24,7 @@ export function PokemonDetailHeader({
   hp,
   maxHp,
   onHpChange,
+  onMaxHpChange,
   xp,
   onXpChange,
   onBack,
@@ -42,17 +44,14 @@ export function PokemonDetailHeader({
         <span className="text-sm">Retour</span>
       </button>
 
-      <div className="flex items-center justify-between px-6 py-4">
-        <h2 className="text-white text-2xl truncate">{pokemonNom}</h2>
+      <div className="flex items-center justify-between gap-3 px-6 py-4">
+        <h2 className="text-white text-2xl truncate flex-1 min-w-0">{pokemonNom}</h2>
         <button
           onClick={onManageMoves}
           title={`Gérer les capacités (${movesCount}/${maxMoves})`}
-          className="relative w-10 h-10 rounded-full bg-orange-700 border border-orange-500 text-white flex items-center justify-center hover:bg-orange-600 transition-colors shrink-0"
+          className="flex items-center gap-2 px-4 py-2 rounded bg-orange-700 border border-orange-500 text-white hover:bg-orange-600 transition-colors font-bold text-sm shrink-0"
         >
-          🥊
-          <span className="absolute -top-1 -right-1 bg-gray-900 border border-orange-500 text-orange-300 text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-            {movesCount}
-          </span>
+          💥 Capacités
         </button>
       </div>
 
@@ -102,6 +101,17 @@ export function PokemonDetailHeader({
               value={xp}
               onChange={(e) => onXpChange(parseInt(e.target.value) || 0)}
               className="w-16 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-blue-400 font-bold text-sm text-center outline-none focus:border-blue-500"
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-gray-400 text-xs">Max HP</span>
+            <input
+              type="number"
+              value={maxHp}
+              onChange={(e) => onMaxHpChange(parseInt(e.target.value) || 0)}
+              title="Personnaliser les PV max de ce pokémon (n'affecte que le vôtre)"
+              className="w-16 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-white text-sm text-center outline-none focus:border-blue-500"
             />
           </div>
         </div>

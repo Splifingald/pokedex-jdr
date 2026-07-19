@@ -137,15 +137,19 @@ CREATE TABLE IF NOT EXISTS players (
 -- Pokémon possédés (une ligne par instance capturée, pas par espèce :
 -- un joueur peut posséder plusieurs fois le même pokémon)
 CREATE TABLE IF NOT EXISTS player_pokemon (
-  id             bigserial PRIMARY KEY,
-  player_id      bigint NOT NULL,
-  pokemon_nom    text NOT NULL,     -- référence par nom vers pokemon.nom (pas de FK, survit aux réimports CSV)
-  pokemon_numero text,              -- copie du numéro pour résilience d'affichage
-  xp             integer NOT NULL DEFAULT 0,
-  moves          text[] NOT NULL DEFAULT '{}',
-  in_team        boolean NOT NULL DEFAULT false,
-  created_at     timestamptz NOT NULL DEFAULT now()
+  id              bigserial PRIMARY KEY,
+  player_id       bigint NOT NULL,
+  pokemon_nom     text NOT NULL,     -- référence par nom vers pokemon.nom (pas de FK, survit aux réimports CSV)
+  pokemon_numero  text,              -- copie du numéro pour résilience d'affichage
+  xp              integer NOT NULL DEFAULT 0,
+  moves           text[] NOT NULL DEFAULT '{}',
+  in_team         boolean NOT NULL DEFAULT false,
+  max_hp_override integer,          -- si renseigné, remplace pokemon.pv_base pour cette instance uniquement
+  created_at      timestamptz NOT NULL DEFAULT now()
 );
+
+-- Mise à jour si la table existe déjà :
+-- ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS max_hp_override integer;
 
 -- Paramètres admin (une seule ligne, id fixe = 1)
 CREATE TABLE IF NOT EXISTS admin_parameters (
