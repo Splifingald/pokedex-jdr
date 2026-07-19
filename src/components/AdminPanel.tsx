@@ -11,7 +11,6 @@ const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET as string
 
 interface Props {
   onImportSuccess: () => void
-  onClose: () => void
   onLogout: () => void
 }
 
@@ -67,7 +66,7 @@ function mapAttackCsvRow(row: AttackCsvRow) {
   }
 }
 
-export function AdminPanel({ onImportSuccess, onClose, onLogout }: Props) {
+export function AdminPanel({ onImportSuccess, onLogout }: Props) {
   const [status, setStatus] = useState<'idle' | 'parsing' | 'importing' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -192,14 +191,12 @@ export function AdminPanel({ onImportSuccess, onClose, onLogout }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-      <div className="bg-gray-900 border-2 border-yellow-600 rounded-lg shadow-[4px_4px_0px_#000] max-w-sm w-full p-6">
+    <div className="bg-gray-900 border-2 border-yellow-600 rounded-lg shadow-[4px_4px_0px_#000] max-w-sm w-full p-6">
         <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-2">
             <span className="text-2xl">🛠️</span>
-            <h3 className="text-yellow-400 text-lg">Mode Admin</h3>
+            <h3 className="text-yellow-400 text-lg">Import CSV</h3>
           </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">✕</button>
         </div>
 
         <div className="mb-5">
@@ -233,7 +230,6 @@ export function AdminPanel({ onImportSuccess, onClose, onLogout }: Props) {
         >
           Quitter le mode admin
         </button>
-      </div>
     </div>
   )
 }

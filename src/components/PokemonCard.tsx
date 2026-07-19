@@ -10,6 +10,7 @@ interface Props {
   attacksByName: Map<string, Attack>
   onBack: () => void
   onUndiscover: () => void
+  onAddToRoster?: () => void
 }
 
 const TRANSPORT_ICONS: Record<string, string> = {
@@ -28,7 +29,7 @@ function StatRow({ icon, label, value }: { icon: string; label: string; value: R
   )
 }
 
-export function PokemonCard({ pokemon, isAdmin, isDiscovered, attacksByName, onBack, onUndiscover }: Props) {
+export function PokemonCard({ pokemon, isAdmin, isDiscovered, attacksByName, onBack, onUndiscover, onAddToRoster }: Props) {
   const [lightboxOpen, setLightboxOpen] = useState(false)
 
   // ── Lecteur audio ─────────────────────────────────────────────
@@ -285,9 +286,21 @@ export function PokemonCard({ pokemon, isAdmin, isDiscovered, attacksByName, onB
             </div>
           )}
 
+          {/* Ajouter au roster du joueur connecté */}
+          {isDiscovered && onAddToRoster && (
+            <div className="mt-6 pt-4 border-t border-gray-800">
+              <button
+                onClick={onAddToRoster}
+                className="w-full py-2.5 bg-red-700 border border-red-500 text-white rounded hover:bg-red-600 transition-colors text-sm font-bold"
+              >
+                ⚔️ Ajouter à mon équipe
+              </button>
+            </div>
+          )}
+
           {/* Annuler découverte — visible uniquement si découvert (et pas en mode admin) */}
           {isDiscovered && !isAdmin && (
-            <div className="mt-6 mb-4 pt-4 border-t border-gray-800">
+            <div className="mt-4 mb-4 pt-4 border-t border-gray-800">
               <button
                 onClick={onUndiscover}
                 className="w-full py-2 text-xs text-gray-600 border border-gray-800 rounded hover:text-red-400 hover:border-red-900 transition-colors"

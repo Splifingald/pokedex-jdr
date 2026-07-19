@@ -121,3 +121,101 @@ CREATE POLICY "Public delete discovered"
   ON discovered_pokemon FOR DELETE
   TO anon
   USING (true);
+
+-- ============================================================
+-- Joueurs, roster et paramètres admin
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS players (
+  id          bigserial PRIMARY KEY,
+  name        text NOT NULL,
+  color       text NOT NULL DEFAULT '#3B82F6',
+  image_url   text NOT NULL DEFAULT '',
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- Pokémon possédés (une ligne par instance capturée, pas par espèce :
+-- un joueur peut posséder plusieurs fois le même pokémon)
+CREATE TABLE IF NOT EXISTS player_pokemon (
+  id             bigserial PRIMARY KEY,
+  player_id      bigint NOT NULL,
+  pokemon_nom    text NOT NULL,     -- référence par nom vers pokemon.nom (pas de FK, survit aux réimports CSV)
+  pokemon_numero text,              -- copie du numéro pour résilience d'affichage
+  xp             integer NOT NULL DEFAULT 0,
+  moves          text[] NOT NULL DEFAULT '{}',
+  in_team        boolean NOT NULL DEFAULT false,
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+
+-- Paramètres admin (une seule ligne, id fixe = 1)
+CREATE TABLE IF NOT EXISTS admin_parameters (
+  id             bigint PRIMARY KEY DEFAULT 1,
+  max_moves      integer NOT NULL DEFAULT 4,
+  max_team_size  integer NOT NULL DEFAULT 3,
+  CONSTRAINT single_row CHECK (id = 1)
+);
+INSERT INTO admin_parameters (id, max_moves, max_team_size)
+VALUES (1, 4, 3) ON CONFLICT (id) DO NOTHING;
+
+CREATE INDEX IF NOT EXISTS idx_player_pokemon_player_id ON player_pokemon(player_id);
+
+ALTER TABLE players ENABLE ROW LEVEL SECURITY;
+ALTER TABLE player_pokemon ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admin_parameters ENABLE ROW LEVEL SECURITY;
+
+-- players : lecture + écriture publiques (pas d'authentification réelle, app privée entre amis)
+CREATE POLICY "Public read players"
+  ON players FOR SELECT
+  TO anon
+  USING (true);
+
+CREATE POLICY "Public insert players"
+  ON players FOR INSERT
+  TO anon
+  WITH CHECK (true);
+
+CREATE POLICY "Public update players"
+  ON players FOR UPDATE
+  TO anon
+  USING (true)
+  WITH CHECK (true);
+
+CREATE POLICY "Public delete players"
+  ON players FOR DELETE
+  TO anon
+  USING (true);
+
+-- player_pokemon : lecture + écriture publiques
+CREATE POLICY "Public read player_pokemon"
+  ON player_pokemon FOR SELECT
+  TO anon
+  USING (true);
+
+CREATE POLICY "Public insert player_pokemon"
+  ON player_pokemon FOR INSERT
+  TO anon
+  WITH CHECK (true);
+
+CREATE POLICY "Public update player_pokemon"
+  ON player_pokemon FOR UPDATE
+  TO anon
+  USING (true)
+  WITH CHECK (true);
+
+CREATE POLICY "Public delete player_pokemon"
+  ON player_pokemon FOR DELETE
+  TO anon
+  USING (true);
+
+-- admin_parameters : lecture + écriture publiques (n'importe quel client peut modifier
+-- max_moves / max_team_size, pas seulement l'onglet Admin — voulu, app sans vraie sécurité)
+CREATE POLICY "Public read admin_parameters"
+  ON admin_parameters FOR SELECT
+  TO anon
+  USING (true);
+
+CREATE POLICY "Public update admin_parameters"
+  ON admin_parameters FOR UPDATE
+  TO anon
+  USING (true)
+  WITH CHECK (true);

@@ -103,3 +103,40 @@ export interface AttackCsvRow {
 }
 
 export const ATTACK_CSV_REQUIRED_HEADERS: (keyof AttackCsvRow)[] = ['Attaque', 'Type']
+
+// ── Joueurs ───────────────────────────────────────────────────
+export interface Player {
+  id: number
+  name: string
+  color: string
+  image_url: string
+  created_at: string
+}
+
+export const PLAYER_COLORS: string[] = [
+  '#3B82F6', // bleu
+  '#10B981', // émeraude
+  '#F59E0B', // ambre
+  '#8B5CF6', // violet
+  '#EC4899', // rose
+  '#06B6D4', // cyan
+  '#F97316', // orange
+  '#84CC16', // citron vert
+]
+
+export interface PlayerPokemon {
+  id: number
+  player_id: number
+  pokemon_nom: string
+  pokemon_numero: string | null
+  xp: number
+  moves: string[]
+  in_team: boolean
+  created_at: string
+}
+
+export interface AdminParameters {
+  id: number
+  max_moves: number
+  max_team_size: number
+}
