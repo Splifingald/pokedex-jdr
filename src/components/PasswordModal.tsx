@@ -55,7 +55,7 @@ export function PasswordModal({ onSuccess, onCancel }: Props) {
             </button>
             <button
               type="submit"
-              className="flex-1 py-2.5 bg-red-600 border-2 border-red-400 text-white rounded hover:bg-red-500 transition-colors text-sm font-bold"
+              className="flex-1 py-2.5 bg-yellow-700 border-2 border-yellow-500 text-white rounded hover:bg-yellow-600 transition-colors text-sm font-bold"
             >
               Entrer
             </button>

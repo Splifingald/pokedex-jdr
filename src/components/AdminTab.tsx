@@ -7,10 +7,9 @@ type Section = 'import' | 'joueurs' | 'parametres'
 
 interface Props {
   onImportSuccess: () => void
-  onLogout: () => void
 }
 
-export function AdminTab({ onImportSuccess, onLogout }: Props) {
+export function AdminTab({ onImportSuccess }: Props) {
   const [section, setSection] = useState<Section>('import')
 
   const sections: { id: Section; label: string }[] = [
@@ -37,7 +36,7 @@ export function AdminTab({ onImportSuccess, onLogout }: Props) {
         ))}
       </div>
 
-      {section === 'import' && <AdminPanel onImportSuccess={onImportSuccess} onLogout={onLogout} />}
+      {section === 'import' && <AdminPanel onImportSuccess={onImportSuccess} />}
       {section === 'joueurs' && <AdminPlayersPanel />}
       {section === 'parametres' && <AdminParametersPanel />}
     </div>

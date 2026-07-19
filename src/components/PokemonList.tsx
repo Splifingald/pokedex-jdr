@@ -6,6 +6,7 @@ interface Props {
   discovered: Set<string>
   isAdmin: boolean
   selectedId: number | null
+  ownedByPlayer: Set<string>
   onSelectDiscovered: (p: Pokemon) => void
   onSelectUndiscovered: (p: Pokemon) => void
   totalCount: number // total avant filtres, pour afficher "X / Y"
@@ -16,6 +17,7 @@ export function PokemonList({
   discovered,
   isAdmin,
   selectedId,
+  ownedByPlayer,
   onSelectDiscovered,
   onSelectUndiscovered,
   totalCount,
@@ -50,6 +52,7 @@ export function PokemonList({
           isDiscovered={discovered.has(p.nom)}
           isAdmin={isAdmin}
           isSelected={p.id === selectedId}
+          isOwnedByPlayer={ownedByPlayer.has(p.nom)}
           onClick={() => {
             if (discovered.has(p.nom) || isAdmin) {
               onSelectDiscovered(p)

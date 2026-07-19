@@ -3,6 +3,8 @@ import { usePokemon } from './hooks/usePokemon'
 import { useAttacks } from './hooks/useAttacks'
 import { usePlayerContext } from './context/PlayerContext'
 import { usePlayerPokemon } from './hooks/usePlayerPokemon'
+import { useAdminParameters } from './hooks/useAdminParameters'
+import { useToast } from './context/ToastContext'
 import type { Pokemon } from './types'
 import { PokemonList } from './components/PokemonList'
 import { PokemonCard } from './components/PokemonCard'
@@ -16,12 +18,15 @@ import { TabBar, type TabId } from './components/TabBar'
 import { LoginModal } from './components/LoginModal'
 import { PlayerBadge } from './components/PlayerBadge'
 import { TeamTab } from './components/TeamTab'
+import { ConfirmPopup } from './components/ConfirmPopup'
 
 export default function App() {
   const { pokemon, discovered, loading, error, discoverPokemon, undiscoverPokemon, refetch } = usePokemon()
   const { byName: attacksByName, refetch: refetchAttacks } = useAttacks()
   const { player, players, playersLoading, login, logout } = usePlayerContext()
-  const { addOwnedPokemon } = usePlayerPokemon(player?.id ?? null)
+  const { roster, addOwnedPokemon } = usePlayerPokemon(player?.id ?? null)
+  const { parameters } = useAdminParameters()
+  const { showToast } = useToast()
 
   const [selected, setSelected] = useState<Pokemon | null>(null)
   const [pendingDiscovery, setPendingDiscovery] = useState<Pokemon | null>(null)
@@ -30,6 +35,7 @@ export default function App() {
   const [showManualModal, setShowManualModal] = useState(false)
   const [showScannerModal, setShowScannerModal] = useState(false)
   const [showLoginModal, setShowLoginModal] = useState(false)
+  const [showAdminLogoutConfirm, setShowAdminLogoutConfirm] = useState(false)
   const [activeTab, setActiveTab] = useState<TabId>('pokedex')
 
   // Si l'onglet actif devient invisible (déconnexion, sortie du mode admin), on revient au Pokédex
@@ -73,7 +79,7 @@ export default function App() {
 
   const handleAdminTriggerClick = () => {
     if (isAdmin) {
-      setActiveTab('admin')
+      setShowAdminLogoutConfirm(true)
     } else {
       setShowPasswordModal(true)
     }
@@ -120,6 +126,17 @@ export default function App() {
 
   const pokemonByName = useMemo(() => new Map(pokemon.map((p) => [p.nom, p])), [pokemon])
 
+  const ownedNames = useMemo(() => new Set(roster.map((r) => r.pokemon_nom)), [roster])
+  const teamFull = roster.filter((r) => r.in_team).length >= parameters.max_team_size
+  const ownedCount = selected ? roster.filter((r) => r.pokemon_nom === selected.nom).length : 0
+
+  const handleAddToRoster = async () => {
+    if (!selected) return
+    const inTeam = !teamFull
+    await addOwnedPokemon(selected.nom, selected.numero, inTeam)
+    showToast(`${selected.nom} ajouté ${inTeam ? "à l'équipe" : 'au PC'} !`)
+  }
+
   return (
     <div className="flex flex-col h-full bg-gray-900">
       {/* Header Pokédex */}
@@ -154,7 +171,7 @@ export default function App() {
 
           {isAdmin && (
             <button
-              onClick={() => setActiveTab('admin')}
+              onClick={() => setShowAdminLogoutConfirm(true)}
               className="text-yellow-300 text-sm border border-yellow-600 rounded px-2 py-1 hover:bg-yellow-900/30 transition-colors"
             >
               🛠 Admin
@@ -219,6 +236,7 @@ export default function App() {
                 discovered={discovered}
                 isAdmin={isAdmin}
                 selectedId={selected?.id ?? null}
+                ownedByPlayer={ownedNames}
                 onSelectDiscovered={setSelected}
                 onSelectUndiscovered={setPendingDiscovery}
                 totalCount={visibleCount}
@@ -236,7 +254,9 @@ export default function App() {
                 attacksByName={attacksByName}
                 onBack={() => setSelected(null)}
                 onUndiscover={handleUndiscover}
-                onAddToRoster={player ? () => addOwnedPokemon(selected.nom, selected.numero) : undefined}
+                onAddToRoster={player ? handleAddToRoster : undefined}
+                teamFull={teamFull}
+                ownedCount={ownedCount}
               />
             ) : (
               <div className="hidden md:flex h-full items-center justify-center text-gray-700 flex-col gap-4 select-none">
@@ -262,7 +282,6 @@ export default function App() {
       {activeTab === 'admin' && isAdmin && (
         <AdminTab
           onImportSuccess={() => { refetch(); refetchAttacks() }}
-          onLogout={handleAdminLogout}
         />
       )}
 
@@ -279,6 +298,15 @@ export default function App() {
         <PasswordModal
           onSuccess={handlePasswordSuccess}
           onCancel={() => setShowPasswordModal(false)}
+        />
+      )}
+
+      {showAdminLogoutConfirm && (
+        <ConfirmPopup
+          title="Quitter le mode admin ?"
+          confirmLabel="Quitter"
+          onConfirm={() => { handleAdminLogout(); setShowAdminLogoutConfirm(false) }}
+          onCancel={() => setShowAdminLogoutConfirm(false)}
         />
       )}
 

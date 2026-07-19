@@ -300,7 +300,7 @@ export function ScannerModal({ pokemon, discovered, onDiscover, onClose }: Props
                 <p className="text-white/60 text-sm mb-1">Caméra non disponible</p>
                 <button
                   onClick={() => fileRef.current?.click()}
-                  className="px-6 py-3 bg-red-700 border-2 border-red-500 text-white rounded-xl font-bold"
+                  className="px-6 py-3 bg-gray-700 border-2 border-gray-500 text-white rounded-xl font-bold"
                 >
                   📂 Choisir une image
                 </button>
@@ -377,7 +377,7 @@ export function ScannerModal({ pokemon, discovered, onDiscover, onClose }: Props
               </button>
               <button
                 onClick={confirm}
-                className="px-7 py-3 bg-red-700 border-2 border-red-500 text-white rounded-xl font-bold"
+                className="px-7 py-3 bg-gray-700 border-2 border-gray-500 text-white rounded-xl font-bold"
               >
                 Découvrir !
               </button>
@@ -402,7 +402,7 @@ export function ScannerModal({ pokemon, discovered, onDiscover, onClose }: Props
           </div>
           <button
             onClick={retry}
-            className="mt-2 px-6 py-3 bg-red-700 border-2 border-red-500 text-white rounded-xl font-bold"
+            className="mt-2 px-6 py-3 bg-gray-700 border-2 border-gray-500 text-white rounded-xl font-bold"
           >
             Réessayer
           </button>

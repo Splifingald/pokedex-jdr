@@ -24,7 +24,7 @@ export function DiscoveryModal({ numero, onConfirm, onCancel }: Props) {
           </button>
           <button
             onClick={onConfirm}
-            className="flex-1 py-3 bg-red-600 border-2 border-red-400 text-white rounded hover:bg-red-500 transition-colors font-bold"
+            className="flex-1 py-3 bg-gray-700 border-2 border-gray-500 text-white rounded hover:bg-gray-600 transition-colors font-bold"
           >
             Oui !
           </button>

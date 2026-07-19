@@ -1,11 +1,13 @@
 import { memo } from 'react'
 import type { Pokemon } from '../types'
+import { EyeIcon } from './icons/EyeIcon'
 
 interface Props {
   pokemon: Pokemon
   isDiscovered: boolean
   isAdmin: boolean
   isSelected: boolean
+  isOwnedByPlayer: boolean
   onClick: () => void
 }
 
@@ -14,6 +16,7 @@ export const PokemonListItem = memo(function PokemonListItem({
   isDiscovered,
   isAdmin,
   isSelected,
+  isOwnedByPlayer,
   onClick,
 }: Props) {
   const visible = isDiscovered || isAdmin
@@ -45,13 +48,21 @@ export const PokemonListItem = memo(function PokemonListItem({
           {isAdmin && pokemon.cache && (
             <span className="ml-2 shrink-0 text-xs bg-purple-900 text-purple-300 border border-purple-700 rounded px-1 py-0.5 leading-none">CACHÉ</span>
           )}
-          {isAdmin && (
-            <span
-              title={isDiscovered ? 'Découvert par les joueurs' : 'Pas encore découvert'}
-              className={`ml-1 shrink-0 text-sm select-none transition-opacity ${isDiscovered ? 'opacity-100' : 'opacity-20'}`}
-            >
-              👁
-            </span>
+          {isOwnedByPlayer ? (
+            <img
+              src="/pwa-icons/pokeball.svg"
+              alt="Dans votre roster"
+              title="Vous possédez ce pokémon"
+              className="ml-1 shrink-0 w-4 h-4"
+            />
+          ) : (
+            isAdmin && (
+              <span title={isDiscovered ? 'Découvert par les joueurs' : 'Pas encore découvert'} className="ml-1 shrink-0">
+                <EyeIcon
+                  className={`w-4 h-4 text-white transition-opacity ${isDiscovered ? 'opacity-100' : 'opacity-20'}`}
+                />
+              </span>
+            )
           )}
         </>
       ) : (

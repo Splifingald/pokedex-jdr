@@ -11,7 +11,6 @@ const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET as string
 
 interface Props {
   onImportSuccess: () => void
-  onLogout: () => void
 }
 
 function mapCsvRow(row: CsvRow) {
@@ -66,7 +65,7 @@ function mapAttackCsvRow(row: AttackCsvRow) {
   }
 }
 
-export function AdminPanel({ onImportSuccess, onLogout }: Props) {
+export function AdminPanel({ onImportSuccess }: Props) {
   const [status, setStatus] = useState<'idle' | 'parsing' | 'importing' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -207,7 +206,7 @@ export function AdminPanel({ onImportSuccess, onLogout }: Props) {
           <button
             onClick={() => fileRef.current?.click()}
             disabled={status === 'importing' || status === 'parsing'}
-            className="w-full py-3 bg-red-700 border-2 border-red-500 text-white rounded hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-bold"
+            className="w-full py-3 bg-yellow-700 border-2 border-yellow-500 text-white rounded hover:bg-yellow-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-bold"
           >
             {status === 'parsing' || status === 'importing' ? '⏳ En cours…' : '📂 Importer CSV'}
           </button>
@@ -223,13 +222,6 @@ export function AdminPanel({ onImportSuccess, onLogout }: Props) {
             {message}
           </div>
         )}
-
-        <button
-          onClick={onLogout}
-          className="w-full py-2 border border-gray-700 text-gray-500 rounded hover:text-gray-300 hover:border-gray-500 transition-colors text-sm"
-        >
-          Quitter le mode admin
-        </button>
     </div>
   )
 }

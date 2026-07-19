@@ -53,7 +53,7 @@ export function SearchBar({
         <button
           onClick={onManualDiscover}
           title="Ajouter un pokémon manuellement"
-          className="w-9 h-9 bg-red-700 border border-red-500 text-white rounded flex items-center justify-center text-lg hover:bg-red-600 transition-colors shrink-0"
+          className="w-9 h-9 bg-gray-700 border border-gray-500 text-white rounded flex items-center justify-center text-lg hover:bg-gray-600 transition-colors shrink-0"
         >
           +
         </button>

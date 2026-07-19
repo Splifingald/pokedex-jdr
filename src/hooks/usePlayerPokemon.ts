@@ -73,11 +73,11 @@ export function usePlayerPokemon(playerId: number | null) {
     }
   }, [playerId])
 
-  const addOwnedPokemon = useCallback(async (nom: string, numero: string) => {
+  const addOwnedPokemon = useCallback(async (nom: string, numero: string, inTeam: boolean) => {
     if (!playerId) return null
     const { data, error } = await supabase
       .from('player_pokemon')
-      .insert({ player_id: playerId, pokemon_nom: nom, pokemon_numero: numero })
+      .insert({ player_id: playerId, pokemon_nom: nom, pokemon_numero: numero, in_team: inTeam })
       .select()
       .single()
     if (error) {

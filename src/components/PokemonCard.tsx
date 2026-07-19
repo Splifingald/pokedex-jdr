@@ -1,7 +1,10 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
 import type { Pokemon, Attack } from '../types'
 import { TypeBadge } from './TypeBadge'
 import { ImageLightbox } from './ImageLightbox'
+import { StatRow } from './StatRow'
+import { AudioDescriptionPlayer } from './AudioDescriptionPlayer'
+import { EyeOffIcon } from './icons/EyeOffIcon'
 
 interface Props {
   pokemon: Pokemon
@@ -11,6 +14,8 @@ interface Props {
   onBack: () => void
   onUndiscover: () => void
   onAddToRoster?: () => void
+  teamFull?: boolean
+  ownedCount?: number
 }
 
 const TRANSPORT_ICONS: Record<string, string> = {
@@ -19,55 +24,8 @@ const TRANSPORT_ICONS: Record<string, string> = {
   Sol: '🐾',
 }
 
-function StatRow({ icon, label, value }: { icon: string; label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-start gap-3 py-2 border-b border-gray-700">
-      <span className="text-xl w-7 shrink-0 text-center">{icon}</span>
-      <span className="text-gray-400 text-sm w-32 shrink-0">{label}</span>
-      <span className="text-white text-sm flex-1">{value}</span>
-    </div>
-  )
-}
-
-export function PokemonCard({ pokemon, isAdmin, isDiscovered, attacksByName, onBack, onUndiscover, onAddToRoster }: Props) {
+export function PokemonCard({ pokemon, isAdmin, isDiscovered, attacksByName, onBack, onUndiscover, onAddToRoster, teamFull = false, ownedCount = 0 }: Props) {
   const [lightboxOpen, setLightboxOpen] = useState(false)
-
-  // ── Lecteur audio ─────────────────────────────────────────────
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  const [audioState, setAudioState] = useState<'idle' | 'playing' | 'paused'>('idle')
-  const [progress, setProgress] = useState(0)   // 0–1
-  const [duration, setDuration] = useState(0)
-
-  // Pause automatique à la fermeture de la fiche
-  useEffect(() => {
-    return () => { audioRef.current?.pause() }
-  }, [])
-
-  // Réinitialise le player si on change de pokémon
-  useEffect(() => {
-    audioRef.current?.pause()
-    setAudioState('idle')
-    setProgress(0)
-    setDuration(0)
-  }, [pokemon.id])
-
-  function fmt(sec: number) {
-    const m = Math.floor(sec / 60)
-    const s = Math.floor(sec % 60)
-    return `${m}:${s.toString().padStart(2, '0')}`
-  }
-
-  function toggleAudio() {
-    const a = audioRef.current
-    if (!a) return
-    if (audioState === 'playing') {
-      a.pause()
-      setAudioState('paused')
-    } else {
-      a.play()
-      setAudioState('playing')
-    }
-  }
 
   const superEfficace = [
     pokemon.super_efficace_1,
@@ -146,53 +104,7 @@ export function PokemonCard({ pokemon, isAdmin, isDiscovered, attacksByName, onB
         </div>
 
         {/* ── Lecteur audio ── */}
-        {pokemon.audio_url && (
-          <>
-            <audio
-              ref={audioRef}
-              src={pokemon.audio_url}
-              onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
-              onTimeUpdate={(e) => {
-                const a = e.currentTarget
-                setProgress(a.duration ? a.currentTime / a.duration : 0)
-              }}
-              onEnded={() => { setAudioState('idle'); setProgress(0) }}
-            />
-            <div className="mx-4 my-3 px-3 py-2 bg-red-950/60 border border-red-900/50 rounded-lg flex items-center gap-3">
-              <span className="text-lg shrink-0">🔊</span>
-              <span className="text-gray-300 text-xs shrink-0">Description</span>
-
-              {/* Barre de progression cliquable */}
-              <div
-                className="flex-1 h-1.5 bg-gray-700 rounded-full overflow-hidden cursor-pointer"
-                onClick={(e) => {
-                  const a = audioRef.current
-                  if (!a || !a.duration) return
-                  const rect = e.currentTarget.getBoundingClientRect()
-                  a.currentTime = ((e.clientX - rect.left) / rect.width) * a.duration
-                }}
-              >
-                <div
-                  className="h-full bg-red-500 rounded-full transition-all duration-100"
-                  style={{ width: `${progress * 100}%` }}
-                />
-              </div>
-
-              {/* Durée */}
-              <span className="text-gray-500 text-xs shrink-0 w-8 text-right">
-                {audioState === 'idle' ? fmt(duration) : fmt((audioRef.current?.currentTime ?? 0))}
-              </span>
-
-              {/* Bouton play/pause */}
-              <button
-                onClick={toggleAudio}
-                className="w-8 h-8 rounded-full bg-red-700 hover:bg-red-600 flex items-center justify-center shrink-0 transition-colors"
-              >
-                {audioState === 'playing' ? '⏸' : '▶'}
-              </button>
-            </div>
-          </>
-        )}
+        {pokemon.audio_url && <AudioDescriptionPlayer key={pokemon.id} audioUrl={pokemon.audio_url} />}
 
         {/* Stats */}
         <div className="px-4 py-2 flex-1">
@@ -286,27 +198,26 @@ export function PokemonCard({ pokemon, isAdmin, isDiscovered, attacksByName, onB
             </div>
           )}
 
-          {/* Ajouter au roster du joueur connecté */}
-          {isDiscovered && onAddToRoster && (
-            <div className="mt-6 pt-4 border-t border-gray-800">
-              <button
-                onClick={onAddToRoster}
-                className="w-full py-2.5 bg-red-700 border border-red-500 text-white rounded hover:bg-red-600 transition-colors text-sm font-bold"
-              >
-                ⚔️ Ajouter à mon équipe
-              </button>
-            </div>
-          )}
-
-          {/* Annuler découverte — visible uniquement si découvert (et pas en mode admin) */}
-          {isDiscovered && !isAdmin && (
-            <div className="mt-4 mb-4 pt-4 border-t border-gray-800">
-              <button
-                onClick={onUndiscover}
-                className="w-full py-2 text-xs text-gray-600 border border-gray-800 rounded hover:text-red-400 hover:border-red-900 transition-colors"
-              >
-                Marquer comme non découvert
-              </button>
+          {/* Actions */}
+          {isDiscovered && (onAddToRoster || !isAdmin) && (
+            <div className="mt-6 mb-4 pt-4 border-t border-gray-800 flex gap-3">
+              {onAddToRoster && (
+                <button
+                  onClick={onAddToRoster}
+                  className="flex-1 py-2.5 bg-blue-700 border border-blue-500 text-white rounded hover:bg-blue-600 transition-colors text-sm font-bold"
+                >
+                  + {teamFull ? 'Ajouter à mon PC' : 'Ajouter à mon équipe'}{ownedCount > 0 ? ` (${ownedCount})` : ''}
+                </button>
+              )}
+              {!isAdmin && (
+                <button
+                  onClick={onUndiscover}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs text-gray-500 border border-gray-800 rounded hover:text-gray-300 hover:border-gray-600 transition-colors"
+                >
+                  <EyeOffIcon className="w-3.5 h-3.5" />
+                  Marquer comme non découvert
+                </button>
+              )}
             </div>
           )}
         </div>

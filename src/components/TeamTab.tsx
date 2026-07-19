@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import type { Player, Pokemon, Attack } from '../types'
 import { usePlayerPokemon } from '../hooks/usePlayerPokemon'
 import { useAdminParameters } from '../hooks/useAdminParameters'
+import { useToast } from '../context/ToastContext'
 import { PokemonOwnedCard } from './PokemonOwnedCard'
 import { PokemonSearchInput } from './PokemonSearchInput'
 import { PokemonDetailView } from './PokemonDetailView'
@@ -19,6 +20,7 @@ interface Props {
 export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByName, attacksByName }: Props) {
   const { roster, loading, addOwnedPokemon, updateXp, toggleInTeam, addMove, removeMove } = usePlayerPokemon(player.id)
   const { parameters } = useAdminParameters()
+  const { showToast } = useToast()
 
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [managingMoves, setManagingMoves] = useState(false)
@@ -33,6 +35,18 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
   const teamFull = team.length >= parameters.max_team_size
 
   const selected = roster.find((r) => r.id === selectedId) ?? null
+
+  const handleAddOwned = async (p: Pokemon) => {
+    const inTeam = !teamFull
+    await addOwnedPokemon(p.nom, p.numero, inTeam)
+    showToast(`${p.nom} ajouté ${inTeam ? "à l'équipe" : 'au PC'} !`)
+  }
+
+  const handleToggleInTeam = async (id: number, inTeam: boolean) => {
+    await toggleInTeam(id, inTeam)
+    const pp = roster.find((r) => r.id === id)
+    showToast(`${pp?.pokemon_nom ?? 'Pokémon'} ${inTeam ? "ajouté à l'équipe" : 'mis au PC'} !`)
+  }
 
   if (selected) {
     const pokemon = pokemonByName.get(selected.pokemon_nom)
@@ -57,8 +71,9 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
         playerPokemon={selected}
         pokemon={pokemon}
         teamFull={teamFull}
+        maxMoves={parameters.max_moves}
         onUpdateXp={updateXp}
-        onToggleInTeam={toggleInTeam}
+        onToggleInTeam={handleToggleInTeam}
         onManageMoves={() => setManagingMoves(true)}
         onBack={() => setSelectedId(null)}
       />
@@ -71,7 +86,7 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
         <label className="text-gray-400 text-sm mb-2 block">Ajouter un pokémon à mon roster</label>
         <PokemonSearchInput
           options={addableOptions}
-          onSelect={(p) => addOwnedPokemon(p.nom, p.numero)}
+          onSelect={handleAddOwned}
         />
       </div>
 
