@@ -1,3 +1,5 @@
+import { BUTTON_STYLE } from '../lib/buttonStyles'
+
 interface Props {
   numero: string
   onConfirm: () => void
@@ -15,16 +17,16 @@ export function DiscoveryModal({ numero, onConfirm, onCancel }: Props) {
             Avez-vous découvert ce Pokémon ?
           </h3>
         </div>
-        <div className="flex gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             onClick={onCancel}
-            className="flex-1 py-3 border-2 border-gray-600 text-gray-300 rounded hover:bg-gray-800 transition-colors"
+            className={`py-3 rounded ${BUTTON_STYLE.gray}`}
           >
             Non
           </button>
           <button
             onClick={onConfirm}
-            className="flex-1 py-3 bg-gray-700 border-2 border-gray-500 text-white rounded hover:bg-gray-600 transition-colors font-bold"
+            className={`py-3 rounded font-bold ${BUTTON_STYLE.gray}`}
           >
             Oui !
           </button>

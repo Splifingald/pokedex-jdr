@@ -7,6 +7,7 @@ import { AudioDescriptionPlayer } from './AudioDescriptionPlayer'
 import { ConfirmPopup } from './ConfirmPopup'
 import { useLocalHp } from '../hooks/useLocalHp'
 import { getMaxHp } from '../lib/maxHp'
+import { BUTTON_STYLE } from '../lib/buttonStyles'
 
 interface Props {
   playerPokemon: PlayerPokemon
@@ -127,18 +128,18 @@ export function PokemonDetailView({ playerPokemon, pokemon, teamFull, maxMoves, 
           </>
         )}
 
-        <div className="mt-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4 mb-4">
           {playerPokemon.in_team ? (
             <button
               onClick={() => onToggleInTeam(playerPokemon.id, false)}
-              className="w-full py-2.5 bg-blue-700 border border-blue-500 text-white rounded hover:bg-blue-600 transition-colors text-sm font-bold"
+              className={`py-2.5 rounded text-sm font-bold ${BUTTON_STYLE.blue}`}
             >
               📦 Ajouter au PC
             </button>
           ) : !teamFull ? (
             <button
               onClick={() => onToggleInTeam(playerPokemon.id, true)}
-              className="w-full py-2.5 bg-blue-700 border border-blue-500 text-white rounded hover:bg-blue-600 transition-colors text-sm font-bold"
+              className={`py-2.5 rounded text-sm font-bold ${BUTTON_STYLE.blue}`}
             >
               + Ajouter à l'équipe
             </button>
@@ -146,7 +147,7 @@ export function PokemonDetailView({ playerPokemon, pokemon, teamFull, maxMoves, 
             <div title="Équipe complète">
               <button
                 disabled
-                className="w-full py-2.5 bg-blue-700 border border-blue-500 text-white rounded transition-colors text-sm font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                className={`w-full py-2.5 rounded text-sm font-bold disabled:opacity-40 disabled:cursor-not-allowed ${BUTTON_STYLE.blue}`}
               >
                 + Ajouter à l'équipe
               </button>
@@ -155,7 +156,7 @@ export function PokemonDetailView({ playerPokemon, pokemon, teamFull, maxMoves, 
 
           <button
             onClick={() => setShowDeleteConfirm(true)}
-            className="w-full py-2 mt-3 text-xs text-gray-500 border border-gray-800 rounded hover:text-red-400 hover:border-red-900 transition-colors"
+            className={`py-2.5 rounded text-sm ${BUTTON_STYLE.gray}`}
           >
             🗑 Supprimer ce pokémon
           </button>

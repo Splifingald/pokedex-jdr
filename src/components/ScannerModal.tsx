@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Pokemon } from '../types'
+import { BUTTON_STYLE } from '../lib/buttonStyles'
 
 interface Props {
   pokemon: Pokemon[]
@@ -300,7 +301,7 @@ export function ScannerModal({ pokemon, discovered, onDiscover, onClose }: Props
                 <p className="text-white/60 text-sm mb-1">Caméra non disponible</p>
                 <button
                   onClick={() => fileRef.current?.click()}
-                  className="px-6 py-3 bg-gray-700 border-2 border-gray-500 text-white rounded-xl font-bold"
+                  className={`px-6 py-3 rounded-xl font-bold ${BUTTON_STYLE.gray}`}
                 >
                   📂 Choisir une image
                 </button>
@@ -362,22 +363,22 @@ export function ScannerModal({ pokemon, discovered, onDiscover, onClose }: Props
               </p>
               <button
                 onClick={onClose}
-                className="px-6 py-3 border border-gray-600 text-gray-300 rounded-xl"
+                className={`px-6 py-3 rounded-xl ${BUTTON_STYLE.gray}`}
               >
                 Fermer
               </button>
             </div>
           ) : (
-            <div className="flex gap-3 mt-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
               <button
                 onClick={retry}
-                className="px-5 py-3 border border-gray-600 text-gray-400 rounded-xl text-sm"
+                className={`px-5 py-3 rounded-xl text-sm ${BUTTON_STYLE.gray}`}
               >
                 Réessayer
               </button>
               <button
                 onClick={confirm}
-                className="px-7 py-3 bg-gray-700 border-2 border-gray-500 text-white rounded-xl font-bold"
+                className={`px-7 py-3 rounded-xl font-bold ${BUTTON_STYLE.gray}`}
               >
                 Découvrir !
               </button>
@@ -402,7 +403,7 @@ export function ScannerModal({ pokemon, discovered, onDiscover, onClose }: Props
           </div>
           <button
             onClick={retry}
-            className="mt-2 px-6 py-3 bg-gray-700 border-2 border-gray-500 text-white rounded-xl font-bold"
+            className={`mt-2 px-6 py-3 rounded-xl font-bold ${BUTTON_STYLE.gray}`}
           >
             Réessayer
           </button>

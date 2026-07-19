@@ -1,3 +1,5 @@
+import { BUTTON_STYLE } from '../lib/buttonStyles'
+
 interface Props {
   title: string
   message?: string
@@ -24,20 +26,16 @@ export function ConfirmPopup({
           <h3 className="text-white text-lg">{title}</h3>
           {message && <p className="text-gray-400 text-sm mt-2">{message}</p>}
         </div>
-        <div className="flex gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
             onClick={onCancel}
-            className="flex-1 py-2.5 border-2 border-gray-600 text-gray-300 rounded hover:bg-gray-800 transition-colors text-sm"
+            className={`py-2.5 rounded text-sm font-bold ${BUTTON_STYLE.gray}`}
           >
             {cancelLabel}
           </button>
           <button
             onClick={onConfirm}
-            className={`flex-1 py-2.5 border-2 text-white rounded transition-colors text-sm font-bold ${
-              danger
-                ? 'bg-red-600 border-red-400 hover:bg-red-500'
-                : 'bg-gray-700 border-gray-500 hover:bg-gray-600'
-            }`}
+            className={`py-2.5 rounded text-sm font-bold ${danger ? BUTTON_STYLE.red : BUTTON_STYLE.gray}`}
           >
             {confirmLabel}
           </button>

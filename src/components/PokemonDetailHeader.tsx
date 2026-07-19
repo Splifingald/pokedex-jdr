@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import type { Pokemon } from '../types'
 import { HpGauge } from './HpGauge'
 import { ImageLightbox } from './ImageLightbox'
+import { BUTTON_STYLE } from '../lib/buttonStyles'
+import { useHoldRepeat } from '../hooks/useHoldRepeat'
 
 interface Props {
   pokemonNom: string
@@ -33,6 +35,10 @@ export function PokemonDetailHeader({
   maxMoves,
 }: Props) {
   const [lightboxOpen, setLightboxOpen] = useState(false)
+  const hpRef = useRef(hp)
+  useEffect(() => { hpRef.current = hp }, [hp])
+  const decrementHold = useHoldRepeat(() => onHpChange(hpRef.current - 1))
+  const incrementHold = useHoldRepeat(() => onHpChange(hpRef.current + 1))
 
   return (
     <div className="border-b border-gray-700 shrink-0">
@@ -49,7 +55,7 @@ export function PokemonDetailHeader({
         <button
           onClick={onManageMoves}
           title={`Gérer les capacités (${movesCount}/${maxMoves})`}
-          className="flex items-center gap-2 px-4 py-2 rounded bg-orange-700 border border-orange-500 text-white hover:bg-orange-600 transition-colors font-bold text-sm shrink-0"
+          className={`flex items-center gap-2 px-4 py-2 rounded font-bold text-sm shrink-0 ${BUTTON_STYLE.orange}`}
         >
           💥 Capacités
         </button>
@@ -75,7 +81,7 @@ export function PokemonDetailHeader({
           <div className="flex items-center gap-2">
             <span className="text-gray-400 text-xs">HP</span>
             <button
-              onClick={() => onHpChange(hp - 1)}
+              {...decrementHold}
               className="w-6 h-6 rounded bg-gray-800 border border-gray-600 text-white hover:bg-gray-700"
             >
               −
@@ -87,7 +93,7 @@ export function PokemonDetailHeader({
               className="w-14 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-white text-sm text-center outline-none focus:border-blue-500"
             />
             <button
-              onClick={() => onHpChange(hp + 1)}
+              {...incrementHold}
               className="w-6 h-6 rounded bg-gray-800 border border-gray-600 text-white hover:bg-gray-700"
             >
               +

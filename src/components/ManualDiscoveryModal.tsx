@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import type { Pokemon } from '../types'
+import { BUTTON_STYLE } from '../lib/buttonStyles'
 
 interface Props {
   pokemon: Pokemon[]
@@ -85,7 +86,7 @@ export function ManualDiscoveryModal({ pokemon, discovered, onDiscover, onClose 
           />
           <button
             type="submit"
-            className="px-4 py-2 bg-gray-700 border-2 border-gray-500 text-white rounded hover:bg-gray-600 transition-colors text-sm font-bold"
+            className={`px-4 py-2 rounded text-sm font-bold ${BUTTON_STYLE.gray}`}
           >
             OK
           </button>
@@ -115,16 +116,16 @@ export function ManualDiscoveryModal({ pokemon, discovered, onDiscover, onClose 
             <p className="text-gray-400 text-xs mb-0.5">#{foundPokemon.numero}</p>
             <p className="text-white font-bold">{foundPokemon.nom}</p>
             <p className="text-gray-400 text-xs mb-4">{foundPokemon.type}</p>
-            <div className="flex gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 onClick={onClose}
-                className="flex-1 py-2 border-2 border-gray-600 text-gray-300 rounded hover:bg-gray-700 transition-colors text-sm"
+                className={`py-2 rounded text-sm ${BUTTON_STYLE.gray}`}
               >
                 Annuler
               </button>
               <button
                 onClick={handleConfirm}
-                className="flex-1 py-2 bg-gray-700 border-2 border-gray-500 text-white rounded hover:bg-gray-600 transition-colors text-sm font-bold"
+                className={`py-2 rounded text-sm font-bold ${BUTTON_STYLE.gray}`}
               >
                 Découvrir !
               </button>

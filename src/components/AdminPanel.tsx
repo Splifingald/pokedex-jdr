@@ -2,6 +2,7 @@ import { useState, useRef } from 'react'
 import Papa from 'papaparse'
 import type { CsvRow, AttackCsvRow } from '../types'
 import { CSV_REQUIRED_HEADERS, ATTACK_CSV_REQUIRED_HEADERS } from '../types'
+import { BUTTON_STYLE } from '../lib/buttonStyles'
 
 // L'import CSV passe par une Netlify Function côté serveur
 // → la clé service_role Supabase n'est jamais exposée dans le bundle JS
@@ -206,7 +207,7 @@ export function AdminPanel({ onImportSuccess }: Props) {
           <button
             onClick={() => fileRef.current?.click()}
             disabled={status === 'importing' || status === 'parsing'}
-            className="w-full py-3 bg-yellow-700 border-2 border-yellow-500 text-white rounded hover:bg-yellow-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-bold"
+            className={`w-full py-3 rounded disabled:opacity-50 disabled:cursor-not-allowed font-bold ${BUTTON_STYLE.yellow}`}
           >
             {status === 'parsing' || status === 'importing' ? '⏳ En cours…' : '📂 Importer CSV'}
           </button>

@@ -5,6 +5,7 @@ import { ImageLightbox } from './ImageLightbox'
 import { StatRow } from './StatRow'
 import { AudioDescriptionPlayer } from './AudioDescriptionPlayer'
 import { EyeOffIcon } from './icons/EyeOffIcon'
+import { BUTTON_STYLE } from '../lib/buttonStyles'
 
 interface Props {
   pokemon: Pokemon
@@ -200,11 +201,11 @@ export function PokemonCard({ pokemon, isAdmin, isDiscovered, attacksByName, onB
 
           {/* Actions */}
           {isDiscovered && (onAddToRoster || !isAdmin) && (
-            <div className="mt-6 mb-4 pt-4 border-t border-gray-800 flex gap-3">
+            <div className="mt-6 mb-4 pt-4 border-t border-gray-800 grid grid-cols-1 sm:grid-cols-2 gap-3">
               {onAddToRoster && (
                 <button
                   onClick={onAddToRoster}
-                  className="flex-1 py-2.5 bg-blue-700 border border-blue-500 text-white rounded hover:bg-blue-600 transition-colors text-sm font-bold"
+                  className={`py-2.5 rounded text-sm font-bold ${BUTTON_STYLE.blue}`}
                 >
                   + {teamFull ? 'Ajouter à mon PC' : 'Ajouter à mon équipe'}{ownedCount > 0 ? ` (${ownedCount})` : ''}
                 </button>
@@ -212,7 +213,7 @@ export function PokemonCard({ pokemon, isAdmin, isDiscovered, attacksByName, onB
               {!isAdmin && (
                 <button
                   onClick={onUndiscover}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs text-gray-500 border border-gray-800 rounded hover:text-gray-300 hover:border-gray-600 transition-colors"
+                  className={`flex items-center justify-center gap-1.5 py-2 rounded text-xs ${BUTTON_STYLE.gray}`}
                 >
                   <EyeOffIcon className="w-3.5 h-3.5" />
                   Marquer comme non découvert

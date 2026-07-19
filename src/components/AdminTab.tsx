@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { AdminPanel } from './AdminPanel'
 import { AdminPlayersPanel } from './AdminPlayersPanel'
 import { AdminParametersPanel } from './AdminParametersPanel'
+import { BUTTON_STYLE } from '../lib/buttonStyles'
 
 type Section = 'import' | 'joueurs' | 'parametres'
 
@@ -20,16 +21,12 @@ export function AdminTab({ onImportSuccess }: Props) {
 
   return (
     <div className="flex-1 overflow-y-auto p-4">
-      <div className="flex gap-2 mb-4 max-w-sm">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4 max-w-sm">
         {sections.map((s) => (
           <button
             key={s.id}
             onClick={() => setSection(s.id)}
-            className={`px-3 py-1.5 text-sm rounded border transition-colors ${
-              section === s.id
-                ? 'bg-yellow-900/40 border-yellow-600 text-yellow-300'
-                : 'border-gray-700 text-gray-400 hover:text-gray-200'
-            }`}
+            className={`px-3 py-1.5 rounded text-sm font-bold ${section === s.id ? BUTTON_STYLE.yellow : BUTTON_STYLE.gray}`}
           >
             {s.label}
           </button>

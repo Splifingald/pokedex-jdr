@@ -19,6 +19,7 @@ import { LoginModal } from './components/LoginModal'
 import { PlayerBadge } from './components/PlayerBadge'
 import { TeamTab } from './components/TeamTab'
 import { ConfirmPopup } from './components/ConfirmPopup'
+import { BUTTON_STYLE } from './lib/buttonStyles'
 
 export default function App() {
   const { pokemon, discovered, loading, error, discoverPokemon, undiscoverPokemon, refetch } = usePokemon()
@@ -163,7 +164,7 @@ export default function App() {
           ) : (
             <button
               onClick={() => setShowLoginModal(true)}
-              className="text-white text-sm border border-white/40 rounded px-2 py-1 hover:bg-white/10 transition-colors"
+              className={`${BUTTON_STYLE.gray} text-sm rounded px-2 py-1 font-bold`}
             >
               👤 Connexion
             </button>
@@ -172,7 +173,7 @@ export default function App() {
           {isAdmin && (
             <button
               onClick={() => setShowAdminLogoutConfirm(true)}
-              className="text-yellow-300 text-sm border border-yellow-600 rounded px-2 py-1 hover:bg-yellow-900/30 transition-colors"
+              className={`${BUTTON_STYLE.yellow} text-sm rounded px-2 py-1 font-bold`}
             >
               🛠 Admin
             </button>

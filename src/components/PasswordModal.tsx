@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { BUTTON_STYLE } from '../lib/buttonStyles'
 
 const ADMIN_PASSWORD = 'Rioluxray171216'
 
@@ -45,17 +46,17 @@ export function PasswordModal({ onSuccess, onCancel }: Props) {
             className={`w-full bg-gray-800 border-2 ${error ? 'border-red-500' : 'border-gray-600'} rounded px-3 py-2 text-white outline-none focus:border-red-400 transition-colors`}
           />
           {error && <p className="text-red-400 text-xs text-center">Mot de passe incorrect</p>}
-          <div className="flex gap-3 mt-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1">
             <button
               type="button"
               onClick={onCancel}
-              className="flex-1 py-2.5 border-2 border-gray-600 text-gray-300 rounded hover:bg-gray-800 transition-colors text-sm"
+              className={`py-2.5 rounded text-sm font-bold ${BUTTON_STYLE.gray}`}
             >
               Annuler
             </button>
             <button
               type="submit"
-              className="flex-1 py-2.5 bg-yellow-700 border-2 border-yellow-500 text-white rounded hover:bg-yellow-600 transition-colors text-sm font-bold"
+              className={`py-2.5 rounded text-sm font-bold ${BUTTON_STYLE.yellow}`}
             >
               Entrer
             </button>

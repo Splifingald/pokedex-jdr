@@ -5,6 +5,7 @@ import { useAdminParameters } from '../hooks/useAdminParameters'
 import { useToast } from '../context/ToastContext'
 import { restoreLocalHp } from '../hooks/useLocalHp'
 import { getMaxHp } from '../lib/maxHp'
+import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PokemonOwnedCard } from './PokemonOwnedCard'
 import { PokemonSearchInput } from './PokemonSearchInput'
 import { PokemonDetailView } from './PokemonDetailView'
@@ -77,7 +78,9 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
           onUpdateXp={updateXp}
           onAddMove={addMove}
           onRemoveMove={removeMove}
-          onBack={() => setManagingMoves(false)}
+          onUpdateMaxHpOverride={updateMaxHpOverride}
+          onGoToInfo={() => setManagingMoves(false)}
+          onBack={() => { setManagingMoves(false); setSelectedId(null) }}
         />
       )
     }
@@ -115,7 +118,7 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
         {team.length > 0 && (
           <button
             onClick={() => handleRestoreAll(team)}
-            className="text-xs px-2.5 py-1 rounded bg-green-700 border border-green-500 text-white hover:bg-green-600 transition-colors font-bold"
+            className={`text-xs px-2.5 py-1 rounded font-bold ${BUTTON_STYLE.green}`}
           >
             ❤️ Tout soigner
           </button>
@@ -144,7 +147,7 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
         {box.length > 0 && (
           <button
             onClick={() => handleRestoreAll(box)}
-            className="text-xs px-2.5 py-1 rounded bg-green-700 border border-green-500 text-white hover:bg-green-600 transition-colors font-bold"
+            className={`text-xs px-2.5 py-1 rounded font-bold ${BUTTON_STYLE.green}`}
           >
             ❤️ Tout soigner
           </button>

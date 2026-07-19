@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { usePlayers } from '../hooks/usePlayers'
 import { PLAYER_COLORS } from '../types'
 import type { Player } from '../types'
+import { BUTTON_STYLE } from '../lib/buttonStyles'
 
 const emptyForm = { name: '', color: PLAYER_COLORS[0], image_url: '' }
 
@@ -64,13 +65,13 @@ export function AdminPlayersPanel() {
                   <span className="text-red-400 text-xs">Supprimer {p.name} et son roster ?</span>
                   <button
                     onClick={() => handleDelete(p)}
-                    className="text-white bg-red-700 hover:bg-red-600 text-xs border border-red-500 rounded px-2 py-1"
+                    className={`text-xs rounded px-2 py-1 font-bold ${BUTTON_STYLE.red}`}
                   >
                     Confirmer
                   </button>
                   <button
                     onClick={() => setConfirmingDeleteId(null)}
-                    className="text-gray-400 hover:text-white text-xs border border-gray-600 rounded px-2 py-1"
+                    className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
                   >
                     Annuler
                   </button>
@@ -79,13 +80,13 @@ export function AdminPlayersPanel() {
                 <>
                   <button
                     onClick={() => setEditing(p)}
-                    className="text-gray-400 hover:text-white text-xs border border-gray-600 rounded px-2 py-1"
+                    className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
                   >
                     Éditer
                   </button>
                   <button
                     onClick={() => setConfirmingDeleteId(p.id)}
-                    className="text-gray-400 hover:text-red-400 text-xs border border-gray-600 rounded px-2 py-1"
+                    className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
                   >
                     Suppr.
                   </button>
@@ -136,12 +137,12 @@ export function AdminPlayersPanel() {
           ))}
         </div>
 
-        <div className="flex gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {editing && (
             <button
               type="button"
               onClick={() => setEditing(null)}
-              className="flex-1 py-2 border border-gray-600 text-gray-300 rounded hover:bg-gray-800 transition-colors text-sm"
+              className={`py-2 rounded text-sm ${BUTTON_STYLE.gray}`}
             >
               Annuler
             </button>
@@ -149,7 +150,7 @@ export function AdminPlayersPanel() {
           <button
             type="submit"
             disabled={saving || !form.name.trim()}
-            className="flex-1 py-2 bg-yellow-700 border border-yellow-500 text-white rounded hover:bg-yellow-600 transition-colors text-sm font-bold disabled:opacity-50"
+            className={`py-2 rounded text-sm font-bold disabled:opacity-50 ${BUTTON_STYLE.yellow}`}
           >
             {editing ? 'Enregistrer' : 'Créer'}
           </button>

@@ -5,6 +5,7 @@ import { MoveSearchInput } from './MoveSearchInput'
 import { TypeBadge } from './TypeBadge'
 import { useLocalHp } from '../hooks/useLocalHp'
 import { getMaxHp } from '../lib/maxHp'
+import { getPrecisionColor } from '../lib/precisionColor'
 
 interface Props {
   playerPokemon: PlayerPokemon
@@ -14,19 +15,21 @@ interface Props {
   onUpdateXp: (id: number, xp: number) => void
   onAddMove: (id: number, moveName: string) => void
   onRemoveMove: (id: number, moveName: string) => void
+  onUpdateMaxHpOverride: (id: number, maxHp: number) => void
+  onGoToInfo: () => void
   onBack: () => void
 }
 
-function MoveStat({ label, value }: { label: string; value: React.ReactNode }) {
+function MoveStatIcon({ icon, value, style }: { icon: string; value: React.ReactNode; style?: React.CSSProperties }) {
   return (
-    <div className="flex items-center gap-2 text-xs">
-      <span className="text-gray-500 w-20 shrink-0">{label}</span>
-      <span className="text-gray-200">{value ?? '—'}</span>
+    <div className="flex items-center gap-1.5 text-xs">
+      <span className="shrink-0">{icon}</span>
+      <span className="text-gray-200" style={style}>{value ?? '—'}</span>
     </div>
   )
 }
 
-export function MovesTab({ playerPokemon, pokemon, maxMoves, attacksByName, onUpdateXp, onAddMove, onRemoveMove, onBack }: Props) {
+export function MovesTab({ playerPokemon, pokemon, maxMoves, attacksByName, onUpdateXp, onAddMove, onRemoveMove, onUpdateMaxHpOverride, onGoToInfo, onBack }: Props) {
   const maxHp = getMaxHp(playerPokemon, pokemon)
   const [hp, setHp] = useLocalHp(playerPokemon.id, maxHp)
 
@@ -45,9 +48,11 @@ export function MovesTab({ playerPokemon, pokemon, maxMoves, attacksByName, onUp
         hp={hp}
         maxHp={maxHp}
         onHpChange={setHp}
+        onMaxHpChange={(value) => onUpdateMaxHpOverride(playerPokemon.id, value)}
         xp={playerPokemon.xp}
         onXpChange={(xp) => onUpdateXp(playerPokemon.id, xp)}
         onBack={onBack}
+        onGoToInfo={onGoToInfo}
       />
 
       <div className="px-4 py-4">
@@ -86,13 +91,25 @@ export function MovesTab({ playerPokemon, pokemon, maxMoves, attacksByName, onUp
                   </div>
 
                   {atk ? (
-                    <div className="flex flex-col gap-1">
-                      <MoveStat label="Distance" value={atk.distance} />
-                      <MoveStat label="Dégâts base" value={atk.degats_base} />
-                      <MoveStat label="Dégâts dé" value={atk.degats_de} />
-                      <MoveStat label="Cible" value={atk.cible} />
-                      <MoveStat label="Précision" value={atk.precision != null ? `${atk.precision}%` : null} />
-                      <MoveStat label="Effet" value={atk.effet} />
+                    <div className="flex flex-col gap-1.5">
+                      {atk.effet && (
+                        <p className="text-gray-300 text-xs italic border-b border-gray-700 pb-1.5">{atk.effet}</p>
+                      )}
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                        <div className="flex flex-col gap-1">
+                          <MoveStatIcon icon="↔️" value={atk.distance} />
+                          <MoveStatIcon icon="👊" value={atk.degats_base} />
+                          <MoveStatIcon icon="🎲" value={atk.degats_de} />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <MoveStatIcon icon="👤" value={atk.cible} />
+                          <MoveStatIcon
+                            icon="🎯"
+                            value={atk.precision}
+                            style={{ color: getPrecisionColor(atk.precision), fontWeight: 'bold' }}
+                          />
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <p className="text-gray-500 text-xs">Capacité introuvable dans la table attacks.</p>
