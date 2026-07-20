@@ -2,7 +2,7 @@ import { useRef, useEffect, useMemo } from 'react'
 import type { Pokemon } from '../types'
 import type { StatusId } from '../lib/status'
 import { STATUS_LIST, getStatusInfo } from '../lib/status'
-import { getMilestones, getMaxXp, clampXp } from '../lib/xpBonuses'
+import { getMilestones, getMaxXp } from '../lib/xpBonuses'
 import { HpGauge } from './HpGauge'
 import { XpGauge } from './XpGauge'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
@@ -78,7 +78,7 @@ export function OwnedPokemonHeader({
 
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-2">
-              <span className="text-gray-400 text-xs">HP</span>
+              <span className="text-gray-400 text-xs">PV</span>
               <button
                 {...decrementHold}
                 className="w-6 h-6 rounded bg-gray-800 border border-gray-600 text-white hover:bg-gray-700"
@@ -124,18 +124,31 @@ export function OwnedPokemonHeader({
 
           <div className="mt-2 max-w-xs flex flex-col gap-2">
             <HpGauge current={hp} max={maxHp} />
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-gray-400 text-xs">XP</span>
+            {maxXp != null ? (
+              <XpGauge xp={xp} max={maxXp} milestones={milestones} onXpChange={onXpChange} />
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-gray-400 text-xs">Expérience</span>
+                <button
+                  onClick={() => onXpChange(Math.max(0, xp - 1))}
+                  className="w-6 h-6 rounded bg-gray-800 border border-gray-600 text-white hover:bg-gray-700"
+                >
+                  −
+                </button>
                 <input
                   type="number"
                   value={xp}
-                  onChange={(e) => onXpChange(clampXp(parseInt(e.target.value) || 0, maxXp))}
+                  onChange={(e) => onXpChange(Math.max(0, parseInt(e.target.value) || 0))}
                   className="w-16 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-blue-400 font-bold text-sm text-center outline-none focus:border-blue-500"
                 />
+                <button
+                  onClick={() => onXpChange(xp + 1)}
+                  className="w-6 h-6 rounded bg-gray-800 border border-gray-600 text-white hover:bg-gray-700"
+                >
+                  +
+                </button>
               </div>
-              {maxXp != null && <XpGauge current={xp} max={maxXp} milestones={milestones} />}
-            </div>
+            )}
           </div>
         </div>
       </div>

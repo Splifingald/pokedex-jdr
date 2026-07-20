@@ -30,7 +30,7 @@ function parseMilestoneCell(raw: string | null | undefined): Omit<Milestone, 'xp
   if (match) {
     const value = parseInt(match[1], 10)
     const kind: BonusKind = match[2].toUpperCase() === 'PV' ? 'hp' : 'dmg'
-    return { kind, value, label: `+${value} ${kind === 'hp' ? 'HP' : 'DMG'}` }
+    return { kind, value, label: trimmed }
   }
   return { kind: 'text', value: null, label: trimmed }
 }
