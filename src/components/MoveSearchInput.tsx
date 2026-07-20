@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import type { Attack } from '../types'
 import { TypeBadge } from './TypeBadge'
+import { normalizeSearch } from '../lib/normalizeSearch'
 
 interface Props {
   options: Attack[]
@@ -12,9 +13,9 @@ export function MoveSearchInput({ options, disabled, onSelect }: Props) {
   const [query, setQuery] = useState('')
 
   const matches = useMemo(() => {
-    const q = query.trim().toLowerCase()
+    const q = normalizeSearch(query.trim())
     if (!q) return []
-    return options.filter((a) => a.nom.toLowerCase().includes(q)).slice(0, 8)
+    return options.filter((a) => normalizeSearch(a.nom).includes(q)).slice(0, 8)
   }, [query, options])
 
   const handleSelect = (a: Attack) => {

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import type { Pokemon } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
+import { normalizeSearch } from '../lib/normalizeSearch'
 
 interface Props {
   pokemon: Pokemon[]
@@ -28,16 +29,16 @@ export function ManualDiscoveryModal({ pokemon, discovered, onDiscover, onClose 
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
-    const q = query.trim().toLowerCase()
+    const q = normalizeSearch(query.trim())
     if (!q) return
 
     // Recherche par code en premier (trouve aussi les cachés)
-    let match = pokemon.find((p) => p.code?.toLowerCase() === q)
+    let match = pokemon.find((p) => p.code && normalizeSearch(p.code) === q)
 
     // Puis par numéro ou nom, uniquement sur les non-cachés
     if (!match) {
       match = pokemon.find(
-        (p) => !p.cache && (p.numero.toLowerCase() === q || p.nom.toLowerCase() === q)
+        (p) => !p.cache && (p.numero.toLowerCase() === q || normalizeSearch(p.nom) === q)
       )
     }
 

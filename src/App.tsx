@@ -20,6 +20,7 @@ import { PlayerBadge } from './components/PlayerBadge'
 import { TeamTab } from './components/TeamTab'
 import { ConfirmPopup } from './components/ConfirmPopup'
 import { BUTTON_STYLE } from './lib/buttonStyles'
+import { normalizeSearch } from './lib/normalizeSearch'
 
 export default function App() {
   const { pokemon, discovered, loading, error, discoverPokemon, undiscoverPokemon, refetch } = usePokemon()
@@ -63,8 +64,8 @@ export default function App() {
       // Hors admin : caché non découvert → toujours invisible
       // Hors admin + filtre actif : non découvert → invisible (recherche sur découverts seulement)
       if (!isAdmin && !discovered.has(p.nom) && (p.cache || hasFilter)) return false
-      const q = search.toLowerCase()
-      if (q && !p.nom.toLowerCase().includes(q) && !p.numero.includes(q)) return false
+      const q = normalizeSearch(search)
+      if (q && !normalizeSearch(p.nom).includes(q) && !p.numero.includes(q)) return false
       if (typeFilter && p.type !== typeFilter) return false
       return true
     })

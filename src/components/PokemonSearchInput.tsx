@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import type { Pokemon } from '../types'
+import { normalizeSearch } from '../lib/normalizeSearch'
 
 interface Props {
   options: Pokemon[]
@@ -11,9 +12,9 @@ export function PokemonSearchInput({ options, onSelect, placeholder = 'Recherche
   const [query, setQuery] = useState('')
 
   const matches = useMemo(() => {
-    const q = query.trim().toLowerCase()
+    const q = normalizeSearch(query.trim())
     if (!q) return []
-    return options.filter((p) => p.nom.toLowerCase().includes(q) || p.numero.includes(q)).slice(0, 8)
+    return options.filter((p) => normalizeSearch(p.nom).includes(q) || p.numero.includes(q)).slice(0, 8)
   }, [query, options])
 
   const handleSelect = (p: Pokemon) => {
