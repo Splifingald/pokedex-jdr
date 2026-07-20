@@ -1,6 +1,10 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import type { Pokemon } from '../types'
+import type { StatusId } from '../lib/status'
+import { STATUS_LIST, getStatusInfo } from '../lib/status'
+import { getMilestones, getMaxXp, clampXp } from '../lib/xpBonuses'
 import { HpGauge } from './HpGauge'
+import { XpGauge } from './XpGauge'
 import { ImageLightbox } from './ImageLightbox'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { useHoldRepeat } from '../hooks/useHoldRepeat'
@@ -11,9 +15,10 @@ interface Props {
   hp: number
   maxHp: number
   onHpChange: (value: number) => void
-  onMaxHpChange: (value: number) => void
   xp: number
   onXpChange: (value: number) => void
+  status: StatusId
+  onStatusChange: (value: StatusId) => void
   onBack: () => void
   onManageMoves: () => void
   movesCount: number
@@ -26,9 +31,10 @@ export function PokemonDetailHeader({
   hp,
   maxHp,
   onHpChange,
-  onMaxHpChange,
   xp,
   onXpChange,
+  status,
+  onStatusChange,
   onBack,
   onManageMoves,
   movesCount,
@@ -39,6 +45,8 @@ export function PokemonDetailHeader({
   useEffect(() => { hpRef.current = hp }, [hp])
   const decrementHold = useHoldRepeat(() => onHpChange(hpRef.current - 1))
   const incrementHold = useHoldRepeat(() => onHpChange(hpRef.current + 1))
+  const milestones = useMemo(() => getMilestones(pokemon), [pokemon])
+  const maxXp = useMemo(() => getMaxXp(pokemon), [pokemon])
 
   return (
     <div className="border-b border-gray-700 shrink-0">
@@ -101,28 +109,42 @@ export function PokemonDetailHeader({
           </div>
 
           <div className="flex items-center gap-2">
+            <span className="text-gray-400 text-xs">Statut</span>
+            <select
+              value={status}
+              onChange={(e) => onStatusChange(e.target.value as StatusId)}
+              className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-white text-sm outline-none focus:border-blue-500"
+            >
+              {STATUS_LIST.map((s) => (
+                <option key={s.id} value={s.id}>{s.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {status !== 'aucun' && (
+          <div
+            className="mb-2 rounded px-3 py-2 text-xs border"
+            style={{ borderColor: getStatusInfo(status).color, backgroundColor: `${getStatusInfo(status).color}22`, color: getStatusInfo(status).color }}
+          >
+            <span className="font-bold">{getStatusInfo(status).label}</span> — {getStatusInfo(status).description}
+          </div>
+        )}
+
+        <HpGauge current={hp} max={maxHp} />
+
+        <div className="mt-3">
+          <div className="flex items-center gap-2 mb-1">
             <span className="text-gray-400 text-xs">XP</span>
             <input
               type="number"
               value={xp}
-              onChange={(e) => onXpChange(parseInt(e.target.value) || 0)}
+              onChange={(e) => onXpChange(clampXp(parseInt(e.target.value) || 0, maxXp))}
               className="w-16 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-blue-400 font-bold text-sm text-center outline-none focus:border-blue-500"
             />
           </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-gray-400 text-xs">Max HP</span>
-            <input
-              type="number"
-              value={maxHp}
-              onChange={(e) => onMaxHpChange(parseInt(e.target.value) || 0)}
-              title="Personnaliser les PV max de ce pokémon (n'affecte que le vôtre)"
-              className="w-16 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-white text-sm text-center outline-none focus:border-blue-500"
-            />
-          </div>
+          {maxXp != null && <XpGauge current={xp} max={maxXp} milestones={milestones} />}
         </div>
-
-        <HpGauge current={hp} max={maxHp} />
       </div>
 
       {lightboxOpen && pokemon?.image_illustree && (

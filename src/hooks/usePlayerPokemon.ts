@@ -105,14 +105,6 @@ export function usePlayerPokemon(playerId: number | null) {
     }
   }, [])
 
-  const updateMaxHpOverride = useCallback(async (id: number, maxHpOverride: number | null) => {
-    setRoster((prev) => prev.map((r) => (r.id === id ? { ...r, max_hp_override: maxHpOverride } : r)))
-    const { error } = await supabase.from('player_pokemon').update({ max_hp_override: maxHpOverride }).eq('id', id)
-    if (error) {
-      console.error('Erreur lors de la mise à jour des PV max :', error)
-    }
-  }, [])
-
   const setMoves = useCallback(async (id: number, moves: string[]) => {
     setRoster((prev) => prev.map((r) => (r.id === id ? { ...r, moves } : r)))
     const { error } = await supabase.from('player_pokemon').update({ moves }).eq('id', id)
@@ -152,7 +144,6 @@ export function usePlayerPokemon(playerId: number | null) {
     toggleInTeam,
     addMove,
     removeMove,
-    updateMaxHpOverride,
     deleteOwnedPokemon,
     refetch: fetchAll,
   }

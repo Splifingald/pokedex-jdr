@@ -21,6 +21,17 @@
 -- ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS attaque_9 text;
 -- ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS attaque_10 text;
 -- CREATE POLICY "Public delete discovered" ON discovered_pokemon FOR DELETE TO anon USING (true);
+-- ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS xp_10 text;
+-- ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS xp_20 text;
+-- ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS xp_30 text;
+-- ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS xp_40 text;
+-- ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS xp_50 text;
+-- ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS xp_60 text;
+-- ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS xp_70 text;
+-- ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS xp_80 text;
+-- ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS xp_90 text;
+-- ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS xp_100 text;
+-- ALTER TABLE player_pokemon DROP COLUMN IF EXISTS max_hp_override;
 -- ============================================================
 
 -- Table principale des pokémon
@@ -58,7 +69,17 @@ CREATE TABLE IF NOT EXISTS pokemon (
   attaque_7             text,
   attaque_8             text,
   attaque_9             text,
-  attaque_10            text
+  attaque_10            text,
+  xp_10                 text,
+  xp_20                 text,
+  xp_30                 text,
+  xp_40                 text,
+  xp_50                 text,
+  xp_60                 text,
+  xp_70                 text,
+  xp_80                 text,
+  xp_90                 text,
+  xp_100                text
 );
 
 -- Table des attaques (référencées par nom depuis pokemon.attaque_1..10, pas de FK)
@@ -131,6 +152,7 @@ CREATE TABLE IF NOT EXISTS players (
   name        text NOT NULL,
   color       text NOT NULL DEFAULT '#3B82F6',
   image_url   text NOT NULL DEFAULT '',
+  is_npc      boolean NOT NULL DEFAULT false,
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 
@@ -144,12 +166,11 @@ CREATE TABLE IF NOT EXISTS player_pokemon (
   xp              integer NOT NULL DEFAULT 0,
   moves           text[] NOT NULL DEFAULT '{}',
   in_team         boolean NOT NULL DEFAULT false,
-  max_hp_override integer,          -- si renseigné, remplace pokemon.pv_base pour cette instance uniquement
   created_at      timestamptz NOT NULL DEFAULT now()
 );
 
 -- Mise à jour si la table existe déjà :
--- ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS max_hp_override integer;
+-- ALTER TABLE players ADD COLUMN IF NOT EXISTS is_npc boolean NOT NULL DEFAULT false;
 
 -- Paramètres admin (une seule ligne, id fixe = 1)
 CREATE TABLE IF NOT EXISTS admin_parameters (

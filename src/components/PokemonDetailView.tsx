@@ -6,17 +6,19 @@ import { TypeBadge } from './TypeBadge'
 import { AudioDescriptionPlayer } from './AudioDescriptionPlayer'
 import { ConfirmPopup } from './ConfirmPopup'
 import { useLocalHp } from '../hooks/useLocalHp'
+import { useLocalStatus } from '../hooks/useLocalStatus'
 import { getMaxHp } from '../lib/maxHp'
+import { getHpBreakdown, getDamageBreakdown } from '../lib/xpBonuses'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 
 interface Props {
   playerPokemon: PlayerPokemon
   pokemon: Pokemon | undefined
   teamFull: boolean
+  isNpc: boolean
   maxMoves: number
   onUpdateXp: (id: number, xp: number) => void
   onToggleInTeam: (id: number, inTeam: boolean) => void
-  onUpdateMaxHpOverride: (id: number, maxHp: number) => void
   onManageMoves: () => void
   onDelete: (id: number) => void
   onBack: () => void
@@ -28,10 +30,13 @@ const TRANSPORT_ICONS: Record<string, string> = {
   Sol: '🐾',
 }
 
-export function PokemonDetailView({ playerPokemon, pokemon, teamFull, maxMoves, onUpdateXp, onToggleInTeam, onUpdateMaxHpOverride, onManageMoves, onDelete, onBack }: Props) {
+export function PokemonDetailView({ playerPokemon, pokemon, teamFull, isNpc, maxMoves, onUpdateXp, onToggleInTeam, onManageMoves, onDelete, onBack }: Props) {
   const maxHp = getMaxHp(playerPokemon, pokemon)
   const [hp, setHp] = useLocalHp(playerPokemon.id, maxHp)
+  const [status, setStatus] = useLocalStatus(playerPokemon.id)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const hpBreakdown = getHpBreakdown(pokemon, playerPokemon.xp)
+  const dmgBreakdown = getDamageBreakdown(pokemon, playerPokemon.xp)
 
   const superEfficace = pokemon
     ? [pokemon.super_efficace_1, pokemon.super_efficace_2, pokemon.super_efficace_3, pokemon.super_efficace_4].filter(Boolean) as string[]
@@ -49,9 +54,10 @@ export function PokemonDetailView({ playerPokemon, pokemon, teamFull, maxMoves, 
         hp={hp}
         maxHp={maxHp}
         onHpChange={setHp}
-        onMaxHpChange={(value) => onUpdateMaxHpOverride(playerPokemon.id, value)}
         xp={playerPokemon.xp}
         onXpChange={(xp) => onUpdateXp(playerPokemon.id, xp)}
+        status={status}
+        onStatusChange={setStatus}
         onBack={onBack}
         onManageMoves={onManageMoves}
         movesCount={playerPokemon.moves.length}
@@ -68,8 +74,14 @@ export function PokemonDetailView({ playerPokemon, pokemon, teamFull, maxMoves, 
               <TypeBadge type={pokemon.type} />
             </div>
 
-            <StatRow icon="❤️" label="PV de base" value={pokemon.pv_base} />
-            <StatRow icon="⚔️" label="Dégâts de base" value={pokemon.degats_base} />
+            <StatRow
+              icon="❤️" label="PV de base"
+              value={hpBreakdown.bonus > 0 ? `${hpBreakdown.total} (${hpBreakdown.base} + ${hpBreakdown.bonus})` : hpBreakdown.total}
+            />
+            <StatRow
+              icon="⚔️" label="Dégâts de base"
+              value={dmgBreakdown.bonus > 0 ? `${dmgBreakdown.total} (${dmgBreakdown.base} + ${dmgBreakdown.bonus})` : dmgBreakdown.total}
+            />
             <StatRow icon="👟" label="Distance" value={`${pokemon.distance_deplacement} cases`} />
 
             {pokemon.transport && (
@@ -128,8 +140,8 @@ export function PokemonDetailView({ playerPokemon, pokemon, teamFull, maxMoves, 
           </>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4 mb-4">
-          {playerPokemon.in_team ? (
+        <div className={`grid grid-cols-1 ${isNpc ? '' : 'sm:grid-cols-2'} gap-3 mt-4 mb-4`}>
+          {isNpc ? null : playerPokemon.in_team ? (
             <button
               onClick={() => onToggleInTeam(playerPokemon.id, false)}
               className={`py-2.5 rounded text-sm font-bold ${BUTTON_STYLE.blue}`}

@@ -4,6 +4,7 @@ import { OwnedPokemonHeader } from './OwnedPokemonHeader'
 import { MoveSearchInput } from './MoveSearchInput'
 import { TypeBadge } from './TypeBadge'
 import { useLocalHp } from '../hooks/useLocalHp'
+import { useLocalStatus } from '../hooks/useLocalStatus'
 import { getMaxHp } from '../lib/maxHp'
 import { getPrecisionColor } from '../lib/precisionColor'
 
@@ -15,7 +16,6 @@ interface Props {
   onUpdateXp: (id: number, xp: number) => void
   onAddMove: (id: number, moveName: string) => void
   onRemoveMove: (id: number, moveName: string) => void
-  onUpdateMaxHpOverride: (id: number, maxHp: number) => void
   onGoToInfo: () => void
   onBack: () => void
 }
@@ -29,9 +29,10 @@ function MoveStatIcon({ icon, value, style }: { icon: string; value: React.React
   )
 }
 
-export function MovesTab({ playerPokemon, pokemon, maxMoves, attacksByName, onUpdateXp, onAddMove, onRemoveMove, onUpdateMaxHpOverride, onGoToInfo, onBack }: Props) {
+export function MovesTab({ playerPokemon, pokemon, maxMoves, attacksByName, onUpdateXp, onAddMove, onRemoveMove, onGoToInfo, onBack }: Props) {
   const maxHp = getMaxHp(playerPokemon, pokemon)
   const [hp, setHp] = useLocalHp(playerPokemon.id, maxHp)
+  const [status, setStatus] = useLocalStatus(playerPokemon.id)
 
   const searchOptions = useMemo(
     () => [...attacksByName.values()].filter((a) => !playerPokemon.moves.includes(a.nom)),
@@ -48,9 +49,10 @@ export function MovesTab({ playerPokemon, pokemon, maxMoves, attacksByName, onUp
         hp={hp}
         maxHp={maxHp}
         onHpChange={setHp}
-        onMaxHpChange={(value) => onUpdateMaxHpOverride(playerPokemon.id, value)}
         xp={playerPokemon.xp}
         onXpChange={(xp) => onUpdateXp(playerPokemon.id, xp)}
+        status={status}
+        onStatusChange={setStatus}
         onBack={onBack}
         onGoToInfo={onGoToInfo}
       />

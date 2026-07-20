@@ -129,7 +129,7 @@ export default function App() {
   const pokemonByName = useMemo(() => new Map(pokemon.map((p) => [p.nom, p])), [pokemon])
 
   const ownedNames = useMemo(() => new Set(roster.map((r) => r.pokemon_nom)), [roster])
-  const teamFull = roster.filter((r) => r.in_team).length >= parameters.max_team_size
+  const teamFull = player?.is_npc ? false : roster.filter((r) => r.in_team).length >= parameters.max_team_size
   const ownedCount = selected ? roster.filter((r) => r.pokemon_nom === selected.nom).length : 0
 
   const handleAddToRoster = async () => {
@@ -316,6 +316,7 @@ export default function App() {
         <LoginModal
           players={players}
           loading={playersLoading}
+          isAdmin={isAdmin}
           onSelect={handlePlayerLogin}
           onClose={() => setShowLoginModal(false)}
         />

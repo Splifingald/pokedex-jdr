@@ -1,8 +1,12 @@
 import type { PlayerPokemon, Pokemon } from '../types'
 import { TypeBadge } from './TypeBadge'
 import { HpGauge } from './HpGauge'
+import { XpMiniGauge } from './XpMiniGauge'
 import { useLocalHp } from '../hooks/useLocalHp'
+import { useLocalStatus } from '../hooks/useLocalStatus'
 import { getMaxHp } from '../lib/maxHp'
+import { getMilestones, getMaxXp } from '../lib/xpBonuses'
+import { getStatusInfo } from '../lib/status'
 
 interface Props {
   playerPokemon: PlayerPokemon
@@ -14,6 +18,9 @@ interface Props {
 export function PokemonOwnedCard({ playerPokemon, pokemon, showHp, onClick }: Props) {
   const maxHp = getMaxHp(playerPokemon, pokemon)
   const [hp] = useLocalHp(playerPokemon.id, maxHp)
+  const [status] = useLocalStatus(playerPokemon.id)
+  const milestones = getMilestones(pokemon)
+  const maxXp = getMaxXp(pokemon)
   const isKo = showHp && hp <= 0
 
   return (
@@ -40,6 +47,14 @@ export function PokemonOwnedCard({ playerPokemon, pokemon, showHp, onClick }: Pr
         </div>
 
         <div className="text-blue-400 text-xs font-bold">XP {playerPokemon.xp}</div>
+
+        {maxXp != null && <XpMiniGauge xp={playerPokemon.xp} milestones={milestones} />}
+
+        {status !== 'aucun' && (
+          <div className="text-xs font-bold" style={{ color: getStatusInfo(status).color }}>
+            {getStatusInfo(status).label}
+          </div>
+        )}
 
         {showHp && <HpGauge current={hp} max={maxHp} />}
       </div>

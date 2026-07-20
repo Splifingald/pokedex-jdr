@@ -49,6 +49,16 @@ function mapCsvRow(row: CsvRow) {
     attaque_8:            row['Attaque 8']?.trim() || null,
     attaque_9:            row['Attaque 9']?.trim() || null,
     attaque_10:           row['Attaque 10']?.trim() || null,
+    xp_10:                row['10 XP']?.trim() || null,
+    xp_20:                row['20 XP']?.trim() || null,
+    xp_30:                row['30 XP']?.trim() || null,
+    xp_40:                row['40 XP']?.trim() || null,
+    xp_50:                row['50 XP']?.trim() || null,
+    xp_60:                row['60 XP']?.trim() || null,
+    xp_70:                row['70 XP']?.trim() || null,
+    xp_80:                row['80 XP']?.trim() || null,
+    xp_90:                row['90 XP']?.trim() || null,
+    xp_100:               row['100 XP']?.trim() || null,
   }
 }
 

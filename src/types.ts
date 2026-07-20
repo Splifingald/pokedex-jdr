@@ -33,6 +33,16 @@ export interface Pokemon {
   attaque_8: string | null
   attaque_9: string | null
   attaque_10: string | null
+  xp_10: string | null
+  xp_20: string | null
+  xp_30: string | null
+  xp_40: string | null
+  xp_50: string | null
+  xp_60: string | null
+  xp_70: string | null
+  xp_80: string | null
+  xp_90: string | null
+  xp_100: string | null
 }
 
 export interface CsvRow {
@@ -69,6 +79,16 @@ export interface CsvRow {
   'Attaque 8': string
   'Attaque 9': string
   'Attaque 10': string
+  '10 XP': string
+  '20 XP': string
+  '30 XP': string
+  '40 XP': string
+  '50 XP': string
+  '60 XP': string
+  '70 XP': string
+  '80 XP': string
+  '90 XP': string
+  '100 XP': string
 }
 
 export const CSV_REQUIRED_HEADERS: (keyof CsvRow)[] = [
@@ -110,6 +130,7 @@ export interface Player {
   name: string
   color: string
   image_url: string
+  is_npc: boolean
   created_at: string
 }
 
@@ -132,7 +153,6 @@ export interface PlayerPokemon {
   xp: number
   moves: string[]
   in_team: boolean
-  max_hp_override: number | null
   created_at: string
 }
 

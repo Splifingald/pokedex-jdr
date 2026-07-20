@@ -61,7 +61,7 @@ export function usePlayers() {
     }
   }, [])
 
-  const createPlayer = useCallback(async (data: { name: string; color: string; image_url: string }) => {
+  const createPlayer = useCallback(async (data: { name: string; color: string; image_url: string; is_npc: boolean }) => {
     const { data: created, error } = await supabase.from('players').insert(data).select().single()
     if (error) {
       console.error('Erreur lors de la création du joueur :', error)
@@ -71,7 +71,7 @@ export function usePlayers() {
     return created as Player
   }, [])
 
-  const updatePlayer = useCallback(async (id: number, data: { name: string; color: string; image_url: string }) => {
+  const updatePlayer = useCallback(async (id: number, data: { name: string; color: string; image_url: string; is_npc: boolean }) => {
     setPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, ...data } : p)))
     const { error } = await supabase.from('players').update(data).eq('id', id)
     if (error) {

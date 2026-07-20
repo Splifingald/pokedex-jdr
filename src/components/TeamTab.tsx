@@ -21,7 +21,7 @@ interface Props {
 }
 
 export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByName, attacksByName }: Props) {
-  const { roster, loading, addOwnedPokemon, updateXp, toggleInTeam, addMove, removeMove, updateMaxHpOverride, deleteOwnedPokemon } = usePlayerPokemon(player.id)
+  const { roster, loading, addOwnedPokemon, updateXp, toggleInTeam, addMove, removeMove, deleteOwnedPokemon } = usePlayerPokemon(player.id)
   const { parameters } = useAdminParameters()
   const { showToast } = useToast()
 
@@ -34,8 +34,8 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
   )
 
   const team = roster.filter((r) => r.in_team)
-  const box = roster.filter((r) => !r.in_team)
-  const teamFull = team.length >= parameters.max_team_size
+  const box = player.is_npc ? [] : roster.filter((r) => !r.in_team)
+  const teamFull = player.is_npc ? false : team.length >= parameters.max_team_size
 
   const selected = roster.find((r) => r.id === selectedId) ?? null
 
@@ -78,7 +78,6 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
           onUpdateXp={updateXp}
           onAddMove={addMove}
           onRemoveMove={removeMove}
-          onUpdateMaxHpOverride={updateMaxHpOverride}
           onGoToInfo={() => setManagingMoves(false)}
           onBack={() => { setManagingMoves(false); setSelectedId(null) }}
         />
@@ -90,10 +89,10 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
         playerPokemon={selected}
         pokemon={pokemon}
         teamFull={teamFull}
+        isNpc={player.is_npc}
         maxMoves={parameters.max_moves}
         onUpdateXp={updateXp}
         onToggleInTeam={handleToggleInTeam}
-        onUpdateMaxHpOverride={updateMaxHpOverride}
         onManageMoves={() => setManagingMoves(true)}
         onDelete={handleDeleteOwned}
         onBack={() => setSelectedId(null)}
@@ -104,7 +103,7 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
   return (
     <div className="flex-1 overflow-y-auto p-4">
       <div className="mb-6">
-        <label className="text-gray-400 text-sm mb-2 block">Ajouter un pokémon à mon roster</label>
+        <label className="text-gray-400 text-sm mb-2 block">Ajouter un pokémon à mon équipe</label>
         <PokemonSearchInput
           options={addableOptions}
           onSelect={handleAddOwned}
@@ -113,7 +112,7 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
 
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-white text-lg">
-          Équipe ({team.length} / {parameters.max_team_size})
+          Équipe ({player.is_npc ? team.length : `${team.length} / ${parameters.max_team_size}`})
         </h2>
         {team.length > 0 && (
           <button
@@ -142,31 +141,35 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-white text-lg">PC ({box.length})</h2>
-        {box.length > 0 && (
-          <button
-            onClick={() => handleRestoreAll(box)}
-            className={`text-xs px-2.5 py-1 rounded font-bold ${BUTTON_STYLE.green}`}
-          >
-            ❤️ Tout soigner
-          </button>
-        )}
-      </div>
-      {box.length === 0 ? (
-        <p className="text-gray-500 text-sm">Aucun pokémon dans le PC.</p>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {box.map((pp) => (
-            <PokemonOwnedCard
-              key={pp.id}
-              playerPokemon={pp}
-              pokemon={pokemonByName.get(pp.pokemon_nom)}
-              showHp={false}
-              onClick={() => setSelectedId(pp.id)}
-            />
-          ))}
-        </div>
+      {!player.is_npc && (
+        <>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-white text-lg">💻 PC ({box.length})</h2>
+            {box.length > 0 && (
+              <button
+                onClick={() => handleRestoreAll(box)}
+                className={`text-xs px-2.5 py-1 rounded font-bold ${BUTTON_STYLE.green}`}
+              >
+                ❤️ Tout soigner
+              </button>
+            )}
+          </div>
+          {box.length === 0 ? (
+            <p className="text-gray-500 text-sm">Aucun pokémon dans le PC.</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {box.map((pp) => (
+                <PokemonOwnedCard
+                  key={pp.id}
+                  playerPokemon={pp}
+                  pokemon={pokemonByName.get(pp.pokemon_nom)}
+                  showHp={false}
+                  onClick={() => setSelectedId(pp.id)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   )

@@ -4,7 +4,7 @@ import { PLAYER_COLORS } from '../types'
 import type { Player } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 
-const emptyForm = { name: '', color: PLAYER_COLORS[0], image_url: '' }
+const emptyForm = { name: '', color: PLAYER_COLORS[0], image_url: '', is_npc: false }
 
 export function AdminPlayersPanel() {
   const { players, loading, createPlayer, updatePlayer, deletePlayer } = usePlayers()
@@ -13,8 +13,11 @@ export function AdminPlayersPanel() {
   const [saving, setSaving] = useState(false)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(null)
 
+  const regularPlayers = players.filter((p) => !p.is_npc)
+  const npcs = players.filter((p) => p.is_npc)
+
   useEffect(() => {
-    setForm(editing ? { name: editing.name, color: editing.color, image_url: editing.image_url } : emptyForm)
+    setForm(editing ? { name: editing.name, color: editing.color, image_url: editing.image_url, is_npc: editing.is_npc } : emptyForm)
   }, [editing])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -49,51 +52,107 @@ export function AdminPlayersPanel() {
       ) : players.length === 0 ? (
         <p className="text-gray-500 text-sm mb-4">Aucun joueur pour l'instant.</p>
       ) : (
-        <div className="flex flex-col gap-2 mb-5">
-          {players.map((p) => (
-            <div key={p.id} className="flex items-center gap-2 bg-gray-800 border border-gray-700 rounded px-2 py-1.5">
-              <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 border-2" style={{ borderColor: p.color }}>
-                {p.image_url ? (
-                  <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full" style={{ backgroundColor: p.color }} />
-                )}
-              </div>
-              <span className="text-white text-sm flex-1 truncate">{p.name}</span>
-              {confirmingDeleteId === p.id ? (
-                <>
-                  <span className="text-red-400 text-xs">Supprimer {p.name} et son roster ?</span>
-                  <button
-                    onClick={() => handleDelete(p)}
-                    className={`text-xs rounded px-2 py-1 font-bold ${BUTTON_STYLE.red}`}
-                  >
-                    Confirmer
-                  </button>
-                  <button
-                    onClick={() => setConfirmingDeleteId(null)}
-                    className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
-                  >
-                    Annuler
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    onClick={() => setEditing(p)}
-                    className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
-                  >
-                    Éditer
-                  </button>
-                  <button
-                    onClick={() => setConfirmingDeleteId(p.id)}
-                    className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
-                  >
-                    Suppr.
-                  </button>
-                </>
-              )}
+        <div className="mb-5">
+          {regularPlayers.length > 0 && (
+            <div className="flex flex-col gap-2 mb-3">
+              {regularPlayers.map((p) => (
+                <div key={p.id} className="flex items-center gap-2 bg-gray-800 border border-gray-700 rounded px-2 py-1.5">
+                  <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 border-2" style={{ borderColor: p.color }}>
+                    {p.image_url ? (
+                      <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full" style={{ backgroundColor: p.color }} />
+                    )}
+                  </div>
+                  <span className="text-white text-sm flex-1 truncate">{p.name}</span>
+                  {confirmingDeleteId === p.id ? (
+                    <>
+                      <span className="text-red-400 text-xs">Supprimer {p.name} et son roster ?</span>
+                      <button
+                        onClick={() => handleDelete(p)}
+                        className={`text-xs rounded px-2 py-1 font-bold ${BUTTON_STYLE.red}`}
+                      >
+                        Confirmer
+                      </button>
+                      <button
+                        onClick={() => setConfirmingDeleteId(null)}
+                        className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
+                      >
+                        Annuler
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => setEditing(p)}
+                        className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
+                      >
+                        Éditer
+                      </button>
+                      <button
+                        onClick={() => setConfirmingDeleteId(p.id)}
+                        className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
+                      >
+                        Suppr.
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))}
             </div>
-          ))}
+          )}
+
+          {npcs.length > 0 && (
+            <>
+              <p className="text-purple-400 text-xs mb-2 mt-1">PNJ</p>
+              <div className="flex flex-col gap-2">
+                {npcs.map((p) => (
+                  <div key={p.id} className="flex items-center gap-2 bg-gray-800 border border-purple-800 rounded px-2 py-1.5">
+                    <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 border-2" style={{ borderColor: p.color }}>
+                      {p.image_url ? (
+                        <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full" style={{ backgroundColor: p.color }} />
+                      )}
+                    </div>
+                    <span className="text-white text-sm flex-1 truncate">{p.name}</span>
+                    {confirmingDeleteId === p.id ? (
+                      <>
+                        <span className="text-red-400 text-xs">Supprimer {p.name} et son roster ?</span>
+                        <button
+                          onClick={() => handleDelete(p)}
+                          className={`text-xs rounded px-2 py-1 font-bold ${BUTTON_STYLE.red}`}
+                        >
+                          Confirmer
+                        </button>
+                        <button
+                          onClick={() => setConfirmingDeleteId(null)}
+                          className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
+                        >
+                          Annuler
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => setEditing(p)}
+                          className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
+                        >
+                          Éditer
+                        </button>
+                        <button
+                          onClick={() => setConfirmingDeleteId(p.id)}
+                          className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
+                        >
+                          Suppr.
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -136,6 +195,16 @@ export function AdminPlayersPanel() {
             />
           ))}
         </div>
+
+        <label className="flex items-center gap-2 mb-4 text-sm text-gray-300">
+          <input
+            type="checkbox"
+            checked={form.is_npc}
+            onChange={(e) => setForm((f) => ({ ...f, is_npc: e.target.checked }))}
+            className="w-4 h-4"
+          />
+          Est un PNJ
+        </label>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {editing && (
