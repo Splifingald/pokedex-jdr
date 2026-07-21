@@ -34,7 +34,7 @@ function mapCsvRow(row: CsvRow) {
     localisation_1:       row['Localisation 1']?.trim() || null,
     localisation_2:       row['Localisation 2']?.trim() || null,
     localisation_3:       row['Localisation 3']?.trim() || null,
-    cache:                row['Caché']?.trim().toLowerCase() === 'oui',
+    cache:                ['oui', 'true', 'vrai', '1', 'yes'].includes(row['Caché']?.trim().toLowerCase() ?? ''),
     code:                 row['Code']?.trim() || null,
     audio_url:            row['Audio']?.trim() || null,
     transport:            row['Transport']?.trim() || null,
@@ -211,7 +211,7 @@ export function AdminPanel({ onImportSuccess }: Props) {
 
         <div className="mb-5">
           <p className="text-gray-400 text-sm mb-3">
-            Importer un CSV Pokémon ou un CSV Attaques (détecté automatiquement).<br />
+            Importer un CSV Pokémon ou un CSV Capacités (détecté automatiquement).<br />
             <span className="text-yellow-600 text-xs">⚠ Remplace toute la liste existante correspondante.</span>
           </p>
           <button

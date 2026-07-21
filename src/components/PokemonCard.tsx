@@ -140,7 +140,7 @@ export function PokemonCard({ pokemon, isAdmin, isDiscovered, attacksByName, onB
           {canShowAttaques && attaques.length > 0 && (
             <StatRow
               icon="🥊"
-              label="Attaques"
+              label="Capacités"
               value={
                 <div className="flex flex-wrap gap-1">
                   {attaques.map((nom) => {

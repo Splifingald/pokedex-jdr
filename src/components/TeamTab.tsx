@@ -91,6 +91,7 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
         teamFull={teamFull}
         isNpc={player.is_npc}
         maxMoves={parameters.max_moves}
+        attacksByName={attacksByName}
         onUpdateXp={updateXp}
         onToggleInTeam={handleToggleInTeam}
         onManageMoves={() => setManagingMoves(true)}

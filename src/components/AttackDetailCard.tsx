@@ -1,0 +1,36 @@
+import type { Attack } from '../types'
+import { getPrecisionColor } from '../lib/precisionColor'
+
+function MoveStatIcon({ icon, value, style }: { icon: string; value: React.ReactNode; style?: React.CSSProperties }) {
+  return (
+    <div className="flex items-center gap-1.5 text-xs">
+      <span className="shrink-0">{icon}</span>
+      <span className="text-gray-200" style={style}>{value ?? '—'}</span>
+    </div>
+  )
+}
+
+export function AttackDetailCard({ attack }: { attack: Attack }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      {attack.effet && (
+        <p className="text-gray-300 text-xs italic border-b border-gray-700 pb-1.5">{attack.effet}</p>
+      )}
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+        <div className="flex flex-col gap-1">
+          <MoveStatIcon icon="↔️" value={attack.distance} />
+          <MoveStatIcon icon="👊" value={attack.degats_base} />
+          <MoveStatIcon icon="🎲" value={attack.degats_de} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <MoveStatIcon icon="👤" value={attack.cible} />
+          <MoveStatIcon
+            icon="🎯"
+            value={attack.precision}
+            style={{ color: getPrecisionColor(attack.precision), fontWeight: 'bold' }}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}

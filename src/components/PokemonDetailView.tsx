@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { PlayerPokemon, Pokemon } from '../types'
+import type { PlayerPokemon, Pokemon, Attack } from '../types'
 import { PokemonDetailHeader } from './PokemonDetailHeader'
 import { StatRow } from './StatRow'
 import { TypeBadge } from './TypeBadge'
@@ -17,6 +17,7 @@ interface Props {
   teamFull: boolean
   isNpc: boolean
   maxMoves: number
+  attacksByName: Map<string, Attack>
   onUpdateXp: (id: number, xp: number) => void
   onToggleInTeam: (id: number, inTeam: boolean) => void
   onManageMoves: () => void
@@ -30,7 +31,7 @@ const TRANSPORT_ICONS: Record<string, string> = {
   Sol: '🐾',
 }
 
-export function PokemonDetailView({ playerPokemon, pokemon, teamFull, isNpc, maxMoves, onUpdateXp, onToggleInTeam, onManageMoves, onDelete, onBack }: Props) {
+export function PokemonDetailView({ playerPokemon, pokemon, teamFull, isNpc, maxMoves, attacksByName, onUpdateXp, onToggleInTeam, onManageMoves, onDelete, onBack }: Props) {
   const maxHp = getMaxHp(playerPokemon, pokemon)
   const [hp, setHp] = useLocalHp(playerPokemon.id, maxHp)
   const [status, setStatus] = useLocalStatus(playerPokemon.id)
@@ -44,6 +45,13 @@ export function PokemonDetailView({ playerPokemon, pokemon, teamFull, isNpc, max
 
   const localisations = pokemon
     ? [pokemon.localisation_1, pokemon.localisation_2, pokemon.localisation_3].filter(Boolean) as string[]
+    : []
+
+  const attaques = pokemon
+    ? [
+        pokemon.attaque_1, pokemon.attaque_2, pokemon.attaque_3, pokemon.attaque_4, pokemon.attaque_5,
+        pokemon.attaque_6, pokemon.attaque_7, pokemon.attaque_8, pokemon.attaque_9, pokemon.attaque_10,
+      ].filter(Boolean) as string[]
     : []
 
   return (
@@ -107,6 +115,30 @@ export function PokemonDetailView({ playerPokemon, pokemon, teamFull, isNpc, max
                 )
               }
             />
+
+            {attaques.length > 0 && (
+              <StatRow
+                icon="🥊"
+                label="Capacités"
+                value={
+                  <div className="flex flex-wrap gap-1">
+                    {attaques.map((nom) => {
+                      const atk = attacksByName.get(nom)
+                      return atk ? (
+                        <TypeBadge key={nom} type={atk.type} label={atk.nom} small />
+                      ) : (
+                        <span
+                          key={nom}
+                          className="text-xs text-gray-500 border border-gray-700 rounded px-1.5 py-0.5"
+                        >
+                          {nom}
+                        </span>
+                      )
+                    })}
+                  </div>
+                }
+              />
+            )}
 
             {(pokemon.nom_talent || pokemon.description_talent) && (
               <div className="flex items-start gap-3 py-2 border-b border-gray-700">

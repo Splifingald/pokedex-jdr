@@ -2,9 +2,10 @@ import { useState } from 'react'
 import { AdminPanel } from './AdminPanel'
 import { AdminPlayersPanel } from './AdminPlayersPanel'
 import { AdminParametersPanel } from './AdminParametersPanel'
+import { AdminAttacksPanel } from './AdminAttacksPanel'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 
-type Section = 'import' | 'joueurs' | 'parametres'
+type Section = 'import' | 'joueurs' | 'parametres' | 'attaques'
 
 interface Props {
   onImportSuccess: () => void
@@ -17,11 +18,12 @@ export function AdminTab({ onImportSuccess }: Props) {
     { id: 'import', label: 'Import CSV' },
     { id: 'joueurs', label: 'Joueurs' },
     { id: 'parametres', label: 'Paramètres' },
+    { id: 'attaques', label: 'Capacités' },
   ]
 
   return (
     <div className="flex-1 overflow-y-auto p-4">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4 max-w-sm">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-4 max-w-md">
         {sections.map((s) => (
           <button
             key={s.id}
@@ -36,6 +38,7 @@ export function AdminTab({ onImportSuccess }: Props) {
       {section === 'import' && <AdminPanel onImportSuccess={onImportSuccess} />}
       {section === 'joueurs' && <AdminPlayersPanel />}
       {section === 'parametres' && <AdminParametersPanel />}
+      {section === 'attaques' && <AdminAttacksPanel />}
     </div>
   )
 }
