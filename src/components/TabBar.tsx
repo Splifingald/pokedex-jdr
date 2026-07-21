@@ -1,4 +1,4 @@
-export type TabId = 'pokedex' | 'equipe' | 'admin'
+export type TabId = 'pokedex' | 'equipe' | 'carte' | 'admin'
 
 interface Tab {
   id: TabId
@@ -10,13 +10,15 @@ interface Props {
   activeTab: TabId
   onTabChange: (tab: TabId) => void
   showTeamTab: boolean
+  showCarteTab: boolean
   showAdminTab: boolean
 }
 
-export function TabBar({ activeTab, onTabChange, showTeamTab, showAdminTab }: Props) {
+export function TabBar({ activeTab, onTabChange, showTeamTab, showCarteTab, showAdminTab }: Props) {
   const tabs: Tab[] = [
     { id: 'pokedex', label: 'Pokédex', visible: true },
     { id: 'equipe', label: 'Mon Équipe', visible: showTeamTab },
+    { id: 'carte', label: 'Carte', visible: showCarteTab },
     { id: 'admin', label: 'Admin', visible: showAdminTab },
   ]
 

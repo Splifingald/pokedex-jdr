@@ -32,6 +32,8 @@
 -- ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS xp_90 text;
 -- ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS xp_100 text;
 -- ALTER TABLE player_pokemon DROP COLUMN IF EXISTS max_hp_override;
+-- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS carte_image_url text NOT NULL DEFAULT '';
+-- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS carte_couleurs_image_url text NOT NULL DEFAULT '';
 -- ============================================================
 
 -- Table principale des pokémon
@@ -96,6 +98,20 @@ CREATE TABLE IF NOT EXISTS attacks (
   effet          text
 );
 
+-- Lieux de la carte (référencés par couleur depuis l'image de couleurs, pas de FK)
+CREATE TABLE IF NOT EXISTS carte_locations (
+  id                 bigserial PRIMARY KEY,
+  couleur            text NOT NULL UNIQUE,
+  titre              text NOT NULL DEFAULT '',
+  description        text,
+  admin_description  text,
+  type               text,
+  image_url          text
+);
+
+-- Mise à jour si la table existe déjà :
+-- ALTER TABLE carte_locations ADD COLUMN IF NOT EXISTS admin_description text;
+
 -- Table des découvertes (état global partagé)
 -- Référence par nom (pas de FK) pour survivre aux réimports CSV
 CREATE TABLE IF NOT EXISTS discovered_pokemon (
@@ -112,6 +128,7 @@ CREATE INDEX IF NOT EXISTS idx_pokemon_numero ON pokemon(numero);
 
 ALTER TABLE pokemon ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attacks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE carte_locations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE discovered_pokemon ENABLE ROW LEVEL SECURITY;
 
 -- pokemon : lecture publique, écriture bloquée pour anon (via Edge Function seulement)
@@ -123,6 +140,12 @@ CREATE POLICY "Public read pokemon"
 -- attacks : lecture publique, écriture bloquée pour anon (via Netlify Function seulement)
 CREATE POLICY "Public read attacks"
   ON attacks FOR SELECT
+  TO anon
+  USING (true);
+
+-- carte_locations : lecture publique, écriture bloquée pour anon (via Netlify Function seulement)
+CREATE POLICY "Public read carte_locations"
+  ON carte_locations FOR SELECT
   TO anon
   USING (true);
 
@@ -174,9 +197,11 @@ CREATE TABLE IF NOT EXISTS player_pokemon (
 
 -- Paramètres admin (une seule ligne, id fixe = 1)
 CREATE TABLE IF NOT EXISTS admin_parameters (
-  id             bigint PRIMARY KEY DEFAULT 1,
-  max_moves      integer NOT NULL DEFAULT 4,
-  max_team_size  integer NOT NULL DEFAULT 3,
+  id                        bigint PRIMARY KEY DEFAULT 1,
+  max_moves                 integer NOT NULL DEFAULT 4,
+  max_team_size             integer NOT NULL DEFAULT 3,
+  carte_image_url           text NOT NULL DEFAULT '',
+  carte_couleurs_image_url  text NOT NULL DEFAULT '',
   CONSTRAINT single_row CHECK (id = 1)
 );
 INSERT INTO admin_parameters (id, max_moves, max_team_size)

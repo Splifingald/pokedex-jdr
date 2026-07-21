@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Player } from '../types'
-import { ConfirmPopup } from './ConfirmPopup'
+import { PlayerSettingsPopup } from './PlayerSettingsPopup'
 
 interface Props {
   player: Player
@@ -8,12 +8,12 @@ interface Props {
 }
 
 export function PlayerBadge({ player, onLogout }: Props) {
-  const [showConfirm, setShowConfirm] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
 
   return (
     <>
       <button
-        onClick={() => setShowConfirm(true)}
+        onClick={() => setShowSettings(true)}
         className="flex items-center gap-2 bg-black/20 rounded-full pl-1 pr-2 py-1 hover:bg-black/30 transition-colors"
       >
         <div
@@ -26,16 +26,14 @@ export function PlayerBadge({ player, onLogout }: Props) {
             <div className="w-full h-full" style={{ backgroundColor: player.color }} />
           )}
         </div>
-        <span className="text-white text-sm font-bold max-w-[8rem] truncate">{player.name}</span>
+        <span className="hidden min-[400px]:inline text-white text-sm font-bold max-w-[8rem] truncate">{player.name}</span>
       </button>
 
-      {showConfirm && (
-        <ConfirmPopup
-          title="Se déconnecter ?"
-          message={`Vous êtes connecté en tant que ${player.name}.`}
-          confirmLabel="Déconnecter"
-          onConfirm={() => { onLogout(); setShowConfirm(false) }}
-          onCancel={() => setShowConfirm(false)}
+      {showSettings && (
+        <PlayerSettingsPopup
+          player={player}
+          onLogout={() => { onLogout(); setShowSettings(false) }}
+          onClose={() => setShowSettings(false)}
         />
       )}
     </>

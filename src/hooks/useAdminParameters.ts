@@ -2,7 +2,13 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import type { AdminParameters } from '../types'
 
-const DEFAULTS: AdminParameters = { id: 1, max_moves: 4, max_team_size: 3 }
+const DEFAULTS: AdminParameters = {
+  id: 1,
+  max_moves: 4,
+  max_team_size: 3,
+  carte_image_url: '',
+  carte_couleurs_image_url: '',
+}
 
 export function useAdminParameters() {
   const channelId = useRef(Math.random().toString(36).slice(2))
@@ -45,7 +51,7 @@ export function useAdminParameters() {
     }
   }, [])
 
-  const updateParameters = useCallback(async (data: { max_moves: number; max_team_size: number }) => {
+  const updateParameters = useCallback(async (data: Partial<Omit<AdminParameters, 'id'>>) => {
     setParameters((prev) => ({ ...prev, ...data }))
     const { error } = await supabase.from('admin_parameters').update(data).eq('id', 1)
     if (error) {

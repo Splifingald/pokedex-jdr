@@ -18,7 +18,10 @@ import { TabBar, type TabId } from './components/TabBar'
 import { LoginModal } from './components/LoginModal'
 import { PlayerBadge } from './components/PlayerBadge'
 import { TeamTab } from './components/TeamTab'
+import { CarteTab } from './components/CarteTab'
 import { ConfirmPopup } from './components/ConfirmPopup'
+import { FullscreenPromptModal } from './components/FullscreenPromptModal'
+import { useFullscreen } from './hooks/useFullscreen'
 import { BUTTON_STYLE } from './lib/buttonStyles'
 import { normalizeSearch } from './lib/normalizeSearch'
 
@@ -29,8 +32,10 @@ export default function App() {
   const { roster, addOwnedPokemon } = usePlayerPokemon(player?.id ?? null)
   const { parameters } = useAdminParameters()
   const { showToast } = useToast()
+  const { enter: enterFullscreen } = useFullscreen()
 
   const [selected, setSelected] = useState<Pokemon | null>(null)
+  const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(true)
   const [pendingDiscovery, setPendingDiscovery] = useState<Pokemon | null>(null)
   const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem('adminMode') === 'true')
   const [showPasswordModal, setShowPasswordModal] = useState(false)
@@ -152,9 +157,11 @@ export default function App() {
 
         <div className="flex items-center gap-2 mr-4 shrink-0">
           <div className="w-8 h-8 rounded-full bg-blue-400 border-2 border-white shadow-[0_0_8px_#60a5fa]" />
-          <div className="w-3 h-3 rounded-full bg-red-300 border border-white" />
-          <div className="w-3 h-3 rounded-full bg-yellow-300 border border-white" />
-          <div className="w-3 h-3 rounded-full bg-green-400 border border-white" />
+          <div className="hidden sm:flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-red-300 border border-white" />
+            <div className="w-3 h-3 rounded-full bg-yellow-300 border border-white" />
+            <div className="w-3 h-3 rounded-full bg-green-400 border border-white" />
+          </div>
         </div>
 
         <h1 className="text-white text-2xl tracking-widest">POKÉDEX</h1>
@@ -186,6 +193,7 @@ export default function App() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
         showTeamTab={!!player}
+        showCarteTab={true}
         showAdminTab={isAdmin}
       />
 
@@ -281,6 +289,8 @@ export default function App() {
         />
       )}
 
+      {activeTab === 'carte' && <CarteTab parameters={parameters} isAdmin={isAdmin} />}
+
       {activeTab === 'admin' && isAdmin && (
         <AdminTab
           onImportSuccess={() => { refetch(); refetchAttacks() }}
@@ -337,6 +347,13 @@ export default function App() {
           discovered={discovered}
           onDiscover={handleManualDiscover}
           onClose={() => setShowScannerModal(false)}
+        />
+      )}
+
+      {showFullscreenPrompt && (
+        <FullscreenPromptModal
+          onEnable={() => { enterFullscreen(); setShowFullscreenPrompt(false) }}
+          onClose={() => setShowFullscreenPrompt(false)}
         />
       )}
     </div>

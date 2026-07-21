@@ -124,6 +124,28 @@ export interface AttackCsvRow {
 
 export const ATTACK_CSV_REQUIRED_HEADERS: (keyof AttackCsvRow)[] = ['Attaque', 'Type']
 
+// ── Carte ─────────────────────────────────────────────────────
+export interface CarteLocation {
+  id: number
+  couleur: string
+  titre: string
+  description: string | null
+  admin_description: string | null
+  type: string | null
+  image_url: string | null
+}
+
+export interface CarteCsvRow {
+  'Couleur': string
+  'Titre': string
+  'Description': string
+  'Admin Description': string
+  'Type': string
+  'Image': string
+}
+
+export const CARTE_CSV_REQUIRED_HEADERS: (keyof CarteCsvRow)[] = ['Couleur', 'Titre']
+
 // ── Joueurs ───────────────────────────────────────────────────
 export interface Player {
   id: number
@@ -160,4 +182,6 @@ export interface AdminParameters {
   id: number
   max_moves: number
   max_team_size: number
+  carte_image_url: string
+  carte_couleurs_image_url: string
 }
