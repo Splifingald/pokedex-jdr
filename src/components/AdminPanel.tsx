@@ -79,7 +79,7 @@ function mapAttackCsvRow(row: AttackCsvRow) {
 
 function mapCarteCsvRow(row: CarteCsvRow) {
   return {
-    couleur:           row['Couleur']?.trim().toLowerCase() ?? '',
+    couleur:           row['Couleur']?.trim().toLowerCase().replace(/^#/, '') ?? '',
     titre:             row['Titre']?.trim() ?? '',
     description:       row['Description']?.trim() || null,
     admin_description: row['Admin Description']?.trim() || null,

@@ -9,9 +9,12 @@ interface Props {
   isAdmin: boolean
 }
 
-const MIN_SCALE = 1
 const MAX_SCALE = 5
 const TAP_THRESHOLD = 6
+// Tolérance de correspondance couleur : les images de couleurs subissent souvent
+// une légère recompression/ré-encodage (CDN, export PNG) qui décale chaque canal
+// de quelques valeurs — une correspondance exacte échoue presque toujours en pratique.
+const COLOR_MATCH_MAX_DIST_SQ = 1200
 
 interface Transform {
   scale: number
@@ -19,14 +22,25 @@ interface Transform {
   y: number
 }
 
+// Centre l'image sur cet axe si elle tient déjà entière dans le conteneur,
+// sinon l'empêche de se décoller des bords
 function clampAxis(pos: number, scaledSize: number, containerSize: number): number {
-  const lo = Math.min(0, containerSize - scaledSize)
-  const hi = Math.max(0, containerSize - scaledSize)
-  return Math.max(lo, Math.min(hi, pos))
+  if (scaledSize <= containerSize) return (containerSize - scaledSize) / 2
+  return Math.max(containerSize - scaledSize, Math.min(0, pos))
+}
+
+function hexToRgb(hex: string): [number, number, number] | null {
+  const clean = hex.trim().toLowerCase().replace(/^#/, '')
+  if (clean.length !== 6) return null
+  const r = parseInt(clean.slice(0, 2), 16)
+  const g = parseInt(clean.slice(2, 4), 16)
+  const b = parseInt(clean.slice(4, 6), 16)
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return null
+  return [r, g, b]
 }
 
 export function CarteTab({ parameters, isAdmin }: Props) {
-  const { byColor } = useCarteLocations()
+  const { locations } = useCarteLocations()
 
   const containerRef = useRef<HTMLDivElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
@@ -63,11 +77,21 @@ export function CarteTab({ parameters, isAdmin }: Props) {
     img.src = parameters.carte_couleurs_image_url
   }, [parameters.carte_couleurs_image_url])
 
+  // Le plus petit zoom qui garde l'image entière visible (largeur ET hauteur) dans le conteneur
+  const getMinScale = useCallback((): number => {
+    const imgEl = imgRef.current
+    const container = containerRef.current
+    if (!imgEl || !container || !imgEl.offsetWidth || !imgEl.offsetHeight) return 1
+    const fitWidthScale = container.clientWidth / imgEl.offsetWidth
+    const fitHeightScale = container.clientHeight / imgEl.offsetHeight
+    return Math.min(1, fitWidthScale, fitHeightScale)
+  }, [])
+
   const clampTransform = useCallback((t: Transform): Transform => {
     const imgEl = imgRef.current
     const container = containerRef.current
     if (!imgEl || !container) return t
-    const scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, t.scale))
+    const scale = Math.max(getMinScale(), Math.min(MAX_SCALE, t.scale))
     const scaledW = imgEl.offsetWidth * scale
     const scaledH = imgEl.offsetHeight * scale
     return {
@@ -75,17 +99,17 @@ export function CarteTab({ parameters, isAdmin }: Props) {
       x: clampAxis(t.x, scaledW, container.clientWidth),
       y: clampAxis(t.y, scaledH, container.clientHeight),
     }
-  }, [])
+  }, [getMinScale])
 
   const zoomTo = useCallback((newScaleRaw: number, px: number, py: number) => {
     setTransform((prev) => {
-      const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScaleRaw))
+      const newScale = Math.max(getMinScale(), Math.min(MAX_SCALE, newScaleRaw))
       const ratio = newScale / prev.scale
       const newX = px - (px - prev.x) * ratio
       const newY = py - (py - prev.y) * ratio
       return clampTransform({ scale: newScale, x: newX, y: newY })
     })
-  }, [clampTransform])
+  }, [clampTransform, getMinScale])
 
   const handleTap = useCallback((clientX: number, clientY: number) => {
     const imgEl = imgRef.current
@@ -104,12 +128,22 @@ export function CarteTab({ parameters, isAdmin }: Props) {
     if (!ctx) return
     try {
       const [r, g, b] = ctx.getImageData(px, py, 1, 1).data
-      const hex = `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`
-      setSelected(byColor.get(hex.toLowerCase()) ?? null)
+      let best: CarteLocation | null = null
+      let bestDist = Infinity
+      for (const loc of locations) {
+        const rgb = hexToRgb(loc.couleur)
+        if (!rgb) continue
+        const dist = (r - rgb[0]) ** 2 + (g - rgb[1]) ** 2 + (b - rgb[2]) ** 2
+        if (dist < bestDist) {
+          bestDist = dist
+          best = loc
+        }
+      }
+      setSelected(bestDist <= COLOR_MATCH_MAX_DIST_SQ ? best : null)
     } catch {
       setColorMapError(true)
     }
-  }, [byColor])
+  }, [locations])
 
   const handlePointerDown = (e: React.PointerEvent) => {
     (e.target as Element).setPointerCapture(e.pointerId)

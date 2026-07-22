@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import type { CarteLocation } from '../types'
 
@@ -25,11 +25,5 @@ export function useCarteLocations() {
     fetchAll()
   }, [fetchAll])
 
-  const byColor = useMemo(() => {
-    const map = new Map<string, CarteLocation>()
-    for (const l of locations) map.set(l.couleur.toLowerCase(), l)
-    return map
-  }, [locations])
-
-  return { locations, byColor, loading, error, refetch: fetchAll }
+  return { locations, loading, error, refetch: fetchAll }
 }
