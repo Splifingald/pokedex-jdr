@@ -82,14 +82,14 @@ export function PokemonCard({ pokemon, isAdmin, isDiscovered, attacksByName, onB
           <TypeBadge type={pokemon.type} />
         </div>
 
-        {/* Image illustrée — cliquable pour agrandir */}
+        {/* Image miniature — cliquable pour agrandir */}
         <div className="bg-gray-800 flex items-center justify-center p-4 shrink-0 relative group" style={{ minHeight: '200px' }}>
-          {pokemon.image_illustree ? (
+          {pokemon.image_miniature ? (
             <>
               <img
-                src={pokemon.image_illustree}
+                src={pokemon.image_miniature}
                 alt={pokemon.nom}
-                className="max-h-64 w-full object-contain cursor-zoom-in transition-opacity group-hover:opacity-80"
+                className="pixelated max-h-64 w-full object-contain cursor-zoom-in transition-opacity group-hover:opacity-80"
                 onClick={() => setLightboxOpen(true)}
               />
               <span className="absolute bottom-2 right-2 text-gray-500 text-xs opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
@@ -224,9 +224,9 @@ export function PokemonCard({ pokemon, isAdmin, isDiscovered, attacksByName, onB
         </div>
       </div>
 
-      {lightboxOpen && pokemon.image_illustree && (
+      {lightboxOpen && pokemon.image_miniature && (
         <ImageLightbox
-          src={pokemon.image_illustree}
+          src={pokemon.image_miniature}
           alt={pokemon.nom}
           onClose={() => setLightboxOpen(false)}
         />

@@ -185,3 +185,36 @@ export interface AdminParameters {
   carte_image_url: string
   carte_couleurs_image_url: string
 }
+
+// ── Objets (Sac) ──────────────────────────────────────────────
+export interface Item {
+  id: number
+  nom: string
+  type: string
+  rarete: string | null
+  cout: number
+  description: string | null
+  image_url: string | null
+}
+
+export interface ItemCsvRow {
+  'Nom': string
+  'Type': string
+  'Rareté': string
+  'Coût': string
+  'Description': string
+  'Image': string
+}
+
+export const ITEM_CSV_REQUIRED_HEADERS: (keyof ItemCsvRow)[] = ['Nom', 'Type', 'Coût']
+
+export interface PlayerItem {
+  id: number
+  player_id: number
+  item_nom: string
+  quantity: number
+  created_at: string
+}
+
+export const POKEDOLLAR_ITEM_NAME = 'Pokédollar'
+export const sellValue = (cout: number) => Math.floor(cout / 2)

@@ -269,3 +269,61 @@ CREATE POLICY "Public update admin_parameters"
   TO anon
   USING (true)
   WITH CHECK (true);
+
+-- ============================================================
+-- Objets et inventaire (Sac)
+-- ============================================================
+
+-- Catalogue d'objets (importé par CSV via Netlify Function)
+CREATE TABLE IF NOT EXISTS items (
+  id          bigserial PRIMARY KEY,
+  nom         text NOT NULL UNIQUE,
+  type        text NOT NULL DEFAULT '',
+  rarete      text,
+  cout        integer NOT NULL DEFAULT 0,
+  description text,
+  image_url   text
+);
+
+-- Inventaire par joueur (référence par nom, pas de FK — survit aux réimports)
+-- La ligne "Pokedollar" représente l'argent du joueur (pas affichée comme un objet normal)
+CREATE TABLE IF NOT EXISTS player_items (
+  id          bigserial PRIMARY KEY,
+  player_id   bigint NOT NULL,
+  item_nom    text NOT NULL,
+  quantity    integer NOT NULL DEFAULT 0,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (player_id, item_nom)
+);
+CREATE INDEX IF NOT EXISTS idx_player_items_player_id ON player_items(player_id);
+
+ALTER TABLE items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE player_items ENABLE ROW LEVEL SECURITY;
+
+-- items : lecture publique, écriture bloquée pour anon (via Netlify Function seulement)
+CREATE POLICY "Public read items"
+  ON items FOR SELECT
+  TO anon
+  USING (true);
+
+-- player_items : lecture + écriture publiques
+CREATE POLICY "Public read player_items"
+  ON player_items FOR SELECT
+  TO anon
+  USING (true);
+
+CREATE POLICY "Public insert player_items"
+  ON player_items FOR INSERT
+  TO anon
+  WITH CHECK (true);
+
+CREATE POLICY "Public update player_items"
+  ON player_items FOR UPDATE
+  TO anon
+  USING (true)
+  WITH CHECK (true);
+
+CREATE POLICY "Public delete player_items"
+  ON player_items FOR DELETE
+  TO anon
+  USING (true);

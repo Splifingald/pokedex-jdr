@@ -3,9 +3,12 @@ import { usePokemon } from './hooks/usePokemon'
 import { useAttacks } from './hooks/useAttacks'
 import { usePlayerContext } from './context/PlayerContext'
 import { usePlayerPokemon } from './hooks/usePlayerPokemon'
+import { useItems } from './hooks/useItems'
+import { usePlayerItems } from './hooks/usePlayerItems'
 import { useAdminParameters } from './hooks/useAdminParameters'
 import { useToast } from './context/ToastContext'
 import type { Pokemon } from './types'
+import { POKEDOLLAR_ITEM_NAME } from './types'
 import { PokemonList } from './components/PokemonList'
 import { PokemonCard } from './components/PokemonCard'
 import { DiscoveryModal } from './components/DiscoveryModal'
@@ -18,7 +21,9 @@ import { TabBar, type TabId } from './components/TabBar'
 import { LoginModal } from './components/LoginModal'
 import { PlayerBadge } from './components/PlayerBadge'
 import { TeamTab } from './components/TeamTab'
+import { SacTab } from './components/SacTab'
 import { CarteTab } from './components/CarteTab'
+import { PokedollarChip } from './components/PokedollarChip'
 import { ConfirmPopup } from './components/ConfirmPopup'
 import { FullscreenPromptModal } from './components/FullscreenPromptModal'
 import { useFullscreen } from './hooks/useFullscreen'
@@ -30,6 +35,8 @@ export default function App() {
   const { byName: attacksByName, refetch: refetchAttacks } = useAttacks()
   const { player, players, playersLoading, login, logout } = usePlayerContext()
   const { roster, addOwnedPokemon } = usePlayerPokemon(player?.id ?? null)
+  const { items, byName: itemsByName, refetch: refetchItems } = useItems()
+  const playerItems = usePlayerItems(player?.id ?? null)
   const { parameters } = useAdminParameters()
   const { showToast } = useToast()
   const { enter: enterFullscreen } = useFullscreen()
@@ -48,6 +55,7 @@ export default function App() {
   // Si l'onglet actif devient invisible (déconnexion, sortie du mode admin), on revient au Pokédex
   useEffect(() => {
     if (activeTab === 'equipe' && !player) setActiveTab('pokedex')
+    if (activeTab === 'sac' && !player) setActiveTab('pokedex')
     if (activeTab === 'admin' && !isAdmin) setActiveTab('pokedex')
   }, [activeTab, player, isAdmin])
 
@@ -164,9 +172,13 @@ export default function App() {
           </div>
         </div>
 
-        <h1 className="text-white text-2xl tracking-widest">POKÉDEX</h1>
-
         <div className="ml-auto flex items-center gap-2">
+          {player && (
+            <PokedollarChip
+              amount={playerItems.pokedollars}
+              imageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
+            />
+          )}
           {player ? (
             <PlayerBadge player={player} onLogout={logout} />
           ) : (
@@ -193,6 +205,7 @@ export default function App() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
         showTeamTab={!!player}
+        showSacTab={!!player}
         showCarteTab={true}
         showAdminTab={isAdmin}
       />
@@ -289,11 +302,15 @@ export default function App() {
         />
       )}
 
+      {activeTab === 'sac' && player && (
+        <SacTab player={player} items={items} itemsByName={itemsByName} playerItems={playerItems} />
+      )}
+
       {activeTab === 'carte' && <CarteTab parameters={parameters} isAdmin={isAdmin} />}
 
       {activeTab === 'admin' && isAdmin && (
         <AdminTab
-          onImportSuccess={() => { refetch(); refetchAttacks() }}
+          onImportSuccess={() => { refetch(); refetchAttacks(); refetchItems() }}
         />
       )}
 

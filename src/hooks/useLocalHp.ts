@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 
 const key = (playerPokemonId: number) => `hp_${playerPokemonId}`
 const EVENT = 'local-hp-changed'
@@ -28,6 +28,8 @@ export function useLocalHp(playerPokemonId: number, maxHp: number) {
     return clamp(parseInt(stored, 10) || 0, maxHp)
   })
 
+  const prevMaxHpRef = useRef(maxHp)
+
   // Synchro entre plusieurs instances montées du même pokémon (ex: carte + fiche, ou "tout soigner")
   useEffect(() => {
     const handler = (e: Event) => {
@@ -38,11 +40,16 @@ export function useLocalHp(playerPokemonId: number, maxHp: number) {
     return () => window.removeEventListener(EVENT, handler)
   }, [playerPokemonId])
 
-  // Reclamp si le max HP diminue (ex: PV max personnalisés réduits)
+  // Si le PV max augmente (palier d'XP franchi), on ajoute le même delta aux PV actuels.
+  // S'il diminue (ex: PV max personnalisés réduits), on reclamp les PV actuels au nouveau maximum.
   useEffect(() => {
+    const prevMaxHp = prevMaxHpRef.current
+    prevMaxHpRef.current = maxHp
+    if (maxHp === prevMaxHp) return
+
     setHpState((prev) => {
-      if (prev <= maxHp) return prev
-      const clamped = clamp(prev, maxHp)
+      const next = maxHp > prevMaxHp ? prev + (maxHp - prevMaxHp) : prev
+      const clamped = clamp(next, maxHp)
       localStorage.setItem(key(playerPokemonId), String(clamped))
       return clamped
     })

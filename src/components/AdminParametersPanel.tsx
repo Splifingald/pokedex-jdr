@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAdminParameters } from '../hooks/useAdminParameters'
+import { NumberInput } from './NumberInput'
 
 export function AdminParametersPanel() {
   const { parameters, loading, updateParameters } = useAdminParameters()
@@ -15,8 +16,16 @@ export function AdminParametersPanel() {
     setCarteCouleursImageUrl(parameters.carte_couleurs_image_url)
   }, [parameters])
 
-  const save = () => {
-    updateParameters({ max_moves: maxMoves, max_team_size: maxTeamSize })
+  const commitMaxMoves = (v: number) => {
+    const clamped = Math.max(1, v)
+    setMaxMoves(clamped)
+    updateParameters({ max_moves: clamped, max_team_size: maxTeamSize })
+  }
+
+  const commitMaxTeamSize = (v: number) => {
+    const clamped = Math.max(1, v)
+    setMaxTeamSize(clamped)
+    updateParameters({ max_moves: maxMoves, max_team_size: clamped })
   }
 
   const saveCarte = () => {
@@ -36,24 +45,22 @@ export function AdminParametersPanel() {
         <div className="flex flex-col gap-4">
           <div>
             <label className="text-gray-400 text-sm block mb-1">Nombre max de capacités par pokémon</label>
-            <input
-              type="number"
+            <NumberInput
               min={1}
+              fallback={1}
               value={maxMoves}
-              onChange={(e) => setMaxMoves(parseInt(e.target.value) || 1)}
-              onBlur={save}
+              onCommit={commitMaxMoves}
               className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm outline-none focus:border-red-400"
             />
           </div>
 
           <div>
             <label className="text-gray-400 text-sm block mb-1">Taille max de l'équipe</label>
-            <input
-              type="number"
+            <NumberInput
               min={1}
+              fallback={1}
               value={maxTeamSize}
-              onChange={(e) => setMaxTeamSize(parseInt(e.target.value) || 1)}
-              onBlur={save}
+              onCommit={commitMaxTeamSize}
               className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm outline-none focus:border-red-400"
             />
           </div>

@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Jersey+25&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; background: #0b0c18; }
+    * { box-sizing: border-box; }
+    a { color: #7fd6ff; }
+    a:hover { color: #a9e6ff; }
+    @keyframes idleBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+    @keyframes jumpPop { 0% { transform: translateY(0); } 35% { transform: translateY(-24px); } 55% { transform: translateY(-24px); } 100% { transform: translateY(0); } }
+    @keyframes celebratePop { 0% { transform: scale(0.6); opacity: 0; } 60% { transform: scale(1.08); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+  </style>
+</helmet>
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 20%, #1b1d38, #0b0c18);padding:40px;font-family:'Jersey 25',system-ui,sans-serif;">
+<x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" width="{{ 390 }}" height="{{ 844 }}" hint-size="390,844">
+
+  <div style="position:relative;height:100%;background:#14162a;color:#f2ecd6;overflow:hidden;font-family:'Jersey 25',system-ui,sans-serif;">
+    <div style="padding-top:54px;display:flex;flex-direction:column;height:100%;overflow:hidden;">
+
+      <div style="flex-shrink:0;display:flex;align-items:center;gap:10px;padding:10px 14px;background:{{ shell }};border-bottom:4px solid #201c14;box-shadow:0 4px 0 rgba(0,0,0,0.35);">
+        <div style="width:20px;height:20px;border-radius:50%;background:#7fd6ff;border:3px solid #f2ecd6;box-shadow:0 0 6px #7fd6ff;flex-shrink:0;"></div>
+        <div style="font-size:19px;letter-spacing:1px;color:#f2ecd6;text-shadow:2px 2px 0 rgba(0,0,0,0.35);flex:1;min-width:0;">{{ headerTitle }}</div>
+        <div style="display:flex;align-items:center;gap:4px;background:rgba(0,0,0,0.28);border-radius:20px;padding:5px 10px;font-size:14px;color:#ffd75e;flex-shrink:0;">
+          <span>💰</span><span>{{ pokedollars }}</span>
+        </div>
+        <button onClick="{{ toggleSettings }}" style="width:30px;height:30px;border-radius:8px;border:2px solid #201c14;background:rgba(0,0,0,0.22);color:#f2ecd6;font-size:15px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;">⚙️</button>
+      </div>
+
+      <div style="flex:1;overflow-y:auto;position:relative;" ref="{{ contentRef }}">
+
+        <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+          <div style="position:relative;width:100%;height:100%;min-height:100%;overflow:hidden;background-image:repeating-linear-gradient(90deg, rgba(255,255,255,0.07) 0 8px, transparent 8px 16px), linear-gradient(to bottom, #cdeed0 0%, #cdeed0 30%, #6fbd5a 30%, #4f9a41 100%);">
+            <div style="position:absolute;top:0;left:0;right:0;padding:12px 14px;background:linear-gradient(to bottom, rgba(20,50,15,0.35), transparent);z-index:5;">
+              <span style="font-size:18px;color:#f2ecd6;letter-spacing:1px;text-shadow:2px 2px 0 rgba(0,0,0,0.4);">MON ÉQUIPE</span>
+            </div>
+
+            <button onClick="{{ handleScan }}" style="{{ cameraBtnStyle }}">{{ cameraIcon }}</button>
+
+            <sc-for list="{{ dioramaTeam }}" as="p" hint-placeholder-count="3">
+              <button onClick="{{ p.onOpen }}" style="{{ p.dioramaWrapStyle }}">
+                <div style="{{ p.dioramaSpriteStyle }}">
+                  <span style="font-family:ui-monospace,monospace;font-size:9px;color:#201c14;background:rgba(242,236,214,0.85);padding:1px 3px;border-radius:2px;">{{ p.nomUpper }}</span>
+                </div>
+                <span style="font-size:12px;color:#14320f;background:rgba(242,236,214,0.9);border-radius:4px;padding:1px 6px;margin-top:4px;white-space:nowrap;">{{ p.hp }}/{{ p.maxHp }} PV</span>
+              </button>
+            </sc-for>
+
+            <sc-if value="{{ noTeam }}" hint-placeholder-val="{{ false }}">
+              <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">
+                <p style="color:#14320f;font-size:14px;background:rgba(242,236,214,0.9);padding:10px 16px;border-radius:8px;border:2px solid #201c14;">Aucun Pokémon dans l'équipe.</p>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ isScanning }}" hint-placeholder-val="{{ false }}">
+              <div style="position:absolute;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:30;">
+                <div style="font-size:15px;color:#f2ecd6;background:rgba(0,0,0,0.55);padding:10px 16px;border-radius:8px;">📷 Analyse en cours…</div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ isCelebrating }}" hint-placeholder-val="{{ false }}">
+              <div style="position:absolute;inset:0;background:rgba(255,215,94,0.25);display:flex;align-items:center;justify-content:center;z-index:30;">
+                <div style="background:#f2ecd6;border:3px solid #201c14;border-radius:10px;padding:16px 22px;text-align:center;box-shadow:5px 5px 0 rgba(0,0,0,0.35);animation:celebratePop 0.4s ease-out 1;">
+                  <div style="font-size:24px;">✨</div>
+                  <div style="font-size:14px;color:#201c14;">Nouveau Pokémon découvert !</div>
+                  <div style="font-size:20px;color:#201c14;">{{ scanResultName }}</div>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isPokemon }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:16px;">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">
+              <sc-for list="{{ pokemonSortOptions }}" as="opt" hint-placeholder-count="3">
+                <button onClick="{{ opt.onClick }}" style="{{ opt.chipStyle }}">{{ opt.label }}</button>
+              </sc-for>
+            </div>
+
+            <sc-if value="{{ isGridLayout }}" hint-placeholder-val="{{ true }}">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                <sc-for list="{{ allRoster }}" as="p" hint-placeholder-count="5">
+                  <button onClick="{{ p.onOpen }}" style="text-align:left;position:relative;background:#f2ecd6;border:3px solid #201c14;border-radius:8px;padding:8px;box-shadow:3px 3px 0 rgba(0,0,0,0.35);cursor:pointer;display:flex;flex-direction:column;gap:6px;font-family:inherit;">
+                    <sc-if value="{{ p.isPc }}" hint-placeholder-val="{{ false }}">
+                      <span style="position:absolute;top:6px;right:6px;font-size:14px;background:rgba(242,236,214,0.95);border:2px solid #201c14;border-radius:5px;padding:1px 4px;">💻</span>
+                    </sc-if>
+                    <div style="width:100%;aspect-ratio:1;border-radius:6px;border:2px solid #201c14;background:{{ p.spriteBg }};display:flex;align-items:center;justify-content:center;">
+                      <span style="font-family:ui-monospace,monospace;font-size:8px;color:#201c14;background:rgba(242,236,214,0.85);padding:1px 3px;border-radius:2px;">{{ p.nomUpper }}</span>
+                    </div>
+                    <div style="font-size:14px;color:#201c14;">{{ p.nom }}</div>
+                    <div style="height:8px;border-radius:4px;background:#cfc7a8;overflow:hidden;border:1px solid #201c14;">
+                      <div style="height:100%;width:{{ p.hpPct }}%;background:{{ p.hpColor }};"></div>
+                    </div>
+                  </button>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ isListLayout }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <sc-for list="{{ allRoster }}" as="p" hint-placeholder-count="5">
+                  <button onClick="{{ p.onOpen }}" style="text-align:left;display:flex;align-items:center;gap:10px;background:#f2ecd6;border:2px solid #201c14;border-radius:8px;padding:8px;cursor:pointer;font-family:inherit;">
+                    <div style="width:44px;height:44px;flex-shrink:0;border-radius:6px;border:2px solid #201c14;background:{{ p.spriteBg }};"></div>
+                    <div style="flex:1;min-width:0;">
+                      <div style="font-size:14px;color:#201c14;">{{ p.nom }}</div>
+                      <div style="height:6px;border-radius:3px;background:#cfc7a8;overflow:hidden;border:1px solid #201c14;margin-top:3px;">
+                        <div style="height:100%;width:{{ p.hpPct }}%;background:{{ p.hpColor }};"></div>
+                      </div>
+                    </div>
+                    <sc-if value="{{ p.isPc }}" hint-placeholder-val="{{ false }}"><span style="font-size:15px;flex-shrink:0;">💻</span></sc-if>
+                    <span style="font-size:10px;padding:2px 6px;border-radius:4px;color:#fff;font-weight:bold;background:{{ p.typeColor }};flex-shrink:0;">{{ p.type }}</span>
+                  </button>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ noRoster }}" hint-placeholder-val="{{ false }}">
+              <p style="color:#7a7c9a;font-size:14px;">Aucun Pokémon possédé.</p>
+            </sc-if>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isPokedex }}" hint-placeholder-val="{{ false }}">
+          <div style="position:relative;height:100%;display:flex;flex-direction:column;">
+            <div style="flex-shrink:0;padding:16px 16px 8px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                <span style="font-size:19px;color:#f2ecd6;letter-spacing:1px;">POKÉDEX</span>
+                <span style="font-size:12px;color:#9a9cba;">{{ discoveredCount }} / {{ totalCount }} découverts</span>
+              </div>
+              <input value="{{ pokedexSearch }}" onChange="{{ onPokedexSearchChange }}" placeholder="Rechercher un Pokémon…" style="width:100%;padding:9px 12px;border-radius:8px;border:2px solid #201c14;background:#f2ecd6;color:#201c14;font-family:inherit;font-size:14px;margin-bottom:10px;"/>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <sc-for list="{{ pokedexSortOptions }}" as="opt" hint-placeholder-count="3">
+                  <button onClick="{{ opt.onClick }}" style="{{ opt.chipStyle }}">{{ opt.label }}</button>
+                </sc-for>
+              </div>
+            </div>
+            <div style="flex:1;overflow-y:auto;padding:8px 16px 90px;">
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+                <sc-for list="{{ pokedex }}" as="e" hint-placeholder-count="9">
+                  <button onClick="{{ e.onOpen }}" style="{{ e.cardStyle }}" ref="{{ e.setRef }}">
+                    <div style="{{ e.spriteStyle }}">
+                      <span style="{{ e.captionStyle }}">{{ e.captionText }}</span>
+                    </div>
+                    <div style="font-size:10px;color:#9a9cba;">#{{ e.numero }}</div>
+                  </button>
+                </sc-for>
+              </div>
+            </div>
+            <button onClick="{{ handleScan }}" style="position:absolute;left:16px;right:16px;bottom:16px;padding:12px;border-radius:8px;border:2px solid #201c14;background:{{ shell }};color:#fff;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:3px 3px 0 rgba(0,0,0,0.35);font-family:inherit;">📷 Ajouter un Pokémon</button>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isSac }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:16px;">
+            <div style="display:flex;align-items:center;gap:10px;background:#f2ecd6;border:3px solid #201c14;border-radius:8px;padding:10px;margin-bottom:14px;box-shadow:3px 3px 0 rgba(0,0,0,0.35);">
+              <span style="font-size:22px;">💰</span>
+              <span style="flex:1;font-size:16px;color:#201c14;">Pokédollars</span>
+              <button onClick="{{ decDollars }}" style="width:28px;height:28px;border-radius:6px;border:2px solid #201c14;background:#e0d8bd;font-weight:bold;cursor:pointer;font-family:inherit;">−</button>
+              <span style="min-width:44px;text-align:center;font-size:16px;color:#201c14;">{{ pokedollars }}</span>
+              <button onClick="{{ incDollars }}" style="width:28px;height:28px;border-radius:6px;border:2px solid #201c14;background:#e0d8bd;font-weight:bold;cursor:pointer;font-family:inherit;">+</button>
+            </div>
+
+            <div style="position:relative;margin-bottom:14px;">
+              <input value="{{ bagSearch }}" onChange="{{ onBagSearchChange }}" placeholder="Rechercher un objet…" style="width:100%;padding:10px 12px;border-radius:8px;border:2px solid #201c14;background:#f2ecd6;color:#201c14;font-family:inherit;font-size:14px;"/>
+              <sc-if value="{{ hasBagSearchResults }}" hint-placeholder-val="{{ false }}">
+                <div style="position:absolute;top:100%;left:0;right:0;background:#f2ecd6;border:2px solid #201c14;border-radius:8px;margin-top:4px;max-height:220px;overflow-y:auto;z-index:10;box-shadow:3px 3px 0 rgba(0,0,0,0.3);">
+                  <sc-for list="{{ bagSearchResults }}" as="r" hint-placeholder-count="3">
+                    <button onClick="{{ r.onSelect }}" style="display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:8px 10px;border:none;border-bottom:1px solid #cfc7a8;background:transparent;cursor:pointer;font-family:inherit;">
+                      <div style="width:26px;height:26px;flex-shrink:0;border-radius:5px;border:2px solid #201c14;background:{{ r.spriteBg }};"></div>
+                      <span style="flex:1;font-size:13px;color:#201c14;">{{ r.nom }}</span>
+                      <span style="font-size:11px;color:#8a8362;">{{ r.qtyLabel }}</span>
+                    </button>
+                  </sc-for>
+                </div>
+              </sc-if>
+            </div>
+
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">
+              <sc-for list="{{ categories }}" as="c" hint-placeholder-count="6">
+                <button onClick="{{ c.onClick }}" style="{{ c.chipStyle }}">{{ c.label }}</button>
+              </sc-for>
+            </div>
+
+            <sc-if value="{{ hasBagItems }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <sc-for list="{{ bagFiltered }}" as="i" hint-placeholder-count="4">
+                  <div style="display:flex;align-items:center;gap:10px;background:#f2ecd6;border:2px solid #201c14;border-radius:8px;padding:8px 10px;">
+                    <div style="width:34px;height:34px;flex-shrink:0;border-radius:6px;border:2px solid #201c14;background:{{ i.spriteBg }};"></div>
+                    <span style="flex:1;font-size:14px;color:#201c14;">{{ i.nom }}</span>
+                    <button onClick="{{ i.onDec }}" style="width:24px;height:24px;border-radius:5px;border:2px solid #201c14;background:#e0d8bd;font-weight:bold;cursor:pointer;font-size:13px;font-family:inherit;">−</button>
+                    <span style="min-width:20px;text-align:center;font-size:14px;color:#201c14;">{{ i.qty }}</span>
+                    <button onClick="{{ i.onInc }}" style="width:24px;height:24px;border-radius:5px;border:2px solid #201c14;background:#e0d8bd;font-weight:bold;cursor:pointer;font-size:13px;font-family:inherit;">+</button>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ noBagItems }}" hint-placeholder-val="{{ false }}">
+              <p style="color:#7a7c9a;font-size:14px;text-align:center;margin-top:20px;">Aucun objet dans cette catégorie.</p>
+            </sc-if>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isCarte }}" hint-placeholder-val="{{ false }}">
+          <div style="position:relative;width:100%;min-height:100%;background:repeating-linear-gradient(45deg,#2c6b46,#2c6b46 10px,#255c3c 10px,#255c3c 20px);">
+            <div style="position:absolute;top:14px;left:14px;right:14px;text-align:center;font-family:ui-monospace,monospace;font-size:11px;color:#eae2c6;background:rgba(0,0,0,0.4);padding:6px;border-radius:4px;">CARTE DE LA RÉGION D'ÉKAÏ — image à venir</div>
+            <sc-for list="{{ mapPins }}" as="pin" hint-placeholder-count="5">
+              <button onClick="{{ pin.onClick }}" style="{{ pin.style }}">📍</button>
+            </sc-for>
+
+            <sc-if value="{{ hasSelectedPin }}" hint-placeholder-val="{{ false }}">
+              <div style="position:absolute;left:0;right:0;bottom:0;background:#f2ecd6;border-top:4px solid #201c14;border-radius:14px 14px 0 0;padding:14px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                  <span style="font-size:11px;color:#8a8362;">{{ selectedPin.type }}</span>
+                  <button onClick="{{ closePinInfo }}" style="width:26px;height:26px;border-radius:6px;border:2px solid #201c14;background:#e0d8bd;cursor:pointer;font-family:inherit;">✕</button>
+                </div>
+                <div style="font-size:17px;color:#201c14;margin-bottom:6px;">{{ selectedPin.nom }}</div>
+                <p style="font-size:13px;color:#4a4636;margin:0;">{{ selectedPin.desc }}</p>
+              </div>
+            </sc-if>
+          </div>
+        </sc-if>
+
+      </div>
+
+      <div style="flex-shrink:0;display:flex;background:#1c1e38;border-top:4px solid #201c14;">
+        <sc-for list="{{ tabs }}" as="tab" hint-placeholder-count="5">
+          <button onClick="{{ tab.onClick }}" style="{{ tab.btnStyle }}">
+            <span style="font-size:26px;">{{ tab.icon }}</span>
+          </button>
+        </sc-for>
+      </div>
+
+    </div>
+
+    <sc-if value="{{ showSettings }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:50;" onClick="{{ toggleSettings }}">
+        <div style="width:270px;max-height:80%;overflow-y:auto;background:#f2ecd6;border:3px solid #201c14;border-radius:10px;padding:18px;box-shadow:5px 5px 0 rgba(0,0,0,0.35);" onClick="{{ stopClick }}">
+          <div style="font-size:18px;color:#201c14;margin-bottom:12px;text-align:center;">PARAMÈTRES</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+            <div style="width:40px;height:40px;border-radius:50%;background:#4a7fd6;border:3px solid #201c14;flex-shrink:0;"></div>
+            <div style="font-size:15px;color:#201c14;">{{ connectLabel2 }}</div>
+          </div>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+            <span style="font-size:13px;color:#201c14;">Plein écran</span>
+            <button onClick="{{ toggleFullscreen }}" style="{{ fullscreenBtnStyle }}">{{ fullscreenLabel }}</button>
+          </div>
+
+          <button onClick="{{ connectToggle }}" style="width:100%;padding:8px;border-radius:8px;border:2px solid #201c14;background:{{ connectBtnBg }};color:#201c14;font-weight:bold;margin-bottom:14px;cursor:pointer;font-family:inherit;">{{ connectLabel }}</button>
+
+          <div style="border-top:2px solid #cfc7a8;padding-top:10px;margin-bottom:14px;">
+            <span style="font-size:11px;color:#8a8362;letter-spacing:1px;">MODE ADMIN</span>
+            <div style="display:flex;gap:6px;margin-top:6px;">
+              <input type="password" value="{{ adminPassword }}" onChange="{{ onAdminPasswordChange }}" placeholder="Mot de passe" style="flex:1;padding:7px 9px;border-radius:6px;border:2px solid #201c14;background:#fff;color:#201c14;font-family:inherit;font-size:13px;"/>
+              <button onClick="{{ submitAdminPassword }}" style="padding:7px 12px;border-radius:6px;border:2px solid #201c14;background:#e0d8bd;font-weight:bold;cursor:pointer;font-family:inherit;">OK</button>
+            </div>
+            <sc-if value="{{ hasAdminMsg }}" hint-placeholder-val="{{ false }}">
+              <p style="font-size:11px;color:#5c8f6a;margin-top:6px;">{{ adminMsg }}</p>
+            </sc-if>
+          </div>
+
+          <button onClick="{{ toggleSettings }}" style="width:100%;padding:9px;border-radius:8px;border:2px solid #201c14;background:#e0d8bd;color:#201c14;font-weight:bold;cursor:pointer;font-family:inherit;">Fermer</button>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ hasDetail }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:flex-end;z-index:40;" onClick="{{ closeDetail }}">
+        <div style="width:100%;background:#f2ecd6;border-top:4px solid #201c14;border-radius:16px 16px 0 0;padding:18px;max-height:85%;overflow-y:auto;box-shadow:0 -6px 0 rgba(0,0,0,0.3);" onClick="{{ stopClick }}">
+          <div style="display:flex;justify-content:center;margin-bottom:10px;"><div style="width:40px;height:5px;border-radius:3px;background:#cfc7a8;"></div></div>
+          <div style="display:flex;gap:14px;align-items:center;margin-bottom:12px;">
+            <div style="width:76px;height:76px;flex-shrink:0;border-radius:8px;border:3px solid #201c14;background:{{ detail.spriteBg }};display:flex;align-items:center;justify-content:center;">
+              <span style="font-family:ui-monospace,monospace;font-size:9px;color:#201c14;background:rgba(242,236,214,0.85);padding:2px 4px;border-radius:2px;">{{ detail.nomUpper }}</span>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:12px;color:#8a8362;">#{{ detail.numero }}</div>
+              <div style="font-size:22px;color:#201c14;">{{ detail.nom }}</div>
+              <span style="display:inline-block;margin-top:2px;font-size:10px;padding:2px 7px;border-radius:4px;color:#fff;font-weight:bold;background:{{ detail.typeColor }};">{{ detail.type }}</span>
+            </div>
+            <button onClick="{{ closeDetail }}" style="width:30px;height:30px;border-radius:6px;border:2px solid #201c14;background:#e0d8bd;color:#201c14;font-size:14px;cursor:pointer;flex-shrink:0;font-family:inherit;">✕</button>
+          </div>
+
+          <sc-if value="{{ detail.isRosterDetail }}" hint-placeholder-val="{{ true }}">
+            <div style="margin-bottom:10px;">
+              <div style="display:flex;justify-content:space-between;font-size:12px;color:#5c5540;margin-bottom:3px;"><span>PV</span><span>{{ detail.hp }}/{{ detail.maxHp }}</span></div>
+              <div style="height:10px;border-radius:5px;background:#cfc7a8;overflow:hidden;border:1px solid #201c14;"><div style="height:100%;width:{{ detail.hpPct }}%;background:{{ detail.hpColor }};"></div></div>
+            </div>
+            <div style="margin-bottom:14px;">
+              <div style="display:flex;justify-content:space-between;font-size:12px;color:#5c5540;margin-bottom:3px;"><span>XP</span><span>{{ detail.xp }}/{{ detail.maxXp }}</span></div>
+              <div style="height:8px;border-radius:4px;background:#cfc7a8;overflow:hidden;border:1px solid #201c14;"><div style="height:100%;width:{{ detail.xpPct }}%;background:#4a7fd6;"></div></div>
+            </div>
+          </sc-if>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+            <div style="background:#e4dcc2;border:2px solid #201c14;border-radius:6px;padding:8px;text-align:center;">
+              <div style="font-size:10px;color:#8a8362;">PV DE BASE</div>
+              <div style="font-size:16px;color:#201c14;">{{ detail.pv_base }}</div>
+            </div>
+            <div style="background:#e4dcc2;border:2px solid #201c14;border-radius:6px;padding:8px;text-align:center;">
+              <div style="font-size:10px;color:#8a8362;">DÉGÂTS BASE</div>
+              <div style="font-size:16px;color:#201c14;">{{ detail.deg_base }}</div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #cfc7a8;margin-bottom:6px;">
+            <span style="font-size:12px;color:#8a8362;">↔️ Distance</span>
+            <span style="font-size:13px;color:#201c14;">{{ detail.distance }} cases</span>
+          </div>
+
+          <div style="padding:6px 0;border-bottom:1px solid #cfc7a8;margin-bottom:6px;">
+            <span style="font-size:12px;color:#8a8362;display:block;margin-bottom:4px;">✨ Super efficace</span>
+            <sc-if value="{{ detail.hasSuperEff }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-wrap:wrap;gap:5px;">
+                <sc-for list="{{ detail.superEffList }}" as="t" hint-placeholder-count="2">
+                  <span style="font-size:10px;padding:2px 7px;border-radius:4px;color:#fff;font-weight:bold;background:{{ t.color }};">{{ t.type }}</span>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ detail.noSuperEff }}" hint-placeholder-val="{{ true }}"><span style="font-size:13px;color:#8a8362;">—</span></sc-if>
+          </div>
+
+          <div style="padding:6px 0;border-bottom:1px solid #cfc7a8;margin-bottom:10px;">
+            <span style="font-size:12px;color:#8a8362;display:block;margin-bottom:4px;">📍 Localisation</span>
+            <sc-for list="{{ detail.localisationList }}" as="loc" hint-placeholder-count="1">
+              <div style="font-size:13px;color:#201c14;">{{ loc }}</div>
+            </sc-for>
+          </div>
+
+          <sc-if value="{{ detail.abilitiesModeFull }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:14px;color:#201c14;">🥊 Capacités</span>
+              <button onClick="{{ detail.onToggleAbilities }}" style="font-size:11px;padding:4px 8px;border-radius:6px;border:2px solid #201c14;background:#e0d8bd;color:#201c14;cursor:pointer;font-family:inherit;">{{ detail.abilityToggleLabel }}</button>
+            </div>
+            <sc-if value="{{ detail.abilitiesOpen }}" hint-placeholder-val="{{ true }}">
+              <sc-for list="{{ detail.fullAbilities }}" as="ab" hint-placeholder-count="2">
+                <div style="background:#e4dcc2;border:2px solid #201c14;border-radius:8px;padding:8px;margin-bottom:8px;">
+                  <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                    <span style="font-size:10px;padding:2px 6px;border-radius:4px;color:#fff;font-weight:bold;background:{{ ab.typeColor }};">{{ ab.type }}</span>
+                    <span style="font-size:14px;color:#201c14;">{{ ab.nom }}</span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;gap:10px;">
+                    <div style="display:flex;flex-direction:column;gap:3px;">
+                      <span style="font-size:11px;color:#4a4636;">↔️ {{ ab.distance }}</span>
+                      <span style="font-size:11px;color:#4a4636;">🔶 {{ ab.degats_base }}</span>
+                      <span style="font-size:11px;color:#4a4636;">🎲 {{ ab.degats_de }}</span>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-end;">
+                      <span style="font-size:11px;color:#4a4636;">👤 {{ ab.cible }}</span>
+                      <span style="font-size:11px;color:#4a4636;">🎯 {{ ab.precision }}</span>
+                    </div>
+                  </div>
+                  <sc-if value="{{ ab.hasEffet }}" hint-placeholder-val="{{ false }}">
+                    <p style="font-size:11px;color:#5c5540;margin:6px 0 0;">{{ ab.effet }}</p>
+                  </sc-if>
+                </div>
+              </sc-for>
+            </sc-if>
+          </sc-if>
+
+          <sc-if value="{{ detail.abilitiesModeNames }}" hint-placeholder-val="{{ false }}">
+            <span style="font-size:14px;color:#201c14;display:block;margin-bottom:6px;">🥊 Capacités apprenables</span>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">
+              <sc-for list="{{ detail.nameAbilities }}" as="ab" hint-placeholder-count="2">
+                <span style="font-size:11px;padding:3px 8px;border-radius:5px;color:#fff;font-weight:bold;background:{{ ab.color }};">{{ ab.nom }}</span>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <div style="margin-top:8px;">
+            <sc-if value="{{ detail.isRosterDetail }}" hint-placeholder-val="{{ true }}">
+              <button onClick="{{ detail.onToggleTeam }}" style="{{ detail.toggleBtnStyle }}">{{ detail.toggleBtnLabel }}</button>
+            </sc-if>
+            <sc-if value="{{ detail.isPokedexNotOwned }}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{ detail.onAdd }}" style="width:100%;padding:10px;border-radius:8px;border:2px solid #1f4f78;background:#8fc5f0;color:#0f2d47;font-weight:bold;font-size:14px;cursor:pointer;font-family:inherit;">+ Ajouter à mon équipe</button>
+            </sc-if>
+            <sc-if value="{{ detail.isPokedexOwned }}" hint-placeholder-val="{{ false }}">
+              <div style="text-align:center;font-size:12px;color:#5c8f6a;padding:8px;">✓ Déjà dans votre roster</div>
+            </sc-if>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+  </div>
+
+</x-import>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:470,&quot;height&quot;:924},&quot;shellColor&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#DC0A2D&quot;,&quot;options&quot;:[&quot;#DC0A2D&quot;,&quot;#2f6fb8&quot;,&quot;#3f8f5c&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Style&quot;},&quot;showLockedEntries&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Pokédex&quot;},&quot;pokemonLayout&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;grid&quot;,&quot;options&quot;:[&quot;grid&quot;,&quot;list&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Pokémon&quot;}}">
+const TYPE_COLORS = {
+  Normal:'#A8A878', Feu:'#F08030', Eau:'#6890F0', Plante:'#78C850', Electrik:'#F8D030',
+  Glace:'#98D8D8', Combat:'#C03028', Poison:'#A040A0', Sol:'#E0C068', Vol:'#A890F0',
+  Psy:'#F85888', Insecte:'#A8B820', Roche:'#B8A038', Spectre:'#705898', Dragon:'#7038F8',
+  Tenebres:'#705848', Acier:'#B8B8D0', Fee:'#EE99AC',
+};
+
+function stripeBg(hex) {
+  return 'repeating-linear-gradient(45deg,' + hex + ',' + hex + ' 7px, rgba(0,0,0,0.22) 7px, rgba(0,0,0,0.22) 14px)';
+}
+function clampPct(v, max) { return max > 0 ? Math.max(0, Math.min(100, (v / max) * 100)) : 0; }
+function hpColorOf(pct) { return pct < 20 ? '#d64545' : pct < 50 ? '#e8933d' : '#4caf6b'; }
+
+const ABILITIES_DB = {
+  'Choc': { type: 'Normal', distance: 1, degats_base: 2, degats_de: 6, cible: 'Adversaire Unique', precision: 10, effet: null },
+  'Décharge': { type: 'Electrik', distance: 3, degats_base: 3, degats_de: 8, cible: 'Adversaire Unique', precision: 12, effet: 'Peut paralyser la cible.' },
+  'Rapidité': { type: 'Normal', distance: 1, degats_base: 2, degats_de: 4, cible: 'Adversaire Unique', precision: 14, effet: 'Touche toujours en premier.' },
+  'Lacération': { type: 'Normal', distance: 1, degats_base: 3, degats_de: 6, cible: 'Adversaire Unique', precision: 11, effet: null },
+  'Liane Vorace': { type: 'Plante', distance: 4, degats_base: 1, degats_de: 4, cible: 'Adversaire Unique', precision: 9, effet: 'Draine des PV.' },
+  'Jet de Flammes': { type: 'Feu', distance: 3, degats_base: 3, degats_de: 6, cible: 'Adversaire Unique', precision: 12, effet: 'Peut brûler la cible.' },
+  'Coup de Boutoir': { type: 'Normal', distance: 1, degats_base: 4, degats_de: 8, cible: 'Adversaire Unique', precision: 8, effet: null },
+  "Jet d'Eau": { type: 'Eau', distance: 3, degats_base: 2, degats_de: 6, cible: 'Adversaire Unique', precision: 11, effet: null },
+  'Lame de Feuille': { type: 'Plante', distance: 2, degats_base: 2, degats_de: 6, cible: 'Zone', precision: 10, effet: null },
+  'Piqué': { type: 'Vol', distance: 3, degats_base: 2, degats_de: 4, cible: 'Adversaire Unique', precision: 13, effet: null },
+};
+
+function withDefaults(o) {
+  return Object.assign({ distance: 2, superEff: [], localisation: ['Ékaï'], attaques: ['Choc'], attaquesApprenables: ['Choc'], speed: 3 }, o);
+}
+
+const TEAM_INIT = [
+  withDefaults({ id: 1, nom: 'Pikachu', numero: '013', type: 'Electrik', hp: 30, maxHp: 42, xp: 65, maxXp: 100, inTeam: true, pv_base: 90, deg_base: 55, speed: 5, distance: 3, superEff: ['Eau', 'Vol'], localisation: ['Forêt Émeraude', 'Plaine électrique'], attaques: ['Décharge', 'Rapidité'] }),
+  withDefaults({ id: 2, nom: 'Miaouss', numero: '052', type: 'Normal', hp: 38, maxHp: 38, xp: 20, maxXp: 100, inTeam: true, pv_base: 76, deg_base: 40, speed: 3, distance: 2, superEff: ['Spectre'], localisation: ["Bourg d'Origine"], attaques: ['Lacération', 'Rapidité'] }),
+  withDefaults({ id: 3, nom: 'Évoli', numero: '133', type: 'Normal', hp: 10, maxHp: 50, xp: 90, maxXp: 100, inTeam: true, pv_base: 82, deg_base: 45, speed: 3, distance: 2, superEff: [], localisation: ['Forêt Émeraude'], attaques: ['Choc'] }),
+  withDefaults({ id: 4, nom: 'Chenipan', numero: '010', type: 'Insecte', hp: 24, maxHp: 24, xp: 5, maxXp: 100, inTeam: false, pv_base: 60, deg_base: 20, speed: 1, distance: 1, superEff: ['Poison'], localisation: ['Forêt Émeraude'], attaques: ['Choc'] }),
+  withDefaults({ id: 5, nom: 'Ponyta', numero: '077', type: 'Feu', hp: 40, maxHp: 40, xp: 45, maxXp: 100, inTeam: false, pv_base: 85, deg_base: 60, speed: 4, distance: 4, superEff: ['Plante', 'Insecte'], localisation: ['Mont Grisant'], attaques: ['Jet de Flammes', 'Rapidité'] }),
+];
+
+const POKEDEX_INIT = [
+  withDefaults({ numero: '001', nom: 'Bulbizarre', type: 'Plante', discovered: true, pv_base: 70, deg_base: 35, distance: 2, superEff: ['Eau', 'Sol'], localisation: ['Forêt Émeraude'], attaquesApprenables: ['Choc', 'Liane Vorace'] }),
+  withDefaults({ numero: '002', nom: 'Salamèche', type: 'Feu', discovered: true, pv_base: 65, deg_base: 40, distance: 3, superEff: ['Plante', 'Insecte'], localisation: ['Mont Grisant'], attaquesApprenables: ['Lacération', 'Jet de Flammes'] }),
+  withDefaults({ numero: '003', nom: 'Carapuce', type: 'Eau', discovered: false, pv_base: 68, deg_base: 32, distance: 2, superEff: ['Feu', 'Sol'], localisation: ['Cité Aurore'], attaquesApprenables: ["Jet d'Eau", 'Choc'] }),
+  withDefaults({ numero: '004', nom: 'Chenipan', type: 'Insecte', discovered: true, pv_base: 60, deg_base: 20, distance: 1, superEff: ['Poison'], localisation: ['Forêt Émeraude'], attaquesApprenables: ['Choc'] }),
+  withDefaults({ numero: '005', nom: 'Aspicot', type: 'Insecte', discovered: false, pv_base: 58, deg_base: 22, distance: 1, superEff: ['Poison'], localisation: ['Forêt Émeraude'], attaquesApprenables: ['Choc'] }),
+  withDefaults({ numero: '006', nom: 'Roucool', type: 'Vol', discovered: true, pv_base: 55, deg_base: 30, distance: 3, superEff: ['Plante', 'Insecte'], localisation: ['Cité Aurore'], attaquesApprenables: ['Piqué', 'Rapidité'] }),
+  withDefaults({ numero: '007', nom: 'Sabelette', type: 'Sol', discovered: false, pv_base: 62, deg_base: 33, distance: 1, superEff: ['Feu', 'Electrik'], localisation: ['Mont Grisant'], attaquesApprenables: ['Choc'] }),
+  withDefaults({ numero: '008', nom: 'Psykokwak', type: 'Eau', discovered: true, pv_base: 66, deg_base: 34, distance: 2, superEff: ['Feu', 'Sol'], localisation: ['Grotte Écho'], attaquesApprenables: ["Jet d'Eau"] }),
+  withDefaults({ numero: '009', nom: 'Abo', type: 'Poison', discovered: false, pv_base: 58, deg_base: 28, distance: 1, superEff: ['Plante'], localisation: ['Grotte Écho'], attaquesApprenables: ['Choc'] }),
+  withDefaults({ numero: '010', nom: 'Miaouss', type: 'Normal', discovered: true, pv_base: 76, deg_base: 40, distance: 2, superEff: ['Spectre'], localisation: ["Bourg d'Origine"], attaquesApprenables: ['Lacération', 'Rapidité'] }),
+  withDefaults({ numero: '011', nom: 'Ponyta', type: 'Feu', discovered: true, pv_base: 85, deg_base: 60, distance: 4, superEff: ['Plante', 'Insecte'], localisation: ['Mont Grisant'], attaquesApprenables: ['Jet de Flammes', 'Rapidité'] }),
+  withDefaults({ numero: '012', nom: 'Évoli', type: 'Normal', discovered: true, pv_base: 82, deg_base: 45, distance: 2, superEff: [], localisation: ['Forêt Émeraude'], attaquesApprenables: ['Choc'] }),
+  withDefaults({ numero: '013', nom: 'Pikachu', type: 'Electrik', discovered: true, pv_base: 90, deg_base: 55, distance: 3, superEff: ['Eau', 'Vol'], localisation: ['Forêt Émeraude', 'Plaine électrique'], attaquesApprenables: ['Décharge', 'Rapidité'] }),
+];
+
+const BAG_CATALOG_INIT = [
+  { id: 'b1', nom: 'Potion', cat: 'Soin', qty: 3, color: '#7fc98f' },
+  { id: 'b2', nom: 'Super Potion', cat: 'Soin', qty: 1, color: '#7fc98f' },
+  { id: 'b3', nom: 'Rappel', cat: 'Soin', qty: 2, color: '#7fc98f' },
+  { id: 'b4', nom: 'Antidote', cat: 'Soin', qty: 0, color: '#7fc98f' },
+  { id: 'b5', nom: 'Poké Ball', cat: 'Balls', qty: 5, color: '#d64545' },
+  { id: 'b6', nom: 'Super Ball', cat: 'Balls', qty: 2, color: '#d64545' },
+  { id: 'b7', nom: 'Hyper Ball', cat: 'Balls', qty: 0, color: '#d64545' },
+  { id: 'b8', nom: 'Fiole Attaque+', cat: 'Combat', qty: 1, color: '#c9855e' },
+  { id: 'b9', nom: 'Fiole Défense+', cat: 'Combat', qty: 0, color: '#c9855e' },
+  { id: 'b10', nom: 'Badge Forêt', cat: 'Unique', qty: 1, color: '#8fa3c9' },
+  { id: 'b11', nom: 'Clé Rouillée', cat: 'Unique', qty: 0, color: '#8fa3c9' },
+  { id: 'b12', nom: 'Pierre Feu', cat: 'Evolution', qty: 0, color: '#cfa93d' },
+  { id: 'b13', nom: 'Pierre Foudre', cat: 'Evolution', qty: 1, color: '#cfa93d' },
+];
+
+const MAP_PINS = [
+  { id: 'p1', nom: "Bourg d'Origine", type: 'Ville', x: 28, y: 74, desc: "Le point de départ de votre aventure à Ékaï. La boutique et le centre de soin s'y trouvent." },
+  { id: 'p2', nom: 'Forêt Émeraude', type: 'Nature', x: 60, y: 56, desc: 'Une forêt dense abritant de nombreux Pokémon Plante et Insecte.' },
+  { id: 'p3', nom: 'Mont Grisant', type: 'Montagne', x: 76, y: 26, desc: 'Un sommet escarpé, repaire de Pokémon Sol et Roche.' },
+  { id: 'p4', nom: 'Grotte Écho', type: 'Grotte', x: 20, y: 34, desc: 'Une grotte sombre où résonnent des cris étranges.' },
+  { id: 'p5', nom: 'Cité Aurore', type: 'Ville', x: 50, y: 14, desc: "La plus grande cité d'Ékaï, siège de l'Arène locale." },
+];
+
+const CATEGORIES = [
+  { id: 'Tous', label: 'Tous' }, { id: 'Soin', label: 'Soin' }, { id: 'Balls', label: 'Balls' },
+  { id: 'Combat', label: 'Combat' }, { id: 'Unique', label: 'Unique' }, { id: 'Evolution', label: 'Évolution' },
+];
+
+const SORT_LABELS = { numero: '#', type: 'Type', alpha: 'A-Z' };
+function sortRows(list, key, nameField) {
+  const arr = list.slice();
+  if (key === 'type') arr.sort((a, b) => a.type.localeCompare(b.type) || a.numero.localeCompare(b.numero));
+  else if (key === 'alpha') arr.sort((a, b) => (a[nameField] || '???').localeCompare(b[nameField] || '???'));
+  else arr.sort((a, b) => a.numero.localeCompare(b.numero));
+  return arr;
+}
+
+class Component extends DCLogic {
+  contentRef = React.createRef();
+  pokedexRefs = {};
+  moveTimeouts = {};
+
+  state = {
+    activeTab: 'home',
+    roster: TEAM_INIT,
+    pokedex: POKEDEX_INIT,
+    bag: BAG_CATALOG_INIT,
+    pokedollars: 1240,
+    detailId: null, detailSource: null, abilitiesOpen: true,
+    showSettings: false,
+    bagCategory: 'Tous', bagSearch: '',
+    pokedexSearch: '', pokedexSort: 'numero', pokemonSort: 'numero',
+    selectedPinId: null,
+    jumpMap: {}, posMap: {},
+    scanState: 'idle', scanResultNumero: null, pendingScrollNumero: null,
+    fullscreen: false, connected: true, adminPassword: '', adminMsg: '',
+  };
+
+  componentDidMount() {
+    this.scheduleJump();
+    TEAM_INIT.filter(p => p.inTeam).forEach(p => this.scheduleMove(p.id, p.speed));
+  }
+  componentWillUnmount() {
+    clearTimeout(this.jumpTimeout); clearTimeout(this.jumpEndTimeout);
+    Object.values(this.moveTimeouts).forEach(t => clearTimeout(t));
+  }
+  componentDidUpdate() {
+    if (this.state.pendingScrollNumero != null) {
+      const el = this.pokedexRefs[this.state.pendingScrollNumero];
+      const container = this.contentRef.current;
+      if (el && container) {
+        container.scrollTop = Math.max(0, el.offsetTop - container.offsetTop - 30);
+        this.setState({ pendingScrollNumero: null });
+      }
+    }
+  }
+
+  scheduleJump = () => {
+    const delay = 5000 + Math.random() * 5000;
+    this.jumpTimeout = setTimeout(() => {
+      const team = this.state.roster.filter(p => p.inTeam);
+      if (team.length) {
+        const pick = team[Math.floor(Math.random() * team.length)];
+        this.setState(s => ({ jumpMap: { ...s.jumpMap, [pick.id]: true } }));
+        this.jumpEndTimeout = setTimeout(() => {
+          this.setState(s => ({ jumpMap: { ...s.jumpMap, [pick.id]: false } }));
+        }, 550);
+      }
+      this.scheduleJump();
+    }, delay);
+  };
+  scheduleMove = (id, speed) => {
+    const duration = Math.max(2, 12 / Math.max(1, speed));
+    this.moveTimeouts[id] = setTimeout(() => {
+      const left = 18 + Math.random() * 64;
+      const bottom = 14 + Math.random() * 30;
+      this.setState(s => ({ posMap: { ...s.posMap, [id]: { left, bottom, duration } } }));
+      this.scheduleMove(id, speed);
+    }, duration * 1000);
+  };
+
+  stopClick = (e) => { e.stopPropagation(); };
+  setTab = (id) => this.setState({ activeTab: id, detailId: null, detailSource: null });
+  openRosterDetail = (id, fromHome) => this.setState({ detailId: id, detailSource: 'roster', abilitiesOpen: !!fromHome });
+  openPokedexDetail = (numero) => {
+    const entry = this.state.pokedex.find(p => p.numero === numero);
+    if (!entry || !entry.discovered) return;
+    this.setState({ detailId: numero, detailSource: 'pokedex' });
+  };
+  closeDetail = () => this.setState({ detailId: null, detailSource: null });
+  toggleAbilities = () => this.setState(s => ({ abilitiesOpen: !s.abilitiesOpen }));
+  toggleInTeam = (id) => this.setState(s => ({ roster: s.roster.map(p => p.id === id ? { ...p, inTeam: !p.inTeam } : p) }));
+  addPokedexToRoster = (numero) => {
+    const entry = this.state.pokedex.find(p => p.numero === numero);
+    if (!entry) return;
+    this.setState(s => {
+      const nextId = Math.max(0, ...s.roster.map(p => p.id)) + 1;
+      const teamLen = s.roster.filter(p => p.inTeam).length;
+      return { roster: [...s.roster, { id: nextId, nom: entry.nom, numero: entry.numero, type: entry.type, hp: 30, maxHp: 30, xp: 0, maxXp: 100, inTeam: teamLen < 3, pv_base: entry.pv_base, deg_base: entry.deg_base, distance: entry.distance, superEff: entry.superEff, localisation: entry.localisation, attaques: entry.attaquesApprenables, speed: 3 }] };
+    });
+    this.closeDetail();
+  };
+  toggleSettings = () => this.setState(s => ({ showSettings: !s.showSettings }));
+  setBagCategory = (cat) => this.setState({ bagCategory: cat });
+  onBagSearchChange = (e) => this.setState({ bagSearch: e.target.value });
+  onPokedexSearchChange = (e) => this.setState({ pokedexSearch: e.target.value });
+  setPokemonSort = (k) => this.setState({ pokemonSort: k });
+  setPokedexSort = (k) => this.setState({ pokedexSort: k });
+  addOrIncrementItem = (id) => this.setState(s => ({ bag: s.bag.map(i => i.id === id ? { ...i, qty: i.qty + 1 } : i), bagSearch: '' }));
+  stepQty = (id, delta) => this.setState(s => ({ bag: s.bag.map(i => i.id === id ? { ...i, qty: Math.max(0, i.qty + delta) } : i) }));
+  stepPokedollars = (delta) => this.setState(s => ({ pokedollars: Math.max(0, s.pokedollars + delta) }));
+  selectPin = (id) => this.setState({ selectedPinId: id });
+  closePinInfo = () => this.setState({ selectedPinId: null });
+
+  toggleFullscreen = () => {
+    try {
+      if (!document.fullscreenElement) { document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); this.setState({ fullscreen: true }); }
+      else { document.exitFullscreen && document.exitFullscreen(); this.setState({ fullscreen: false }); }
+    } catch (e) { this.setState(s => ({ fullscreen: !s.fullscreen })); }
+  };
+  connectToggle = () => this.setState(s => ({ connected: !s.connected }));
+  onAdminPasswordChange = (e) => this.setState({ adminPassword: e.target.value });
+  submitAdminPassword = () => this.setState(s => ({ adminMsg: s.adminPassword.length > 0 ? 'Mode admin activé (démo).' : 'Veuillez saisir un mot de passe.' }));
+
+  handleScan = () => {
+    if (this.state.scanState !== 'idle') return;
+    this.setState({ scanState: 'scanning' });
+    setTimeout(() => {
+      const candidates = this.state.pokedex.filter(e => !e.discovered);
+      const pool = candidates.length ? candidates : this.state.pokedex;
+      const target = pool[Math.floor(Math.random() * pool.length)];
+      this.setState(s => ({
+        scanState: 'celebrate',
+        pokedex: s.pokedex.map(e => e.numero === target.numero ? { ...e, discovered: true } : e),
+        scanResultNumero: target.numero,
+      }));
+      setTimeout(() => {
+        this.setState({ scanState: 'idle', activeTab: 'pokedex', detailId: target.numero, detailSource: 'pokedex', pendingScrollNumero: target.numero });
+      }, 1300);
+    }, 900);
+  };
+
+  renderVals() {
+    const s = this.state;
+    const shell = this.props.shellColor || '#DC0A2D';
+    const showLocked = this.props.showLockedEntries !== false;
+    const layout = this.props.pokemonLayout || 'grid';
+
+    const tabsMeta = [
+      { id: 'pokedex', icon: '📖' }, { id: 'pokemon', icon: '🐾' }, { id: 'home', icon: '🏠' },
+      { id: 'sac', icon: '🎒' }, { id: 'carte', icon: '🗺️' },
+    ];
+    const tabs = tabsMeta.map(t => {
+      const active = s.activeTab === t.id;
+      return {
+        ...t,
+        onClick: () => this.setTab(t.id),
+        btnStyle: 'flex:1;display:flex;align-items:center;justify-content:center;padding:16px 4px;border:none;border-top:3px solid ' + (active ? shell : 'transparent') + ';background:' + (active ? 'rgba(255,255,255,0.06)' : 'transparent') + ';color:' + (active ? '#f2ecd6' : '#7a7c9a') + ';cursor:pointer;font-family:inherit;',
+      };
+    });
+
+    const titles = { home: 'ACCUEIL', pokemon: 'MES POKÉMON', pokedex: 'POKÉDEX', sac: 'SAC', carte: "CARTE D'ÉKAÏ" };
+
+    const abilityFromName = (nom) => {
+      const a = ABILITIES_DB[nom] || { type: 'Normal', distance: 1, degats_base: 1, degats_de: 4, cible: 'Adversaire Unique', precision: 10, effet: null };
+      return { nom, type: a.type, typeColor: TYPE_COLORS[a.type] || '#888', distance: a.distance, degats_base: a.degats_base, degats_de: a.degats_de, cible: a.cible, precision: a.precision, effet: a.effet, hasEffet: !!a.effet };
+    };
+
+    const decorate = (p, fromHome) => {
+      const hpPct = clampPct(p.hp, p.maxHp);
+      return {
+        ...p,
+        hpPct, hpColor: hpColorOf(hpPct),
+        xpPct: clampPct(p.xp, p.maxXp),
+        typeColor: TYPE_COLORS[p.type] || '#888',
+        spriteBg: stripeBg(TYPE_COLORS[p.type] || '#888'),
+        nomUpper: p.nom.toUpperCase(),
+        isPc: !p.inTeam,
+        onOpen: () => this.openRosterDetail(p.id, !!fromHome),
+      };
+    };
+
+    const team = s.roster.filter(p => p.inTeam).map(p => decorate(p, true));
+    const allRoster = sortRows(s.roster.map(p => decorate(p, false)), s.pokemonSort, 'nom');
+
+    const LEFT_POS = [50, 30, 70];
+    const BOTTOM_POS = [22, 34, 40];
+    const dioramaTeam = team.map((p, idx) => {
+      const isJumping = !!s.jumpMap[p.id];
+      const pos = s.posMap[p.id];
+      const left = pos ? pos.left : LEFT_POS[idx % LEFT_POS.length];
+      const bottom = pos ? pos.bottom : BOTTOM_POS[idx % BOTTOM_POS.length];
+      const duration = pos ? pos.duration : 4;
+      const anim = isJumping
+        ? 'animation: jumpPop 0.55s ease-out 1;'
+        : ('animation: idleBob ' + (2.2 + idx * 0.35) + 's ease-in-out infinite; animation-delay: ' + (idx * 0.5) + 's;');
+      return {
+        ...p,
+        dioramaWrapStyle: 'position:absolute;left:' + left + '%;bottom:' + bottom + '%;transform:translateX(-50%);transition:left ' + duration + 's linear, bottom ' + duration + 's linear;display:flex;flex-direction:column;align-items:center;background:none;border:none;cursor:pointer;font-family:inherit;padding:0;z-index:2;',
+        dioramaSpriteStyle: 'width:76px;height:76px;border-radius:8px;border:2px solid #201c14;background:' + p.spriteBg + ';display:flex;align-items:center;justify-content:center;box-shadow:3px 3px 0 rgba(0,0,0,0.3);' + anim,
+      };
+    });
+
+    const cameraBtnStyle = 'position:absolute;right:12px;top:50%;transform:translateY(-50%);width:56px;height:56px;border-radius:50%;border:3px solid #201c14;background:' + (s.scanState === 'idle' ? '#f2ecd6' : '#cfc7a8') + ';font-size:24px;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:3px 3px 0 rgba(0,0,0,0.35);z-index:6;';
+    const cameraIcon = s.scanState === 'idle' ? '📷' : '⏳';
+    const scanTarget = s.scanResultNumero != null ? s.pokedex.find(e => e.numero === s.scanResultNumero) : null;
+
+    const pokedexDecorated = s.pokedex.map(e => {
+      const discovered = e.discovered;
+      const typeColor = TYPE_COLORS[e.type] || '#888';
+      return {
+        ...e, typeColor,
+        isOwned: s.roster.some(p => p.numero === e.numero),
+        onOpen: () => this.openPokedexDetail(e.numero),
+        onSetRefIgnore: null,
+        setRef: (el) => { if (el) this.pokedexRefs[e.numero] = el; },
+        captionText: discovered ? e.nom.toUpperCase() : '???',
+        spriteStyle: discovered
+          ? ('width:100%;aspect-ratio:1;border-radius:6px;border:2px solid #201c14;background:' + stripeBg(typeColor) + ';display:flex;align-items:center;justify-content:center;')
+          : 'width:100%;aspect-ratio:1;border-radius:6px;border:2px solid #201c14;background:#2a2c48;display:flex;align-items:center;justify-content:center;',
+        captionStyle: discovered
+          ? 'font-family:ui-monospace,monospace;font-size:8px;color:#201c14;background:rgba(242,236,214,0.85);padding:1px 3px;border-radius:2px;'
+          : 'font-size:18px;color:#5a5c78;',
+        cardStyle: 'display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px;border:none;background:transparent;font-family:inherit;' + (discovered ? 'cursor:pointer;' : 'cursor:default;opacity:0.75;'),
+      };
+    });
+    let visiblePokedex = showLocked ? pokedexDecorated : pokedexDecorated.filter(e => e.discovered);
+    const q = s.pokedexSearch.trim().toLowerCase();
+    if (q) visiblePokedex = visiblePokedex.filter(e => e.numero.includes(q) || (e.discovered && e.nom.toLowerCase().includes(q)));
+    visiblePokedex = sortRows(visiblePokedex, s.pokedexSort, 'nom');
+    const discoveredCount = pokedexDecorated.filter(e => e.discovered).length;
+
+    let detail = null;
+    if (s.detailId != null) {
+      if (s.detailSource === 'roster') {
+        const p = s.roster.find(r => r.id === s.detailId);
+        if (p) {
+          const d = decorate(p, false);
+          const canAddToTeam = !p.inTeam && team.length < 3;
+          const toggleBtnLabel = p.inTeam ? '📦 Mettre au PC' : (canAddToTeam ? "⚔️ Ajouter à l'équipe" : 'Équipe pleine (3/3)');
+          const toggleDisabled = !p.inTeam && !canAddToTeam;
+          detail = {
+            ...d, source: 'roster', isRosterDetail: true, isPokedexNotOwned: false, isPokedexOwned: false,
+            hasSuperEff: p.superEff.length > 0, noSuperEff: p.superEff.length === 0,
+            superEffList: p.superEff.map(t => ({ type: t, color: TYPE_COLORS[t] || '#888' })),
+            localisationList: p.localisation,
+            abilitiesModeFull: true, abilitiesModeNames: false,
+            abilitiesOpen: s.abilitiesOpen, onToggleAbilities: this.toggleAbilities,
+            abilityToggleLabel: s.abilitiesOpen ? 'Masquer' : 'Afficher',
+            fullAbilities: p.attaques.map(abilityFromName),
+            toggleBtnLabel,
+            toggleBtnStyle: toggleDisabled
+              ? 'width:100%;padding:10px;border-radius:8px;border:2px solid #6a6a6a;font-weight:bold;font-size:14px;cursor:not-allowed;background:#3a3c58;color:#7a7c9a;font-family:inherit;'
+              : 'width:100%;padding:10px;border-radius:8px;border:2px solid #201c14;font-weight:bold;font-size:14px;cursor:pointer;background:' + (p.inTeam ? '#e8b8b8' : '#bfe8cc') + ';color:#201c14;font-family:inherit;',
+            onToggleTeam: toggleDisabled ? (() => {}) : (() => this.toggleInTeam(p.id)),
+          };
+        }
+      } else if (s.detailSource === 'pokedex') {
+        const e = s.pokedex.find(r => r.numero === s.detailId);
+        if (e) {
+          const typeColor = TYPE_COLORS[e.type] || '#888';
+          const isOwned = s.roster.some(p => p.numero === e.numero);
+          detail = {
+            ...e, typeColor, spriteBg: stripeBg(typeColor), nomUpper: e.nom.toUpperCase(),
+            source: 'pokedex', isRosterDetail: false, isOwned,
+            isPokedexNotOwned: !isOwned, isPokedexOwned: isOwned,
+            hasSuperEff: e.superEff.length > 0, noSuperEff: e.superEff.length === 0,
+            superEffList: e.superEff.map(t => ({ type: t, color: TYPE_COLORS[t] || '#888' })),
+            localisationList: e.localisation,
+            abilitiesModeFull: false, abilitiesModeNames: true,
+            nameAbilities: e.attaquesApprenables.map(n => ({ nom: n, color: TYPE_COLORS[(ABILITIES_DB[n] || {}).type] || '#888' })),
+            onAdd: () => this.addPokedexToRoster(e.numero),
+          };
+        }
+      }
+    }
+
+    const categories = CATEGORIES.map(c => {
+      const active = s.bagCategory === c.id;
+      return {
+        ...c, onClick: () => this.setBagCategory(c.id),
+        chipStyle: 'padding:6px 12px;border-radius:20px;border:2px solid #201c14;font-size:12px;cursor:pointer;font-family:inherit;' + (active ? ('background:' + shell + ';color:#fff;font-weight:bold;') : 'background:#2a2c48;color:#c9cbe8;'),
+      };
+    });
+    const bagFiltered = s.bag.filter(i => i.qty > 0 && (s.bagCategory === 'Tous' || i.cat === s.bagCategory)).map(i => ({
+      ...i,
+      spriteBg: 'repeating-linear-gradient(45deg,' + i.color + ',' + i.color + ' 5px, rgba(0,0,0,0.18) 5px, rgba(0,0,0,0.18) 10px)',
+      onDec: () => this.stepQty(i.id, -1), onInc: () => this.stepQty(i.id, 1),
+    }));
+    const bq = s.bagSearch.trim().toLowerCase();
+    const bagSearchResults = bq ? s.bag.filter(i => i.nom.toLowerCase().includes(bq)).slice(0, 6).map(i => ({
+      ...i,
+      spriteBg: 'repeating-linear-gradient(45deg,' + i.color + ',' + i.color + ' 5px, rgba(0,0,0,0.18) 5px, rgba(0,0,0,0.18) 10px)',
+      qtyLabel: i.qty > 0 ? (i.qty + ' en sac') : 'Ajouter',
+      onSelect: () => this.addOrIncrementItem(i.id),
+    })) : [];
+
+    const pokemonSortOptions = ['numero', 'type', 'alpha'].map(k => ({
+      id: k, label: SORT_LABELS[k], onClick: () => this.setPokemonSort(k),
+      chipStyle: 'padding:6px 12px;border-radius:20px;border:2px solid #201c14;font-size:12px;cursor:pointer;font-family:inherit;' + (s.pokemonSort === k ? ('background:' + shell + ';color:#fff;font-weight:bold;') : 'background:#2a2c48;color:#c9cbe8;'),
+    }));
+    const pokedexSortOptions = ['numero', 'type', 'alpha'].map(k => ({
+      id: k, label: SORT_LABELS[k], onClick: () => this.setPokedexSort(k),
+      chipStyle: 'padding:6px 12px;border-radius:20px;border:2px solid #201c14;font-size:12px;cursor:pointer;font-family:inherit;' + (s.pokedexSort === k ? ('background:' + shell + ';color:#fff;font-weight:bold;') : 'background:#2a2c48;color:#c9cbe8;'),
+    }));
+
+    const mapPins = MAP_PINS.map(p => ({
+      ...p, onClick: () => this.selectPin(p.id),
+      style: 'position:absolute;left:' + p.x + '%;top:' + p.y + '%;transform:translate(-50%,-100%);background:none;border:none;font-size:28px;cursor:pointer;filter:drop-shadow(2px 2px 0 rgba(0,0,0,0.5));padding:0;',
+    }));
+    const selectedPin = mapPins.find(p => p.id === s.selectedPinId) || null;
+
+    return {
+      isHome: s.activeTab === 'home', isPokemon: s.activeTab === 'pokemon', isPokedex: s.activeTab === 'pokedex', isSac: s.activeTab === 'sac', isCarte: s.activeTab === 'carte',
+      tabs, headerTitle: titles[s.activeTab], shell,
+      pokedollars: s.pokedollars,
+      decDollars: () => this.stepPokedollars(-10), incDollars: () => this.stepPokedollars(10),
+      showSettings: s.showSettings, toggleSettings: this.toggleSettings, stopClick: this.stopClick,
+      contentRef: this.contentRef,
+      team, dioramaTeam, noTeam: team.length === 0,
+      handleScan: this.handleScan, cameraBtnStyle, cameraIcon,
+      isScanning: s.scanState === 'scanning', isCelebrating: s.scanState === 'celebrate',
+      scanResultName: scanTarget ? scanTarget.nom : '',
+      allRoster, noRoster: allRoster.length === 0,
+      isGridLayout: layout !== 'list', isListLayout: layout === 'list',
+      pokemonSortOptions, pokedexSortOptions,
+      pokedexSearch: s.pokedexSearch, onPokedexSearchChange: this.onPokedexSearchChange,
+      pokedex: visiblePokedex, discoveredCount, totalCount: pokedexDecorated.length,
+      hasDetail: detail != null, detail: detail || {}, closeDetail: this.closeDetail,
+      categories, bagSearch: s.bagSearch, onBagSearchChange: this.onBagSearchChange,
+      hasBagSearchResults: bagSearchResults.length > 0, bagSearchResults,
+      bagFiltered, hasBagItems: bagFiltered.length > 0, noBagItems: bagFiltered.length === 0,
+      mapPins, hasSelectedPin: selectedPin != null, selectedPin: selectedPin || {}, closePinInfo: this.closePinInfo,
+      fullscreenLabel: s.fullscreen ? 'Activé' : 'Désactivé',
+      fullscreenBtnStyle: 'font-size:11px;padding:5px 10px;border-radius:6px;border:2px solid #201c14;background:' + (s.fullscreen ? '#bfe8cc' : '#e0d8bd') + ';color:#201c14;cursor:pointer;font-family:inherit;',
+      connectToggle: this.connectToggle, connectLabel: s.connected ? 'Se déconnecter' : 'Se connecter',
+      connectLabel2: s.connected ? 'Sacha' : 'Non connecté',
+      connectBtnBg: s.connected ? '#e8b8b8' : '#bfe8cc',
+      adminPassword: s.adminPassword, onAdminPasswordChange: this.onAdminPasswordChange, submitAdminPassword: this.submitAdminPassword,
+      hasAdminMsg: s.adminMsg.length > 0, adminMsg: s.adminMsg,
+    };
+  }
+}
+</script>
+</body>
+</html>

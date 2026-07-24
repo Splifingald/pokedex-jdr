@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { PlayerPokemon, Pokemon, Attack } from '../types'
-import { PokemonDetailHeader } from './PokemonDetailHeader'
+import { OwnedPokemonHeader } from './OwnedPokemonHeader'
 import { StatRow } from './StatRow'
 import { TypeBadge } from './TypeBadge'
 import { AudioDescriptionPlayer } from './AudioDescriptionPlayer'
@@ -56,7 +56,7 @@ export function PokemonDetailView({ playerPokemon, pokemon, teamFull, isNpc, max
 
   return (
     <div className="flex flex-col h-full bg-gray-900 overflow-y-auto">
-      <PokemonDetailHeader
+      <OwnedPokemonHeader
         pokemonNom={playerPokemon.pokemon_nom}
         pokemon={pokemon}
         hp={hp}
@@ -67,9 +67,10 @@ export function PokemonDetailView({ playerPokemon, pokemon, teamFull, isNpc, max
         status={status}
         onStatusChange={setStatus}
         onBack={onBack}
-        onManageMoves={onManageMoves}
-        movesCount={playerPokemon.moves.length}
-        maxMoves={maxMoves}
+        actionLabel="💥 Capacités"
+        actionTitle={`Gérer les capacités (${playerPokemon.moves.length}/${maxMoves})`}
+        actionColor="orange"
+        onAction={onManageMoves}
       />
 
       {pokemon?.audio_url && <AudioDescriptionPlayer key={pokemon.id} audioUrl={pokemon.audio_url} />}
@@ -77,11 +78,6 @@ export function PokemonDetailView({ playerPokemon, pokemon, teamFull, isNpc, max
       <div className="px-4 py-2 flex flex-col gap-3">
         {pokemon && (
           <>
-            <div className="flex items-center gap-2 py-1">
-              <span className="text-gray-400 text-sm">Type</span>
-              <TypeBadge type={pokemon.type} />
-            </div>
-
             <StatRow
               icon="❤️" label="PV de base"
               value={hpBreakdown.bonus > 0 ? `${hpBreakdown.total} (${hpBreakdown.base} + ${hpBreakdown.bonus})` : hpBreakdown.total}

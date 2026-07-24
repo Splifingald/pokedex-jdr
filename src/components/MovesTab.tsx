@@ -45,7 +45,8 @@ export function MovesTab({ playerPokemon, pokemon, maxMoves, attacksByName, onUp
         status={status}
         onStatusChange={setStatus}
         onBack={onBack}
-        onGoToInfo={onGoToInfo}
+        actionLabel="Info"
+        onAction={onGoToInfo}
       />
 
       <div className="px-4 py-4">

@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react'
 import type { Milestone } from '../lib/xpBonuses'
 import { clampXp } from '../lib/xpBonuses'
+import { NumberInput } from './NumberInput'
 
 interface Props {
   xp: number
@@ -29,14 +30,12 @@ export function XpGauge({ xp, max, milestones, onXpChange }: Props) {
   const pct = max > 0 ? Math.max(0, Math.min(100, (xp / max) * 100)) : 0
 
   return (
-    <div className="px-2">
-      <div className="text-gray-400 text-xs mb-1">Expérience</div>
-
+    <div>
       <div className="relative h-10 mb-1">
         {milestones.map((m) => (
           <div
             key={m.xp}
-            className={`absolute bottom-0 flex flex-col ${ALIGN_CLASS[markerAlign(m.xp, max)]}`}
+            className={`absolute bottom-0 z-10 flex flex-col ${ALIGN_CLASS[markerAlign(m.xp, max)]}`}
             style={markerStyle(m.xp, max)}
           >
             <div
@@ -55,6 +54,8 @@ export function XpGauge({ xp, max, milestones, onXpChange }: Props) {
       </div>
 
       <div className="relative h-11 mt-0.5">
+        <span className="absolute top-0 left-0 text-gray-400 text-xs">XP</span>
+
         {milestones.map((m) => (
           <span
             key={m.xp}
@@ -74,10 +75,9 @@ export function XpGauge({ xp, max, milestones, onXpChange }: Props) {
             >
               −
             </button>
-            <input
-              type="number"
+            <NumberInput
               value={xp}
-              onChange={(e) => onXpChange(clampXp(parseInt(e.target.value) || 0, max))}
+              onCommit={(v) => onXpChange(clampXp(v, max))}
               className="w-10 bg-transparent text-blue-400 font-bold text-sm text-center outline-none"
             />
             <button
