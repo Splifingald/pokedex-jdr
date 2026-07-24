@@ -145,7 +145,7 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, onScan,
       <button
         onClick={onScan}
         title="Scanner un Pokémon"
-        className="absolute right-3 top-1/2 -translate-y-1/2 w-14 h-14 rounded-full border-[3px] border-ink bg-cream text-2xl flex items-center justify-center shadow-[var(--shadow-pixel)] z-[6] active:shadow-none active:translate-x-[2px] active:translate-y-[calc(-50%+2px)] transition-all"
+        className="absolute right-3 top-1/2 -translate-y-1/2 w-14 h-14 rounded-full border-[3px] border-ink bg-cream text-2xl flex items-center justify-center shadow-[var(--shadow-pixel)] z-[35] active:shadow-none active:translate-x-[2px] active:translate-y-[calc(-50%+2px)] transition-all"
       >
         📷
       </button>

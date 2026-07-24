@@ -22,7 +22,7 @@ function speedBucket(nom: string): number {
 
 export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping, onClick }: Props) {
   const speed = useMemo(() => speedBucket(playerPokemon.pokemon_nom), [playerPokemon.pokemon_nom])
-  const { pos, duration } = useRoamPosition(speed)
+  const { pos, duration } = useRoamPosition(playerPokemon.id, speed)
   const maxHp = getMaxHp(playerPokemon, pokemon)
   const [hp] = useLocalHp(playerPokemon.id, maxHp)
   const isKo = hp <= 0
@@ -33,10 +33,13 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
   return (
     <button
       onClick={onClick}
-      className="absolute flex flex-col items-center z-[2] -translate-x-1/2"
+      className="absolute flex flex-col items-center -translate-x-1/2"
       style={{
         left: `${pos.left}%`,
         bottom: `${pos.bottom}%`,
+        // Perspective : plus le Pokémon est bas dans la scène, plus il passe devant
+        // (plage 10–32, sous le bouton scanner (35) et les overlays (40+))
+        zIndex: Math.round(40 - pos.bottom),
         transition: `left ${duration}s linear, bottom ${duration}s linear`,
       }}
     >
