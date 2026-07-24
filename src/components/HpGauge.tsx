@@ -10,18 +10,18 @@ export function HpGauge({ current, max }: Props) {
   if (isKo) {
     return (
       <div className="text-center">
-        <span className="text-red-500 font-bold text-lg tracking-wide">K.O.</span>
+        <span className="text-hp-red font-bold text-lg tracking-wide">K.O.</span>
       </div>
     )
   }
 
-  const color = pct < 20 ? 'bg-red-500' : pct < 50 ? 'bg-orange-400' : 'bg-green-500'
-  const textColor = pct < 20 ? 'text-red-500' : pct < 50 ? 'text-orange-400' : 'text-green-500'
+  const color = pct < 20 ? 'bg-hp-red' : pct < 50 ? 'bg-hp-orange' : 'bg-hp-green'
+  const textColor = pct < 20 ? 'text-hp-red' : pct < 50 ? 'text-hp-orange' : 'text-hp-green'
 
   return (
     <div>
       <div className={`text-xs font-bold text-right mb-0.5 ${textColor}`}>{current} / {max}</div>
-      <div className="h-2 rounded-full bg-gray-700 overflow-hidden">
+      <div className="h-2.5 rounded-full bg-[#cfc7a8] border border-ink overflow-hidden">
         <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
       </div>
     </div>

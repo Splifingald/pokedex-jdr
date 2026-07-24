@@ -15,11 +15,11 @@ export function XpMiniGauge({ xp, milestones }: Props) {
   return (
     <div>
       <div className="flex items-center justify-between mb-0.5">
-        <span className="text-[10px] text-gray-500">{segStart} XP</span>
-        <span className="text-[10px] text-blue-400 font-bold">{next ? next.label : 'MAX'}</span>
+        <span className="text-[10px] text-ink-muted-2">{segStart} XP</span>
+        <span className="text-[10px] text-xp-blue font-bold">{next ? next.label : 'MAX'}</span>
       </div>
-      <div className="h-1.5 rounded-full bg-gray-700 overflow-hidden">
-        <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${pct}%` }} />
+      <div className="h-1.5 rounded-full bg-[#cfc7a8] overflow-hidden">
+        <div className="h-full rounded-full bg-xp-blue transition-all" style={{ width: `${pct}%` }} />
       </div>
     </div>
   )

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { usePokemon } from './hooks/usePokemon'
 import { useAttacks } from './hooks/useAttacks'
 import { usePlayerContext } from './context/PlayerContext'
@@ -9,29 +9,33 @@ import { useAdminParameters } from './hooks/useAdminParameters'
 import { useToast } from './context/ToastContext'
 import type { Pokemon } from './types'
 import { POKEDOLLAR_ITEM_NAME } from './types'
-import { PokemonList } from './components/PokemonList'
-import { PokemonCard } from './components/PokemonCard'
-import { DiscoveryModal } from './components/DiscoveryModal'
-import { PasswordModal } from './components/PasswordModal'
 import { AdminTab } from './components/AdminTab'
-import { SearchBar } from './components/SearchBar'
 import { ManualDiscoveryModal } from './components/ManualDiscoveryModal'
 import { ScannerModal } from './components/ScannerModal'
 import { TabBar, type TabId } from './components/TabBar'
 import { LoginModal } from './components/LoginModal'
-import { PlayerBadge } from './components/PlayerBadge'
+import { HomeTab } from './components/HomeTab'
+import { PokedexTab } from './components/PokedexTab'
 import { TeamTab } from './components/TeamTab'
 import { SacTab } from './components/SacTab'
 import { CarteTab } from './components/CarteTab'
 import { PokedollarChip } from './components/PokedollarChip'
-import { ConfirmPopup } from './components/ConfirmPopup'
+import { SettingsPopup } from './components/SettingsPopup'
 import { FullscreenPromptModal } from './components/FullscreenPromptModal'
 import { useFullscreen } from './hooks/useFullscreen'
-import { BUTTON_STYLE } from './lib/buttonStyles'
-import { normalizeSearch } from './lib/normalizeSearch'
+import { PANEL_LG, PIXEL_BORDER_SM } from './lib/panelStyles'
+
+const TAB_TITLES: Record<TabId, string> = {
+  accueil: 'ACCUEIL',
+  pokedex: 'POKÉDEX',
+  equipe: 'MES POKÉMON',
+  sac: 'SAC',
+  carte: 'CARTE',
+  admin: 'ADMIN',
+}
 
 export default function App() {
-  const { pokemon, discovered, loading, error, discoverPokemon, undiscoverPokemon, refetch } = usePokemon()
+  const { pokemon, discovered, discoverPokemon, undiscoverPokemon, refetch } = usePokemon()
   const { byName: attacksByName, refetch: refetchAttacks } = useAttacks()
   const { player, players, playersLoading, login, logout } = usePlayerContext()
   const { roster, addOwnedPokemon } = usePlayerPokemon(player?.id ?? null)
@@ -41,301 +45,156 @@ export default function App() {
   const { showToast } = useToast()
   const { enter: enterFullscreen } = useFullscreen()
 
-  const [selected, setSelected] = useState<Pokemon | null>(null)
   const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(true)
-  const [pendingDiscovery, setPendingDiscovery] = useState<Pokemon | null>(null)
   const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem('adminMode') === 'true')
-  const [showPasswordModal, setShowPasswordModal] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const [showManualModal, setShowManualModal] = useState(false)
   const [showScannerModal, setShowScannerModal] = useState(false)
   const [showLoginModal, setShowLoginModal] = useState(false)
-  const [showAdminLogoutConfirm, setShowAdminLogoutConfirm] = useState(false)
-  const [activeTab, setActiveTab] = useState<TabId>('pokedex')
+  const [activeTab, setActiveTab] = useState<TabId>('accueil')
 
-  // Si l'onglet actif devient invisible (déconnexion, sortie du mode admin), on revient au Pokédex
+  // Chorégraphie post-découverte : célébration puis ouverture auto dans le Pokédex
+  const [celebration, setCelebration] = useState<Pokemon | null>(null)
+  const [autoOpenNumero, setAutoOpenNumero] = useState<string | null>(null)
+  const celebrationTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => clearTimeout(celebrationTimer.current), [])
+
+  // Si l'onglet actif devient invisible (déconnexion, sortie du mode admin), on revient à l'accueil
   useEffect(() => {
-    if (activeTab === 'equipe' && !player) setActiveTab('pokedex')
-    if (activeTab === 'sac' && !player) setActiveTab('pokedex')
-    if (activeTab === 'admin' && !isAdmin) setActiveTab('pokedex')
+    if ((activeTab === 'equipe' || activeTab === 'sac') && !player) setActiveTab('accueil')
+    if (activeTab === 'admin' && !isAdmin) setActiveTab('accueil')
   }, [activeTab, player, isAdmin])
 
-  // Filtres de recherche
-  const [search, setSearch] = useState('')
-  const [typeFilter, setTypeFilter] = useState('')
+  const pokemonByName = useMemo(() => new Map(pokemon.map((p) => [p.nom, p])), [pokemon])
+  const teamFull = player?.is_npc ? false : roster.filter((r) => r.in_team).length >= parameters.max_team_size
 
-  // Types uniques disponibles dans le pokédex
-  const availableTypes = useMemo(() => {
-    const visible = isAdmin ? pokemon : pokemon.filter((p) => !p.cache)
-    const types = [...new Set(visible.map((p) => p.type))].sort()
-    return types
-  }, [pokemon, isAdmin])
-
-  // Liste filtrée
-  const filteredPokemon = useMemo(() => {
-    const hasFilter = search !== '' || typeFilter !== ''
-    return pokemon.filter((p) => {
-      // Hors admin : caché non découvert → toujours invisible
-      // Hors admin + filtre actif : non découvert → invisible (recherche sur découverts seulement)
-      if (!isAdmin && !discovered.has(p.nom) && (p.cache || hasFilter)) return false
-      const q = normalizeSearch(search)
-      if (q && !normalizeSearch(p.nom).includes(q) && !p.numero.includes(q)) return false
-      if (typeFilter && p.type !== typeFilter) return false
-      return true
-    })
-  }, [pokemon, search, typeFilter, isAdmin, discovered])
-
-  // Sync la fiche sélectionnée si les données rechargent
-  useEffect(() => {
-    if (selected) {
-      const updated = pokemon.find((p) => p.id === selected.id)
-      if (updated) setSelected(updated)
-    }
-  }, [pokemon])
-
-  const handleAdminTriggerClick = () => {
-    if (isAdmin) {
-      setShowAdminLogoutConfirm(true)
-    } else {
-      setShowPasswordModal(true)
-    }
+  const handleAddToRoster = async (p: Pokemon) => {
+    const inTeam = !teamFull
+    await addOwnedPokemon(p.nom, p.numero, inTeam)
+    showToast(`${p.nom} ajouté ${inTeam ? "à l'équipe" : 'au PC'} !`)
   }
 
-  const handlePasswordSuccess = () => {
-    setIsAdmin(true)
-    setShowPasswordModal(false)
-    setActiveTab('admin')
+  const handleDiscoverWithCelebration = async (p: Pokemon) => {
+    await discoverPokemon(p.nom)
+    setCelebration(p)
+    clearTimeout(celebrationTimer.current)
+    celebrationTimer.current = window.setTimeout(() => {
+      setCelebration(null)
+      setActiveTab('pokedex')
+      setAutoOpenNumero(p.numero)
+    }, 1300)
   }
 
   const handleAdminLogout = () => {
     sessionStorage.removeItem('adminMode')
     setIsAdmin(false)
-    setActiveTab('pokedex')
   }
 
-  const handlePlayerLogin = (p: (typeof players)[number]) => {
-    login(p)
-    setShowLoginModal(false)
-  }
-
-  const handleDiscoveryConfirm = async () => {
-    if (!pendingDiscovery) return
-    await discoverPokemon(pendingDiscovery.nom)
-    setSelected(pendingDiscovery)
-    setPendingDiscovery(null)
-  }
-
-  const handleManualDiscover = async (p: Pokemon) => {
-    await discoverPokemon(p.nom)
-    setSelected(p)
-  }
-
-  const handleUndiscover = async () => {
-    if (!selected) return
-    await undiscoverPokemon(selected.nom)
-    // On ferme la fiche sur mobile, on reste sur desktop
-    if (window.innerWidth < 768) setSelected(null)
-  }
-
-  // Pokémon "visibles" : non-cachés + admin voit tout + cachés découverts
-  const visibleCount = pokemon.filter((p) => !p.cache || isAdmin || discovered.has(p.nom)).length
-
-  const pokemonByName = useMemo(() => new Map(pokemon.map((p) => [p.nom, p])), [pokemon])
-
-  const ownedNames = useMemo(() => new Set(roster.map((r) => r.pokemon_nom)), [roster])
-  const teamFull = player?.is_npc ? false : roster.filter((r) => r.in_team).length >= parameters.max_team_size
-  const ownedCount = selected ? roster.filter((r) => r.pokemon_nom === selected.nom).length : 0
-
-  const handleAddToRoster = async () => {
-    if (!selected) return
-    const inTeam = !teamFull
-    await addOwnedPokemon(selected.nom, selected.numero, inTeam)
-    showToast(`${selected.nom} ajouté ${inTeam ? "à l'équipe" : 'au PC'} !`)
+  const tabBarProps = {
+    activeTab,
+    onTabChange: setActiveTab,
+    showTeamTab: !!player,
+    showSacTab: !!player,
+    showCarteTab: true,
+    showAdminTab: isAdmin,
   }
 
   return (
-    <div className="flex flex-col h-full bg-gray-900">
-      {/* Header Pokédex */}
-      <header className="shrink-0 flex items-center px-4 py-2 bg-red-700 border-b-4 border-red-900 shadow-lg relative">
+    <div className="flex flex-col h-full bg-app-bg">
+      {/* En-tête persistant */}
+      <header className="shrink-0 flex items-center gap-2.5 px-3.5 py-2.5 bg-shell border-b-4 border-ink shadow-[0_4px_0_rgba(0,0,0,0.35)]">
+        <div className="w-5 h-5 rounded-full bg-[#7fd6ff] border-[3px] border-cream shadow-[0_0_6px_#7fd6ff] shrink-0" />
+        <h1 className="flex-1 min-w-0 text-lg text-cream tracking-wide [text-shadow:2px_2px_0_rgba(0,0,0,0.35)] truncate">
+          {TAB_TITLES[activeTab]}
+        </h1>
+        {player && (
+          <PokedollarChip
+            amount={playerItems.pokedollars}
+            imageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
+          />
+        )}
         <button
-          onClick={handleAdminTriggerClick}
-          className="absolute top-0 left-0 w-12 h-12 z-50 opacity-0 cursor-default"
-          aria-hidden="true"
-          tabIndex={-1}
-        />
-
-        <div className="flex items-center gap-2 mr-4 shrink-0">
-          <div className="w-8 h-8 rounded-full bg-blue-400 border-2 border-white shadow-[0_0_8px_#60a5fa]" />
-          <div className="hidden sm:flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-red-300 border border-white" />
-            <div className="w-3 h-3 rounded-full bg-yellow-300 border border-white" />
-            <div className="w-3 h-3 rounded-full bg-green-400 border border-white" />
-          </div>
-        </div>
-
-        <div className="ml-auto flex items-center gap-2">
-          {player && (
-            <PokedollarChip
-              amount={playerItems.pokedollars}
-              imageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
-            />
-          )}
-          {player ? (
-            <PlayerBadge player={player} onLogout={logout} />
-          ) : (
-            <button
-              onClick={() => setShowLoginModal(true)}
-              className={`${BUTTON_STYLE.gray} text-sm rounded px-2 py-1 font-bold`}
-            >
-              👤 Connexion
-            </button>
-          )}
-
-          {isAdmin && (
-            <button
-              onClick={() => setShowAdminLogoutConfirm(true)}
-              className={`${BUTTON_STYLE.yellow} text-sm rounded px-2 py-1 font-bold`}
-            >
-              🛠 Admin
-            </button>
-          )}
-        </div>
+          onClick={() => setShowSettings(true)}
+          title="Paramètres"
+          className={`w-8 h-8 shrink-0 rounded-lg ${PIXEL_BORDER_SM} bg-black/20 text-cream text-sm flex items-center justify-center`}
+        >
+          ⚙️
+        </button>
       </header>
 
-      <TabBar
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        showTeamTab={!!player}
-        showSacTab={!!player}
-        showCarteTab={true}
-        showAdminTab={isAdmin}
-      />
+      {/* Corps : barre latérale (desktop) + contenu */}
+      <div className="flex flex-1 overflow-hidden">
+        <TabBar {...tabBarProps} variant="side" />
 
-      {/* Corps principal */}
-      {activeTab === 'pokedex' && (
-        <div className="flex flex-1 overflow-hidden">
-          {/* Panneau liste */}
-          <div
-            className={`bg-gray-900 border-r border-gray-700 flex flex-col
-              ${selected ? 'hidden md:flex' : 'flex'}
-              w-full md:w-80 lg:w-96 shrink-0
-            `}
-          >
-            {/* Barre de statut */}
-            <div className="px-4 py-1.5 bg-gray-800 border-b border-gray-700 flex items-center justify-between shrink-0">
-              <span className="text-gray-400 text-xs">
-                {loading ? 'Chargement…' : `${filteredPokemon.length} / ${visibleCount} Pokémon`}
-              </span>
-              <span className="text-gray-500 text-xs">{discovered.size} découverts</span>
-            </div>
-
-            {/* Barre de recherche */}
-            <SearchBar
-              search={search}
-              onSearchChange={setSearch}
-              typeFilter={typeFilter}
-              onTypeFilterChange={setTypeFilter}
-              availableTypes={availableTypes}
-              onManualDiscover={() => setShowManualModal(true)}
-              onScanDiscover={() => setShowScannerModal(true)}
+        <main className="flex-1 flex flex-col overflow-hidden">
+          {activeTab === 'accueil' && (
+            <HomeTab
+              player={player}
+              isAdmin={isAdmin}
+              pokemonByName={pokemonByName}
+              attacksByName={attacksByName}
+              onScan={() => setShowScannerModal(true)}
+              onRequestLogin={() => setShowLoginModal(true)}
             />
+          )}
 
-            {loading ? (
-              <div className="flex-1 flex items-center justify-center">
-                <div className="text-gray-500 text-center">
-                  <div className="text-4xl mb-3 animate-spin">⊙</div>
-                  <p className="text-sm">Chargement…</p>
-                </div>
-              </div>
-            ) : error ? (
-              <div className="flex-1 flex items-center justify-center p-6">
-                <div className="text-red-400 text-center text-sm">
-                  <div className="text-3xl mb-2">⚠️</div>
-                  <p>{error}</p>
-                </div>
-              </div>
-            ) : (
-              <PokemonList
-                pokemon={filteredPokemon}
-                discovered={discovered}
-                isAdmin={isAdmin}
-                selectedId={selected?.id ?? null}
-                ownedByPlayer={ownedNames}
-                onSelectDiscovered={setSelected}
-                onSelectUndiscovered={setPendingDiscovery}
-                totalCount={visibleCount}
-              />
-            )}
-          </div>
+          {activeTab === 'pokedex' && (
+            <PokedexTab
+              pokemon={pokemon}
+              discovered={discovered}
+              isAdmin={isAdmin}
+              attacksByName={attacksByName}
+              roster={roster}
+              teamFull={teamFull}
+              canAddToRoster={!!player}
+              onAddToRoster={handleAddToRoster}
+              onDiscover={(p) => discoverPokemon(p.nom)}
+              onUndiscover={(p) => undiscoverPokemon(p.nom)}
+              onScan={() => setShowScannerModal(true)}
+              onManualDiscover={() => setShowManualModal(true)}
+              autoOpenNumero={autoOpenNumero}
+              onAutoOpenHandled={() => setAutoOpenNumero(null)}
+            />
+          )}
 
-          {/* Panneau détail */}
-          <div className="flex-1 overflow-hidden">
-            {selected ? (
-              <PokemonCard
-                pokemon={selected}
-                isAdmin={isAdmin}
-                isDiscovered={discovered.has(selected.nom)}
-                attacksByName={attacksByName}
-                onBack={() => setSelected(null)}
-                onUndiscover={handleUndiscover}
-                onAddToRoster={player ? handleAddToRoster : undefined}
-                teamFull={teamFull}
-                ownedCount={ownedCount}
-              />
-            ) : (
-              <div className="hidden md:flex h-full items-center justify-center text-gray-700 flex-col gap-4 select-none">
-                <div className="text-8xl opacity-20">⊙</div>
-                <p className="text-lg opacity-30">Sélectionnez un Pokémon</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+          {activeTab === 'equipe' && player && (
+            <TeamTab
+              player={player}
+              pokemonList={pokemon}
+              discovered={discovered}
+              isAdmin={isAdmin}
+              pokemonByName={pokemonByName}
+              attacksByName={attacksByName}
+            />
+          )}
 
-      {activeTab === 'equipe' && player && (
-        <TeamTab
-          player={player}
-          pokemonList={pokemon}
-          discovered={discovered}
-          isAdmin={isAdmin}
-          pokemonByName={pokemonByName}
-          attacksByName={attacksByName}
-        />
-      )}
+          {activeTab === 'sac' && player && (
+            <SacTab player={player} items={items} itemsByName={itemsByName} playerItems={playerItems} />
+          )}
 
-      {activeTab === 'sac' && player && (
-        <SacTab player={player} items={items} itemsByName={itemsByName} playerItems={playerItems} />
-      )}
+          {activeTab === 'carte' && <CarteTab parameters={parameters} isAdmin={isAdmin} />}
 
-      {activeTab === 'carte' && <CarteTab parameters={parameters} isAdmin={isAdmin} />}
+          {activeTab === 'admin' && isAdmin && (
+            <AdminTab
+              onImportSuccess={() => { refetch(); refetchAttacks(); refetchItems() }}
+            />
+          )}
+        </main>
+      </div>
 
-      {activeTab === 'admin' && isAdmin && (
-        <AdminTab
-          onImportSuccess={() => { refetch(); refetchAttacks(); refetchItems() }}
-        />
-      )}
+      {/* Barre d'onglets basse (mobile) */}
+      <TabBar {...tabBarProps} variant="bottom" />
 
       {/* Modals */}
-      {pendingDiscovery && (
-        <DiscoveryModal
-          numero={pendingDiscovery.numero}
-          onConfirm={handleDiscoveryConfirm}
-          onCancel={() => setPendingDiscovery(null)}
-        />
-      )}
-
-      {showPasswordModal && (
-        <PasswordModal
-          onSuccess={handlePasswordSuccess}
-          onCancel={() => setShowPasswordModal(false)}
-        />
-      )}
-
-      {showAdminLogoutConfirm && (
-        <ConfirmPopup
-          title="Quitter le mode admin ?"
-          confirmLabel="Quitter"
-          onConfirm={() => { handleAdminLogout(); setShowAdminLogoutConfirm(false) }}
-          onCancel={() => setShowAdminLogoutConfirm(false)}
+      {showSettings && (
+        <SettingsPopup
+          player={player}
+          isAdmin={isAdmin}
+          onRequestLogin={() => { setShowSettings(false); setShowLoginModal(true) }}
+          onLogout={logout}
+          onAdminSuccess={() => { setIsAdmin(true); setShowSettings(false); setActiveTab('admin') }}
+          onAdminLogout={handleAdminLogout}
+          onClose={() => setShowSettings(false)}
         />
       )}
 
@@ -344,7 +203,7 @@ export default function App() {
           players={players}
           loading={playersLoading}
           isAdmin={isAdmin}
-          onSelect={handlePlayerLogin}
+          onSelect={(p) => { login(p); setShowLoginModal(false) }}
           onClose={() => setShowLoginModal(false)}
         />
       )}
@@ -353,7 +212,7 @@ export default function App() {
         <ManualDiscoveryModal
           pokemon={pokemon}
           discovered={discovered}
-          onDiscover={handleManualDiscover}
+          onDiscover={handleDiscoverWithCelebration}
           onClose={() => setShowManualModal(false)}
         />
       )}
@@ -362,7 +221,7 @@ export default function App() {
         <ScannerModal
           pokemon={pokemon}
           discovered={discovered}
-          onDiscover={handleManualDiscover}
+          onDiscover={handleDiscoverWithCelebration}
           onClose={() => setShowScannerModal(false)}
         />
       )}
@@ -372,6 +231,24 @@ export default function App() {
           onEnable={() => { enterFullscreen(); setShowFullscreenPrompt(false) }}
           onClose={() => setShowFullscreenPrompt(false)}
         />
+      )}
+
+      {/* Célébration de découverte */}
+      {celebration && (
+        <div className="fixed inset-0 z-[60] bg-[rgba(255,215,94,0.25)] flex items-center justify-center">
+          <div className={`${PANEL_LG} px-6 py-4 text-center animate-[celebrate-pop_0.4s_ease-out]`}>
+            <div className="text-2xl mb-1">✨</div>
+            {celebration.image_miniature && (
+              <img
+                src={celebration.image_miniature}
+                alt={celebration.nom}
+                className="pixelated h-16 mx-auto mb-1 object-contain"
+              />
+            )}
+            <div className="text-sm text-ink">Nouveau Pokémon découvert !</div>
+            <div className="text-xl text-ink">{celebration.nom}</div>
+          </div>
+        </div>
       )}
     </div>
   )

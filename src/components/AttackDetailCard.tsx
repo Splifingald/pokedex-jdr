@@ -5,7 +5,7 @@ function MoveStatIcon({ icon, value, style }: { icon: string; value: React.React
   return (
     <div className="flex items-center gap-1.5 text-xs">
       <span className="shrink-0">{icon}</span>
-      <span className="text-gray-200" style={style}>{value ?? '—'}</span>
+      <span className="text-ink" style={style}>{value ?? '—'}</span>
     </div>
   )
 }
@@ -14,7 +14,7 @@ export function AttackDetailCard({ attack }: { attack: Attack }) {
   return (
     <div className="flex flex-col gap-1.5">
       {attack.effet && (
-        <p className="text-gray-300 text-xs italic border-b border-gray-700 pb-1.5">{attack.effet}</p>
+        <p className="text-ink-muted text-xs italic border-b border-ink/20 pb-1.5">{attack.effet}</p>
       )}
       <div className="grid grid-cols-2 gap-x-3 gap-y-1">
         <div className="flex flex-col gap-1">

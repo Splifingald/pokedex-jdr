@@ -1,7 +1,31 @@
 @import "tailwindcss";
 
+@theme {
+  --color-app-bg: #14162a;
+  --color-cream: #f2ecd6;
+  --color-cream-secondary: #e4dcc2;
+  --color-cream-button: #e0d8bd;
+  --color-ink: #201c14;
+  --color-ink-muted: #5c5540;
+  --color-ink-muted-2: #8a8362;
+  --color-shell: #dc0a2d;
+  --color-hp-green: #4caf6b;
+  --color-hp-orange: #e8933d;
+  --color-hp-red: #d64545;
+  --color-xp-blue: #4a7fd6;
+  --color-tabbar-bg: #1c1e38;
+  --color-tabbar-inactive: #7a7c9a;
+
+  --shadow-pixel: 3px 3px 0 rgba(0, 0, 0, 0.35);
+  --shadow-pixel-sm: 2px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow-pixel-lg: 5px 5px 0 rgba(0, 0, 0, 0.35);
+
+  --radius-pixel: 8px;
+  --radius-pixel-sm: 6px;
+}
+
 :root {
-  --pokedex-red: #DC0A2D;
+  --pokedex-red: var(--color-shell);
   font-family: 'Jersey 25', system-ui, sans-serif;
 }
 
@@ -21,6 +45,27 @@ html, body, #root {
   padding: 0;
   overflow: hidden;
   background-color: #111827;
+}
+
+/* Animations partagées */
+@keyframes sheet-pop {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes idle-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+@keyframes jump-pop {
+  0% { transform: translateY(0); }
+  35% { transform: translateY(-24px); }
+  55% { transform: translateY(-24px); }
+  100% { transform: translateY(0); }
+}
+@keyframes celebrate-pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  60% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
 }
 
 /* Pixel art images sans lissage */

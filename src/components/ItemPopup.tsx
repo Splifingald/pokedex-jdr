@@ -27,14 +27,14 @@ export function ItemPopup({ row, item, pokedollarImageUrl, onSetQuantity, onSell
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="relative bg-gray-900 border-2 border-gray-600 rounded-lg shadow-[4px_4px_0px_#000] max-w-xs w-full p-6">
+      <div className="relative bg-cream border-[3px] border-ink rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel-lg)] max-w-xs w-full p-6">
         {item?.rarete && (
           <div className={`absolute top-3 left-3 border text-xs rounded-full px-2 py-0.5 ${rarityBadgeStyle(item.rarete)}`}>
             {item.rarete}
           </div>
         )}
         {item && (
-          <div className="absolute top-3 right-3 text-yellow-300 text-sm font-bold flex items-center gap-1">
+          <div className="absolute top-3 right-3 text-[#a3841a] text-sm font-bold flex items-center gap-1">
             <PokedollarIcon imageUrl={pokedollarImageUrl} /> {item.cout}
           </div>
         )}
@@ -47,11 +47,11 @@ export function ItemPopup({ row, item, pokedollarImageUrl, onSetQuantity, onSell
               <span className="text-5xl">🎒</span>
             )}
           </div>
-          <h3 className="text-white text-lg mb-2">{row.item_nom}</h3>
+          <h3 className="text-ink text-lg mb-2">{row.item_nom}</h3>
           {item?.description ? (
-            <p className="text-gray-400 text-sm mb-4">{item.description}</p>
+            <p className="text-ink-muted text-sm mb-4">{item.description}</p>
           ) : !item ? (
-            <p className="text-gray-500 text-xs mb-4 italic">Objet absent du catalogue</p>
+            <p className="text-ink-muted-2 text-xs mb-4 italic">Objet absent du catalogue</p>
           ) : null}
 
           <div className="flex items-center gap-3 mb-5">
@@ -65,7 +65,7 @@ export function ItemPopup({ row, item, pokedollarImageUrl, onSetQuantity, onSell
               min={0}
               value={row.quantity}
               onCommit={(v) => onSetQuantity(Math.max(0, v))}
-              className="w-16 text-center bg-gray-800 border border-gray-700 rounded py-1.5 text-white"
+              className="w-16 text-center bg-white border-2 border-ink rounded py-1.5 text-ink"
             />
             <button
               onClick={() => onSetQuantity(row.quantity + 1)}
