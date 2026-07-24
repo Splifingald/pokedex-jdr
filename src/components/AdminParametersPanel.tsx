@@ -8,12 +8,14 @@ export function AdminParametersPanel() {
   const [maxTeamSize, setMaxTeamSize] = useState(parameters.max_team_size)
   const [carteImageUrl, setCarteImageUrl] = useState(parameters.carte_image_url)
   const [carteCouleursImageUrl, setCarteCouleursImageUrl] = useState(parameters.carte_couleurs_image_url)
+  const [accueilImageUrl, setAccueilImageUrl] = useState(parameters.accueil_image_url)
 
   useEffect(() => {
     setMaxMoves(parameters.max_moves)
     setMaxTeamSize(parameters.max_team_size)
     setCarteImageUrl(parameters.carte_image_url)
     setCarteCouleursImageUrl(parameters.carte_couleurs_image_url)
+    setAccueilImageUrl(parameters.accueil_image_url)
   }, [parameters])
 
   const commitMaxMoves = (v: number) => {
@@ -85,6 +87,18 @@ export function AdminParametersPanel() {
               onChange={(e) => setCarteCouleursImageUrl(e.target.value)}
               onBlur={saveCarte}
               placeholder="https://…"
+              className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+            />
+          </div>
+
+          <div className="border-t-2 border-[#cfc7a8] pt-4">
+            <label className="text-ink-muted-2 text-sm block mb-1">Lien du fond d'écran de l'accueil</label>
+            <input
+              type="text"
+              value={accueilImageUrl}
+              onChange={(e) => setAccueilImageUrl(e.target.value)}
+              onBlur={() => updateParameters({ accueil_image_url: accueilImageUrl })}
+              placeholder="https://… (vide = fond par défaut)"
               className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
             />
           </div>

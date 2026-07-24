@@ -5,10 +5,11 @@ export interface RoamPos {
   bottom: number
 }
 
-// Zone sûre de déambulation (en % de la scène), cf. maquette
+// Zone sûre de déambulation (en % de la scène) — resserrée par rapport à la
+// maquette pour que les grands sprites (304px) restent visibles à l'écran
 const randomPos = (): RoamPos => ({
-  left: 18 + Math.random() * 64,
-  bottom: 14 + Math.random() * 30,
+  left: 30 + Math.random() * 40,
+  bottom: 8 + Math.random() * 22,
 })
 
 /**

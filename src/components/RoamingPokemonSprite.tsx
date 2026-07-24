@@ -42,26 +42,30 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
     >
       {/* Couche saut (une seule à la fois, pilotée par HomeTab) */}
       <div style={isJumping ? { animation: 'jump-pop 0.55s ease-out 1' } : undefined}>
-        {/* Couche flottement continu */}
+        {/* Couche flottement continu — conteneur transparent : simple zone cliquable,
+            le Pokémon semble se déplacer librement dans la prairie */}
         <div
-          className="w-[76px] h-[76px] rounded-lg border-2 border-ink bg-cream/85 flex items-center justify-center overflow-hidden shadow-[var(--shadow-pixel)]"
+          className="w-[304px] h-[304px] flex items-center justify-center"
           style={{ animation: `idle-bob ${bobDuration}s ease-in-out ${bobDelay}s infinite` }}
         >
           {pokemon?.image_miniature ? (
             <img
               src={pokemon.image_miniature}
               alt={playerPokemon.pokemon_nom}
-              className={`pixelated max-w-[90%] max-h-[90%] object-contain ${isKo ? 'grayscale opacity-50' : ''}`}
+              className={`pixelated max-w-full max-h-full object-contain [filter:drop-shadow(2px_4px_2px_rgba(0,0,0,0.3))] ${isKo ? 'grayscale opacity-50' : ''}`}
             />
           ) : (
-            <span className="text-ink-muted-2 text-2xl">?</span>
+            <span className="text-[#14320f] text-4xl">?</span>
           )}
         </div>
       </div>
 
-      <span className="mt-1 px-1.5 py-0.5 rounded text-xs text-[#14320f] bg-cream/90 whitespace-nowrap">
-        {hp}/{maxHp} PV
-      </span>
+      {/* PV affichés seulement si le Pokémon n'est pas au max */}
+      {hp < maxHp && (
+        <span className="mt-1 px-1.5 py-0.5 rounded text-xs text-[#14320f] bg-cream/90 whitespace-nowrap">
+          {hp}/{maxHp} PV
+        </span>
+      )}
     </button>
   )
 }

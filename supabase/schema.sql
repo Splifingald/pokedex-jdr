@@ -34,6 +34,7 @@
 -- ALTER TABLE player_pokemon DROP COLUMN IF EXISTS max_hp_override;
 -- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS carte_image_url text NOT NULL DEFAULT '';
 -- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS carte_couleurs_image_url text NOT NULL DEFAULT '';
+-- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS accueil_image_url text NOT NULL DEFAULT '';
 -- ============================================================
 
 -- Table principale des pokémon
@@ -202,6 +203,7 @@ CREATE TABLE IF NOT EXISTS admin_parameters (
   max_team_size             integer NOT NULL DEFAULT 3,
   carte_image_url           text NOT NULL DEFAULT '',
   carte_couleurs_image_url  text NOT NULL DEFAULT '',
+  accueil_image_url         text NOT NULL DEFAULT '',
   CONSTRAINT single_row CHECK (id = 1)
 );
 INSERT INTO admin_parameters (id, max_moves, max_team_size)

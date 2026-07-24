@@ -126,7 +126,7 @@ function OwnedVitals({
       )}
 
       <div className="flex flex-col gap-2">
-        <HpGauge current={hp} max={maxHp} />
+        <HpGauge current={hp} max={maxHp} onChange={setHp} />
         {maxXp != null ? (
           <XpGauge xp={playerPokemon.xp} max={maxXp} milestones={milestones} onXpChange={handleXpChange} />
         ) : (

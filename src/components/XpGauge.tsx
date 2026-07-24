@@ -49,7 +49,15 @@ export function XpGauge({ xp, max, milestones, onXpChange }: Props) {
         ))}
       </div>
 
-      <div className="h-2.5 rounded-full bg-[#cfc7a8] border border-ink overflow-hidden">
+      <div
+        className="h-2.5 rounded-full bg-[#cfc7a8] border border-ink overflow-hidden cursor-pointer"
+        title="Cliquer pour régler l'XP"
+        onClick={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect()
+          const frac = (e.clientX - rect.left) / rect.width
+          onXpChange(clampXp(Math.round(frac * max), max))
+        }}
+      >
         <div className="h-full rounded-full bg-xp-blue transition-all" style={{ width: `${pct}%` }} />
       </div>
 

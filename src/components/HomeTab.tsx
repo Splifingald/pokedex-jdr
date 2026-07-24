@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import type { Player, Pokemon, Attack } from '../types'
+import { DEFAULT_ACCUEIL_IMAGE_URL } from '../types'
 import { usePlayerPokemon } from '../hooks/usePlayerPokemon'
 import { useAdminParameters } from '../hooks/useAdminParameters'
 import { useToast } from '../context/ToastContext'
@@ -18,13 +19,16 @@ interface Props {
   onRequestLogin: () => void
 }
 
-// Fond "prairie" : ciel clair en haut, herbe dégradée en bas, fines rayures verticales pixel
-const PRAIRIE_BG: React.CSSProperties = {
-  backgroundImage: [
-    'repeating-linear-gradient(90deg, rgba(255,255,255,0.07) 0 8px, transparent 8px 16px)',
-    'linear-gradient(to bottom, #cdeed0 0%, #cdeed0 30%, #6fbd5a 30%, #4f9a41 100%)',
-  ].join(', '),
-}
+// Fond d'accueil : image configurable dans Admin → Paramètres.
+// L'image occupe toujours toute la hauteur (auto 100%) et reste centrée
+// quand l'écran est plus étroit qu'elle.
+const homeBgStyle = (url: string): React.CSSProperties => ({
+  backgroundColor: '#4f9a41',
+  backgroundImage: `url(${url})`,
+  backgroundSize: 'auto 100%',
+  backgroundPosition: 'center',
+  backgroundRepeat: 'no-repeat',
+})
 
 export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, onScan, onRequestLogin }: Props) {
   const { roster, updateXp, toggleInTeam, addMove, removeMove, deleteOwnedPokemon } = usePlayerPokemon(player?.id ?? null)
@@ -100,12 +104,10 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, onScan,
   }
 
   return (
-    <div className="flex-1 relative overflow-hidden" style={PRAIRIE_BG}>
-      {/* Bandeau titre */}
-      <div className="absolute top-0 left-0 right-0 px-3.5 py-3 z-[5] bg-gradient-to-b from-[rgba(20,50,15,0.35)] to-transparent">
-        <span className="text-lg text-cream tracking-wide [text-shadow:2px_2px_0_rgba(0,0,0,0.4)]">MON ÉQUIPE</span>
-      </div>
-
+    <div
+      className="flex-1 relative overflow-hidden"
+      style={homeBgStyle(parameters.accueil_image_url?.trim() || DEFAULT_ACCUEIL_IMAGE_URL)}
+    >
       {/* Équipe en déambulation */}
       {team.map((pp, idx) => (
         <RoamingPokemonSprite

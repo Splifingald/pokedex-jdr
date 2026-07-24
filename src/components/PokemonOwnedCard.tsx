@@ -30,7 +30,7 @@ export function PokemonOwnedCard({ playerPokemon, pokemon, variant, showPcBadge 
     <img
       src={pokemon.image_miniature}
       alt={playerPokemon.pokemon_nom}
-      className={`pixelated max-w-[85%] max-h-[85%] object-contain ${isKo ? 'grayscale opacity-50' : ''}`}
+      className={`pixelated w-full h-full object-contain ${isKo ? 'grayscale opacity-50' : ''}`}
     />
   ) : (
     <span className="text-ink-muted-2 text-3xl">?</span>

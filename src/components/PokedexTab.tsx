@@ -1,13 +1,18 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import type { Pokemon, Attack, PlayerPokemon } from '../types'
 import { Chip } from './Chip'
+import { TypeBadge } from './TypeBadge'
 import { DiscoveryModal } from './DiscoveryModal'
 import { PokemonDetailSheet } from './PokemonDetailSheet'
 import { normalizeSearch } from '../lib/normalizeSearch'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
-import { PIXEL_BORDER_SM } from '../lib/panelStyles'
+import { PANEL, PIXEL_BORDER_SM } from '../lib/panelStyles'
 
 type SortKey = 'numero' | 'type' | 'alpha'
+type LayoutKey = 'grid' | 'list'
+
+// Colonnes fluides : taille mini fixe, et jusqu'à 8 colonnes sur grand écran
+export const POKEDEX_GRID_COLS = 'repeat(auto-fill, minmax(max(96px, 11.5%), 1fr))'
 
 interface Props {
   pokemon: Pokemon[]
@@ -48,6 +53,7 @@ export function PokedexTab({
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('numero')
+  const [layout, setLayout] = useState<LayoutKey>('grid')
   const [selected, setSelected] = useState<Pokemon | null>(null)
   const [pendingDiscovery, setPendingDiscovery] = useState<Pokemon | null>(null)
 
@@ -127,8 +133,7 @@ export function PokedexTab({
     <div className="flex-1 flex flex-col overflow-hidden relative">
       {/* En-tête fixe */}
       <div className="shrink-0 px-4 pt-3 pb-2">
-        <div className="flex items-center justify-between mb-2.5">
-          <span className="text-lg text-cream tracking-wide">POKÉDEX</span>
+        <div className="flex justify-end mb-2">
           <span className="text-xs text-[#9a9cba]">{discovered.size} / {visibleCount} découverts</span>
         </div>
 
@@ -164,10 +169,17 @@ export function PokedexTab({
           )}
         </div>
 
-        <div className="flex gap-1.5 flex-wrap">
+        <div className="flex gap-1.5 flex-wrap items-center">
           {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
             <Chip key={k} label={SORT_LABELS[k]} active={sortKey === k} onClick={() => setSortKey(k)} />
           ))}
+          <button
+            onClick={() => setLayout((l) => (l === 'grid' ? 'list' : 'grid'))}
+            title={layout === 'grid' ? 'Vue liste' : 'Vue grille'}
+            className={`px-2.5 py-1 rounded-md text-sm ${BUTTON_STYLE.gray}`}
+          >
+            {layout === 'grid' ? '☰' : '▦'}
+          </button>
         </div>
       </div>
 
@@ -175,8 +187,8 @@ export function PokedexTab({
       <div className="flex-1 overflow-y-auto px-4 pt-1 pb-24">
         {filteredPokemon.length === 0 ? (
           <p className="text-[#7a7c9a] text-sm text-center mt-8">Aucun Pokémon trouvé.</p>
-        ) : (
-          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5">
+        ) : layout === 'grid' ? (
+          <div className="grid gap-2.5" style={{ gridTemplateColumns: POKEDEX_GRID_COLS }}>
             {filteredPokemon.map((p) => {
               const isDiscovered = discovered.has(p.nom)
               const owned = roster.some((r) => r.pokemon_nom === p.nom)
@@ -193,7 +205,7 @@ export function PokedexTab({
                   {isDiscovered ? (
                     <div className={`relative w-full aspect-square rounded-md ${PIXEL_BORDER_SM} bg-cream flex items-center justify-center overflow-hidden shadow-[var(--shadow-pixel-sm)]`}>
                       {p.image_miniature ? (
-                        <img src={p.image_miniature} alt={p.nom} className="pixelated max-w-[85%] max-h-[85%] object-contain" />
+                        <img src={p.image_miniature} alt={p.nom} className="pixelated w-full h-full object-contain" />
                       ) : (
                         <span className="text-ink-muted-2 text-2xl">?</span>
                       )}
@@ -210,6 +222,41 @@ export function PokedexTab({
                     </div>
                   )}
                   <span className="text-[11px] text-[#9a9cba]">#{p.numero}</span>
+                </button>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {filteredPokemon.map((p) => {
+              const isDiscovered = discovered.has(p.nom)
+              const owned = roster.some((r) => r.pokemon_nom === p.nom)
+              return (
+                <button
+                  key={p.id}
+                  ref={(el) => {
+                    if (el) cellRefs.current.set(p.numero, el)
+                    else cellRefs.current.delete(p.numero)
+                  }}
+                  onClick={() => (isDiscovered ? setSelected(p) : setPendingDiscovery(p))}
+                  className={`${PANEL} flex items-center gap-2.5 p-2 text-left w-full ${isDiscovered ? '' : 'opacity-75'}`}
+                >
+                  <div className={`w-11 h-11 shrink-0 rounded-md border-2 border-ink flex items-center justify-center overflow-hidden ${isDiscovered ? 'bg-cream-secondary' : 'bg-[#2a2c48]'}`}>
+                    {isDiscovered && p.image_miniature ? (
+                      <img src={p.image_miniature} alt={p.nom} className="pixelated w-full h-full object-contain" />
+                    ) : (
+                      <span className={`text-xl ${isDiscovered ? 'text-ink-muted-2' : 'text-[#5a5c78]'}`}>?</span>
+                    )}
+                  </div>
+                  <span className="text-xs text-ink-muted-2 shrink-0">#{p.numero}</span>
+                  <span className="flex-1 text-ink text-sm font-bold truncate">
+                    {isDiscovered ? p.nom : '???'}
+                    {isAdmin && p.cache && (
+                      <span className="ml-2 text-[9px] bg-purple-200 text-purple-900 border border-purple-700 rounded px-1 align-middle">C</span>
+                    )}
+                  </span>
+                  {owned && <span className="text-sm shrink-0" title="Dans votre roster">⭐</span>}
+                  {isDiscovered && <TypeBadge type={p.type} small />}
                 </button>
               )
             })}

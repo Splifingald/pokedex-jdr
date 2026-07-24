@@ -111,8 +111,11 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
   return (
     <div className="flex-1 overflow-y-auto p-4">
       <div className="mb-4">
-        <label className="text-[#9a9cba] text-sm mb-2 block">Ajouter un pokémon à mon équipe</label>
-        <PokemonSearchInput options={addableOptions} onSelect={handleAddOwned} />
+        <PokemonSearchInput
+          options={addableOptions}
+          onSelect={handleAddOwned}
+          placeholder="Ajouter un pokémon…"
+        />
       </div>
 
       {/* Tri + disposition + soin */}
@@ -146,7 +149,7 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
       ) : sortedRoster.length === 0 ? (
         <p className="text-[#7a7c9a] text-sm">Aucun Pokémon possédé.</p>
       ) : layout === 'grid' ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
+        <div className="grid gap-2.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(max(150px, 11.5%), 1fr))' }}>
           {sortedRoster.map((pp) => (
             <PokemonOwnedCard
               key={pp.id}

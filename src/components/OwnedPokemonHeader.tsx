@@ -139,7 +139,7 @@ export function OwnedPokemonHeader({
         )}
 
         <div className="mt-2 flex flex-col gap-2">
-          <HpGauge current={hp} max={maxHp} />
+          <HpGauge current={hp} max={maxHp} onChange={onHpChange} />
           {maxXp != null ? (
             <XpGauge xp={xp} max={maxXp} milestones={milestones} onXpChange={onXpChange} />
           ) : (

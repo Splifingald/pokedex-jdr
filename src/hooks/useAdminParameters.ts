@@ -8,6 +8,7 @@ const DEFAULTS: AdminParameters = {
   max_team_size: 3,
   carte_image_url: '',
   carte_couleurs_image_url: '',
+  accueil_image_url: '',
 }
 
 export function useAdminParameters() {

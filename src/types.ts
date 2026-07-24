@@ -184,7 +184,12 @@ export interface AdminParameters {
   max_team_size: number
   carte_image_url: string
   carte_couleurs_image_url: string
+  accueil_image_url: string
 }
+
+// Fond par défaut de l'écran d'accueil (modifiable dans Admin → Paramètres)
+export const DEFAULT_ACCUEIL_IMAGE_URL =
+  'https://media-s3-us-east-1.ceros.com/hype-beast/images/2018/07/13/a9a51bc0b8d626db493ab5f9a971b043/background-hero.png?imageOpt=1&fit=bounds&width=2163'
 
 // ── Objets (Sac) ──────────────────────────────────────────────
 export interface Item {
