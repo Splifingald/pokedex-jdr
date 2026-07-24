@@ -45,7 +45,7 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
         {/* Couche flottement continu — conteneur transparent : simple zone cliquable,
             le Pokémon semble se déplacer librement dans la prairie */}
         <div
-          className="w-[304px] h-[304px] flex items-center justify-center"
+          className="w-[912px] h-[912px] max-w-[95vw] max-h-[70vh] flex items-center justify-center"
           style={{ animation: `idle-bob ${bobDuration}s ease-in-out ${bobDelay}s infinite` }}
         >
           {pokemon?.image_miniature ? (
