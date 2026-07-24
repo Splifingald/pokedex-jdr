@@ -207,9 +207,9 @@ export function CarteTab({ parameters, isAdmin }: Props) {
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden relative bg-gray-950">
+    <div className="flex-1 flex flex-col overflow-hidden relative bg-app-bg">
       {!parameters.carte_image_url ? (
-        <div className="flex-1 flex items-center justify-center text-gray-500 text-sm p-6 text-center">
+        <div className="flex-1 flex items-center justify-center text-[#7a7c9a] text-sm p-6 text-center">
           Aucune carte configurée. Ajoutez un lien d'image dans Admin → Paramètres.
         </div>
       ) : (
@@ -244,30 +244,36 @@ export function CarteTab({ parameters, isAdmin }: Props) {
       )}
 
       {selected && (
-        <div className="shrink-0 bg-gray-900 border-t-2 border-gray-700 p-4 max-h-[45%] overflow-y-auto">
+        <div className="shrink-0 bg-cream border-t-4 border-ink rounded-t-2xl p-4 max-h-[45%] overflow-y-auto animate-[sheet-pop_0.25s_ease-out]">
           <div className="flex items-center gap-2 mb-2">
             {selected.type && (
-              <span className="text-xs bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-gray-300 uppercase">
+              <span className="text-xs bg-cream-secondary border-2 border-ink rounded px-1.5 py-0.5 text-ink-muted uppercase">
                 {selected.type}
               </span>
             )}
-            <h3 className="text-white font-bold">{selected.titre}</h3>
+            <h3 className="text-ink font-bold flex-1">{selected.titre}</h3>
+            <button
+              onClick={() => setSelected(null)}
+              className={`w-7 h-7 shrink-0 rounded-md text-sm font-bold ${BUTTON_STYLE.gray}`}
+            >
+              ✕
+            </button>
           </div>
           {selected.image_url && (
             <button
               onClick={() => setViewerOpen(true)}
-              className={`mb-2 px-3 py-1.5 rounded text-xs font-bold ${BUTTON_STYLE.blue}`}
+              className={`mb-2 px-3 py-1.5 rounded-md text-xs font-bold ${BUTTON_STYLE.blue}`}
             >
               🖼 Voir l'image
             </button>
           )}
           {selected.description && (
-            <p className="text-gray-300 text-sm whitespace-pre-wrap">{selected.description}</p>
+            <p className="text-ink-muted text-sm whitespace-pre-wrap">{selected.description}</p>
           )}
           {isAdmin && selected.admin_description && (
-            <div className="mt-3 pt-3 border-t border-gray-700">
-              <p className="text-yellow-500 text-xs font-bold mb-1">🛠 Description admin</p>
-              <p className="text-yellow-200/90 text-sm whitespace-pre-wrap">{selected.admin_description}</p>
+            <div className="mt-3 pt-3 border-t-2 border-[#cfc7a8]">
+              <p className="text-[#a3841a] text-xs font-bold mb-1">🛠 Description admin</p>
+              <p className="text-ink-muted text-sm whitespace-pre-wrap">{selected.admin_description}</p>
             </div>
           )}
         </div>

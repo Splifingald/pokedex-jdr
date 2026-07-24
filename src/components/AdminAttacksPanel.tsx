@@ -66,10 +66,10 @@ export function AdminAttacksPanel() {
   }, [attacks, search, typeFilter, sortKey])
 
   return (
-    <div className="bg-gray-900 border-2 border-yellow-600 rounded-lg shadow-[4px_4px_0px_#000] w-full p-6">
+    <div className="bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] w-full p-6">
       <div className="flex items-center gap-2 mb-5">
         <span className="text-2xl">💥</span>
-        <h3 className="text-yellow-400 text-lg">Capacités</h3>
+        <h3 className="text-[#a3841a] text-lg font-bold">Capacités</h3>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-2 mb-5">
@@ -78,12 +78,12 @@ export function AdminAttacksPanel() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Rechercher une attaque…"
-          className="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm outline-none focus:border-red-400"
+          className="flex-1 bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
         />
         <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
-          className="bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm outline-none focus:border-red-400"
+          className="bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
         >
           <option value="">Tous les types</option>
           {availableTypes.map((t) => (
@@ -93,7 +93,7 @@ export function AdminAttacksPanel() {
         <select
           value={sortKey}
           onChange={(e) => setSortKey(e.target.value as SortKey)}
-          className="bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm outline-none focus:border-red-400"
+          className="bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
         >
           {SORT_OPTIONS.map((o) => (
             <option key={o.id} value={o.id}>Trier par : {o.label}</option>
@@ -102,16 +102,16 @@ export function AdminAttacksPanel() {
       </div>
 
       {loading ? (
-        <p className="text-gray-500 text-sm">Chargement…</p>
+        <p className="text-ink-muted-2 text-sm">Chargement…</p>
       ) : filtered.length === 0 ? (
-        <p className="text-gray-500 text-sm">Aucune capacité.</p>
+        <p className="text-ink-muted-2 text-sm">Aucune capacité.</p>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {filtered.map((a) => (
-            <div key={a.nom} className="bg-gray-800 border border-gray-700 rounded-lg p-3">
+            <div key={a.nom} className="bg-cream-secondary border-2 border-ink rounded-lg p-3">
               <div className="flex items-center gap-2 mb-2 min-w-0">
                 <TypeBadge type={a.type} small />
-                <span className="text-white text-sm font-bold truncate">{a.nom}</span>
+                <span className="text-ink text-sm font-bold truncate">{a.nom}</span>
               </div>
               <AttackDetailCard attack={a} />
             </div>

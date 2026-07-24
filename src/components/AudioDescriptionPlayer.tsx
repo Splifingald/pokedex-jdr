@@ -46,12 +46,12 @@ export function AudioDescriptionPlayer({ audioUrl }: Props) {
         }}
         onEnded={() => { setAudioState('idle'); setProgress(0) }}
       />
-      <div className="mx-4 my-3 px-3 py-2 bg-gray-800/60 border border-gray-700 rounded-lg flex items-center gap-3">
+      <div className="my-3 px-3 py-2 bg-cream-secondary border-2 border-ink rounded-lg flex items-center gap-3">
         <span className="text-lg shrink-0">🔊</span>
-        <span className="text-gray-300 text-xs shrink-0">Description</span>
+        <span className="text-ink-muted text-xs shrink-0">Description</span>
 
         <div
-          className="flex-1 h-1.5 bg-gray-700 rounded-full overflow-hidden cursor-pointer"
+          className="flex-1 h-1.5 bg-[#cfc7a8] rounded-full overflow-hidden cursor-pointer"
           onClick={(e) => {
             const a = audioRef.current
             if (!a || !a.duration) return

@@ -70,10 +70,10 @@ export function ManualDiscoveryModal({ pokemon, discovered, onDiscover, onClose 
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-gray-900 border-2 border-gray-600 rounded-lg shadow-[4px_4px_0px_#000] max-w-sm w-full p-6">
+      <div className="bg-cream border-[3px] border-ink rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel-lg)] max-w-sm w-full p-6">
         <div className="flex items-center justify-between mb-5">
-          <h3 className="text-white text-lg">Découvrir un Pokémon</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">✕</button>
+          <h3 className="text-ink text-lg">Découvrir un Pokémon</h3>
+          <button onClick={onClose} className="text-ink-muted-2 hover:text-ink text-xl leading-none">✕</button>
         </div>
 
         <form onSubmit={handleSearch} className="flex gap-2 mb-4">
@@ -83,7 +83,7 @@ export function ManualDiscoveryModal({ pokemon, discovered, onDiscover, onClose 
             value={query}
             onChange={(e) => { setQuery(e.target.value); setResult('idle') }}
             placeholder="Numéro, nom ou code secret"
-            className="flex-1 bg-gray-800 border-2 border-gray-600 rounded px-3 py-2 text-white text-sm outline-none focus:border-red-400 transition-colors"
+            className="flex-1 min-w-0 bg-white border-2 border-ink rounded-md px-3 py-2 text-ink text-sm placeholder-ink-muted-2 outline-none"
           />
           <button
             type="submit"
@@ -95,18 +95,18 @@ export function ManualDiscoveryModal({ pokemon, discovered, onDiscover, onClose 
 
         {/* Résultat */}
         {result === 'notfound' && (
-          <p className="text-red-400 text-sm text-center py-2">❌ Aucun Pokémon trouvé.</p>
+          <p className="text-hp-red text-sm text-center py-2">❌ Aucun Pokémon trouvé.</p>
         )}
 
         {result === 'already' && foundPokemon && (
           <div className="text-center py-2">
-            <p className="text-yellow-400 text-sm mb-1">⚠ Déjà dans le Pokédex !</p>
-            <p className="text-gray-400 text-xs">#{foundPokemon.numero} {foundPokemon.nom}</p>
+            <p className="text-[#a3841a] text-sm mb-1">⚠ Déjà dans le Pokédex !</p>
+            <p className="text-ink-muted-2 text-xs">#{foundPokemon.numero} {foundPokemon.nom}</p>
           </div>
         )}
 
         {result === 'found' && foundPokemon && (
-          <div className="bg-gray-800 border border-gray-600 rounded-lg p-4 text-center">
+          <div className="bg-cream-secondary border-2 border-ink rounded-lg p-4 text-center">
             {foundPokemon.image_miniature && (
               <img
                 src={foundPokemon.image_miniature}
@@ -114,9 +114,9 @@ export function ManualDiscoveryModal({ pokemon, discovered, onDiscover, onClose 
                 className="w-16 h-16 object-contain mx-auto mb-2 pixelated"
               />
             )}
-            <p className="text-gray-400 text-xs mb-0.5">#{foundPokemon.numero}</p>
-            <p className="text-white font-bold">{foundPokemon.nom}</p>
-            <p className="text-gray-400 text-xs mb-4">{foundPokemon.type}</p>
+            <p className="text-ink-muted-2 text-xs mb-0.5">#{foundPokemon.numero}</p>
+            <p className="text-ink font-bold">{foundPokemon.nom}</p>
+            <p className="text-ink-muted-2 text-xs mb-4">{foundPokemon.type}</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 onClick={onClose}

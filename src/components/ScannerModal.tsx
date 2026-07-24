@@ -269,7 +269,7 @@ export function ScannerModal({ pokemon, discovered, onDiscover, onClose }: Props
                   'bottom-0 right-0 border-b-[3px] border-r-[3px] rounded-br-lg',
                 ] as const
               ).map((cls, i) => (
-                <div key={i} className={`absolute w-8 h-8 border-red-500 ${cls}`} />
+                <div key={i} className={`absolute w-8 h-8 border-shell ${cls}`} />
               ))}
             </div>
             <p className="mt-5 text-white/60 text-xs tracking-wide">
@@ -327,7 +327,7 @@ export function ScannerModal({ pokemon, discovered, onDiscover, onClose }: Props
             <p className="text-gray-500 text-sm mb-5">Lecture OCR de l'image</p>
             <div className="w-56 h-2 bg-gray-800 rounded-full overflow-hidden mx-auto">
               <div
-                className="h-full bg-red-500 rounded-full transition-all duration-200"
+                className="h-full bg-shell rounded-full transition-all duration-200"
                 style={{ width: `${progress}%` }}
               />
             </div>
@@ -338,8 +338,8 @@ export function ScannerModal({ pokemon, discovered, onDiscover, onClose }: Props
 
       {/* ── RÉSULTAT TROUVÉ ───────────────────────────────────────── */}
       {phase === 'result' && found && (
-        <div className="flex-1 flex flex-col items-center justify-center gap-5 bg-gray-900 p-8">
-          <p className="text-green-400 text-sm tracking-widest uppercase">
+        <div className="flex-1 flex flex-col items-center justify-center gap-5 bg-app-bg p-8">
+          <p className="text-hp-green text-sm tracking-widest uppercase">
             Pokémon identifié !
           </p>
 
@@ -352,13 +352,13 @@ export function ScannerModal({ pokemon, discovered, onDiscover, onClose }: Props
           )}
 
           <div className="text-center">
-            <p className="text-gray-400 text-sm">#{found.numero}</p>
-            <h2 className="text-white text-3xl">{found.nom}</h2>
+            <p className="text-[#9a9cba] text-sm">#{found.numero}</p>
+            <h2 className="text-cream text-3xl">{found.nom}</h2>
           </div>
 
           {alreadyDiscovered ? (
             <div className="text-center mt-2">
-              <p className="text-yellow-500 text-sm mb-4">
+              <p className="text-[#ffd75e] text-sm mb-4">
                 Ce Pokémon a déjà été découvert !
               </p>
               <button
@@ -378,7 +378,7 @@ export function ScannerModal({ pokemon, discovered, onDiscover, onClose }: Props
               </button>
               <button
                 onClick={confirm}
-                className={`px-7 py-3 rounded-xl font-bold ${BUTTON_STYLE.gray}`}
+                className={`px-7 py-3 rounded-xl font-bold ${BUTTON_STYLE.green}`}
               >
                 Découvrir !
               </button>
@@ -389,10 +389,10 @@ export function ScannerModal({ pokemon, discovered, onDiscover, onClose }: Props
 
       {/* ── PAS DE RÉSULTAT / ERREUR ──────────────────────────────── */}
       {(phase === 'nomatch' || phase === 'error') && (
-        <div className="flex-1 flex flex-col items-center justify-center gap-5 bg-gray-900 p-8 text-center">
+        <div className="flex-1 flex flex-col items-center justify-center gap-5 bg-app-bg p-8 text-center">
           <div className="text-6xl">{phase === 'nomatch' ? '🔍' : '⚠️'}</div>
           <div>
-            <p className="text-red-400 text-xl mb-2">
+            <p className="text-hp-red text-xl mb-2">
               {phase === 'nomatch' ? 'Aucun Pokémon trouvé' : "Erreur d'analyse"}
             </p>
             <p className="text-gray-500 text-sm leading-relaxed max-w-xs">

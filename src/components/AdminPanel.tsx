@@ -323,18 +323,18 @@ export function AdminPanel({ onImportSuccess }: Props) {
   }
 
   return (
-    <div className="bg-gray-900 border-2 border-yellow-600 rounded-lg shadow-[4px_4px_0px_#000] max-w-sm w-full p-6">
+    <div className="bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] max-w-sm w-full p-6">
         <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-2">
             <span className="text-2xl">🛠️</span>
-            <h3 className="text-yellow-400 text-lg">Import CSV</h3>
+            <h3 className="text-[#a3841a] text-lg font-bold">Import CSV</h3>
           </div>
         </div>
 
         <div className="mb-5">
-          <p className="text-gray-400 text-sm mb-3">
+          <p className="text-ink-muted-2 text-sm mb-3">
             Importer un CSV Pokémon, Capacités, Carte ou Objets (détecté automatiquement).<br />
-            <span className="text-yellow-600 text-xs">⚠ Remplace toute la liste existante correspondante.</span>
+            <span className="text-[#a3841a] text-xs">⚠ Remplace toute la liste existante correspondante.</span>
           </p>
           <button
             onClick={() => fileRef.current?.click()}
@@ -347,10 +347,10 @@ export function AdminPanel({ onImportSuccess }: Props) {
         </div>
 
         {message && (
-          <div className={`text-sm p-3 rounded mb-4 ${
-            status === 'success' ? 'bg-green-900/50 text-green-300 border border-green-700' :
-            status === 'error'   ? 'bg-red-900/50 text-red-300 border border-red-700' :
-            'bg-gray-800 text-gray-300'
+          <div className={`text-sm p-3 rounded mb-4 border-2 ${
+            status === 'success' ? 'bg-green-100 text-green-900 border-green-700' :
+            status === 'error'   ? 'bg-red-100 text-red-900 border-red-700' :
+            'bg-cream-secondary text-ink-muted border-ink/40'
           }`}>
             {message}
           </div>

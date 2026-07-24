@@ -33,59 +33,59 @@ export function AdminParametersPanel() {
   }
 
   return (
-    <div className="bg-gray-900 border-2 border-yellow-600 rounded-lg shadow-[4px_4px_0px_#000] max-w-sm w-full p-6">
+    <div className="bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] max-w-sm w-full p-6">
       <div className="flex items-center gap-2 mb-5">
         <span className="text-2xl">⚙️</span>
-        <h3 className="text-yellow-400 text-lg">Paramètres</h3>
+        <h3 className="text-[#a3841a] text-lg font-bold">Paramètres</h3>
       </div>
 
       {loading ? (
-        <p className="text-gray-500 text-sm">Chargement…</p>
+        <p className="text-ink-muted-2 text-sm">Chargement…</p>
       ) : (
         <div className="flex flex-col gap-4">
           <div>
-            <label className="text-gray-400 text-sm block mb-1">Nombre max de capacités par pokémon</label>
+            <label className="text-ink-muted-2 text-sm block mb-1">Nombre max de capacités par pokémon</label>
             <NumberInput
               min={1}
               fallback={1}
               value={maxMoves}
               onCommit={commitMaxMoves}
-              className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm outline-none focus:border-red-400"
+              className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
             />
           </div>
 
           <div>
-            <label className="text-gray-400 text-sm block mb-1">Taille max de l'équipe</label>
+            <label className="text-ink-muted-2 text-sm block mb-1">Taille max de l'équipe</label>
             <NumberInput
               min={1}
               fallback={1}
               value={maxTeamSize}
               onCommit={commitMaxTeamSize}
-              className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm outline-none focus:border-red-400"
+              className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
             />
           </div>
 
-          <div className="border-t border-gray-700 pt-4">
-            <label className="text-gray-400 text-sm block mb-1">Lien de l'image de la carte</label>
+          <div className="border-t-2 border-[#cfc7a8] pt-4">
+            <label className="text-ink-muted-2 text-sm block mb-1">Lien de l'image de la carte</label>
             <input
               type="text"
               value={carteImageUrl}
               onChange={(e) => setCarteImageUrl(e.target.value)}
               onBlur={saveCarte}
               placeholder="https://…"
-              className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm outline-none focus:border-red-400"
+              className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
             />
           </div>
 
           <div>
-            <label className="text-gray-400 text-sm block mb-1">Lien de l'image des couleurs</label>
+            <label className="text-ink-muted-2 text-sm block mb-1">Lien de l'image des couleurs</label>
             <input
               type="text"
               value={carteCouleursImageUrl}
               onChange={(e) => setCarteCouleursImageUrl(e.target.value)}
               onBlur={saveCarte}
               placeholder="https://…"
-              className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white text-sm outline-none focus:border-red-400"
+              className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
             />
           </div>
         </div>

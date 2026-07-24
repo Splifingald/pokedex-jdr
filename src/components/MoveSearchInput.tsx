@@ -25,7 +25,7 @@ export function MoveSearchInput({ options, disabled, onSelect }: Props) {
 
   if (disabled) {
     return (
-      <p className="text-gray-500 text-sm bg-gray-800 border border-gray-700 rounded px-3 py-2">
+      <p className="text-ink-muted-2 text-sm bg-cream-secondary border-2 border-ink rounded-lg px-3 py-2">
         Nombre maximum de capacités atteint.
       </p>
     )
@@ -38,21 +38,21 @@ export function MoveSearchInput({ options, disabled, onSelect }: Props) {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Rechercher une capacité…"
-        className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white text-sm placeholder-gray-500 outline-none focus:border-red-500 transition-colors"
+        className="w-full bg-cream border-2 border-ink rounded-lg px-3 py-2 text-ink text-sm placeholder-ink-muted-2 outline-none"
       />
       {query && (
-        <div className="absolute z-10 top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded shadow-lg max-h-64 overflow-y-auto">
+        <div className="absolute z-10 top-full left-0 right-0 mt-1 bg-cream border-2 border-ink rounded-lg shadow-[var(--shadow-pixel)] max-h-64 overflow-y-auto">
           {matches.length === 0 ? (
-            <p className="text-gray-500 text-sm px-3 py-2">Aucun résultat</p>
+            <p className="text-ink-muted-2 text-sm px-3 py-2">Aucun résultat</p>
           ) : (
             matches.map((a) => (
               <button
                 key={a.nom}
                 onClick={() => handleSelect(a)}
-                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-700 transition-colors text-left"
+                className="w-full flex items-center gap-2 px-3 py-2 border-b border-[#cfc7a8] last:border-b-0 hover:bg-cream-secondary transition-colors text-left"
               >
                 <TypeBadge type={a.type} small />
-                <span className="text-white text-sm truncate">{a.nom}</span>
+                <span className="text-ink text-sm truncate">{a.nom}</span>
               </button>
             ))
           )}

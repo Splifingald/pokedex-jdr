@@ -2,8 +2,7 @@ import { useMemo } from 'react'
 import type { PlayerPokemon, Pokemon, Attack } from '../types'
 import { OwnedPokemonHeader } from './OwnedPokemonHeader'
 import { MoveSearchInput } from './MoveSearchInput'
-import { TypeBadge } from './TypeBadge'
-import { AttackDetailCard } from './AttackDetailCard'
+import { AbilityCard } from './AbilityCard'
 import { useLocalHp } from '../hooks/useLocalHp'
 import { useLocalStatus } from '../hooks/useLocalStatus'
 import { getMaxHp } from '../lib/maxHp'
@@ -33,7 +32,7 @@ export function MovesTab({ playerPokemon, pokemon, maxMoves, attacksByName, onUp
   const atCap = playerPokemon.moves.length >= maxMoves
 
   return (
-    <div className="flex flex-col h-full bg-gray-900 overflow-y-auto">
+    <div className="flex-1 flex flex-col overflow-y-auto">
       <OwnedPokemonHeader
         pokemonNom={playerPokemon.pokemon_nom}
         pokemon={pokemon}
@@ -50,8 +49,8 @@ export function MovesTab({ playerPokemon, pokemon, maxMoves, attacksByName, onUp
       />
 
       <div className="px-4 py-4">
-        <h3 className="text-white text-sm mb-2">
-          Capacités ({playerPokemon.moves.length} / {maxMoves})
+        <h3 className="text-cream text-sm mb-2">
+          🥊 Capacités ({playerPokemon.moves.length} / {maxMoves})
         </h3>
 
         <div className="mb-4">
@@ -63,32 +62,30 @@ export function MovesTab({ playerPokemon, pokemon, maxMoves, attacksByName, onUp
         </div>
 
         {playerPokemon.moves.length === 0 ? (
-          <p className="text-gray-500 text-sm">Aucune capacité apprise.</p>
+          <p className="text-[#7a7c9a] text-sm">Aucune capacité apprise.</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {playerPokemon.moves.map((moveName) => {
               const atk = attacksByName.get(moveName)
-              return (
-                <div key={moveName} className="bg-gray-800 border border-gray-700 rounded-lg p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      {atk && <TypeBadge type={atk.type} small />}
-                      <span className="text-white text-sm font-bold truncate">{moveName}</span>
-                    </div>
-                    <button
-                      onClick={() => onRemoveMove(playerPokemon.id, moveName)}
-                      className="text-gray-500 hover:text-red-400 text-sm leading-none shrink-0 ml-2"
-                      title="Retirer la capacité"
-                    >
-                      ✕
-                    </button>
+              return atk ? (
+                <AbilityCard
+                  key={moveName}
+                  attack={atk}
+                  onRemove={() => onRemoveMove(playerPokemon.id, moveName)}
+                />
+              ) : (
+                <div key={moveName} className="bg-cream-secondary border-2 border-ink rounded-lg p-3 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-ink text-sm font-bold">{moveName}</p>
+                    <p className="text-ink-muted-2 text-xs">Capacité introuvable dans la table attacks.</p>
                   </div>
-
-                  {atk ? (
-                    <AttackDetailCard attack={atk} />
-                  ) : (
-                    <p className="text-gray-500 text-xs">Capacité introuvable dans la table attacks.</p>
-                  )}
+                  <button
+                    onClick={() => onRemoveMove(playerPokemon.id, moveName)}
+                    className="text-ink-muted-2 hover:text-hp-red text-sm leading-none shrink-0"
+                    title="Retirer la capacité"
+                  >
+                    ✕
+                  </button>
                 </div>
               )
             })}
