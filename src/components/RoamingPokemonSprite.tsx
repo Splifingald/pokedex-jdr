@@ -45,14 +45,16 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
         {/* Couche flottement continu — conteneur transparent : simple zone cliquable,
             le Pokémon semble se déplacer librement dans la prairie */}
         <div
-          className="w-[912px] h-[912px] max-w-[95vw] max-h-[70vh] flex items-center justify-center"
+          className="w-[304px] h-[304px] max-w-[80vw] max-h-[45vh] flex items-center justify-center"
           style={{ animation: `idle-bob ${bobDuration}s ease-in-out ${bobDelay}s infinite` }}
         >
           {pokemon?.image_miniature ? (
+            // w-full h-full (et pas max-w/max-h) : l'image est agrandie pour remplir
+            // la boîte même si son fichier source est plus petit
             <img
               src={pokemon.image_miniature}
               alt={playerPokemon.pokemon_nom}
-              className={`pixelated max-w-full max-h-full object-contain [filter:drop-shadow(2px_4px_2px_rgba(0,0,0,0.3))] ${isKo ? 'grayscale opacity-50' : ''}`}
+              className={`pixelated w-full h-full object-contain [filter:drop-shadow(2px_4px_2px_rgba(0,0,0,0.3))] ${isKo ? 'grayscale opacity-50' : ''}`}
             />
           ) : (
             <span className="text-[#14320f] text-4xl">?</span>
