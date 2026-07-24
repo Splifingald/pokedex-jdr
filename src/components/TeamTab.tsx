@@ -12,10 +12,10 @@ import { PokemonSearchInput } from './PokemonSearchInput'
 import { PokemonDetailSheet } from './PokemonDetailSheet'
 import { MovesTab } from './MovesTab'
 
-type SortKey = 'numero' | 'type' | 'alpha'
+type SortKey = 'numero' | 'type' | 'alpha' | 'equipe'
 type LayoutKey = 'grid' | 'list'
 
-const SORT_LABELS: Record<SortKey, string> = { numero: '#', type: 'Type', alpha: 'A-Z' }
+const SORT_LABELS: Record<SortKey, string> = { numero: '#', type: 'Type', alpha: 'A-Z', equipe: 'Équipe' }
 
 interface Props {
   player: Player
@@ -58,6 +58,8 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
       })
     } else if (sortKey === 'alpha') {
       list.sort((a, b) => a.pokemon_nom.localeCompare(b.pokemon_nom, 'fr'))
+    } else if (sortKey === 'equipe') {
+      list.sort((a, b) => (b.in_team ? 1 : 0) - (a.in_team ? 1 : 0) || byNumero(a, b))
     } else {
       list.sort(byNumero)
     }

@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useRef, useLayoutEffect } from 'react'
 import type { Pokemon, PlayerPokemon } from '../types'
 import { useRoamPosition } from '../hooks/useRoamPosition'
 import { useLocalHp } from '../hooks/useLocalHp'
@@ -20,6 +20,8 @@ function speedBucket(nom: string): number {
   return (Math.abs(h) % 5) + 1
 }
 
+const CENTER = 'translateX(-50%)'
+
 export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping, onClick }: Props) {
   const speed = useMemo(() => speedBucket(playerPokemon.pokemon_nom), [playerPokemon.pokemon_nom])
   const { pos, duration } = useRoamPosition(playerPokemon.id, speed)
@@ -30,17 +32,50 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
   const bobDuration = 2.2 + index * 0.35
   const bobDelay = index * 0.5
 
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const prevRectRef = useRef<DOMRect | null>(null)
+
+  // Le déplacement était animé via une transition CSS sur left/bottom : des
+  // propriétés de layout, qui forcent un reflow à chaque frame et saccadent
+  // le mouvement (surtout avec de grands sprites + drop-shadow). On anime
+  // désormais via `transform` (accéléré GPU, pas de reflow) avec la technique
+  // FLIP : on mesure le déplacement de layout, on l'annule instantanément par
+  // un transform inverse, puis on relance une transition vers l'identité.
+  useLayoutEffect(() => {
+    const el = buttonRef.current
+    if (!el) return
+    const newRect = el.getBoundingClientRect()
+    const prevRect = prevRectRef.current
+    prevRectRef.current = newRect
+
+    if (!prevRect) {
+      el.style.transition = 'none'
+      el.style.transform = CENTER
+      return
+    }
+
+    const dx = prevRect.left - newRect.left
+    const dy = prevRect.top - newRect.top
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return
+
+    el.style.transition = 'none'
+    el.style.transform = `${CENTER} translate(${dx}px, ${dy}px)`
+    void el.offsetHeight // force le reflow avant de relancer la transition
+    el.style.transition = `transform ${duration}s linear`
+    el.style.transform = CENTER
+  }, [pos.left, pos.bottom, duration])
+
   return (
     <button
+      ref={buttonRef}
       onClick={onClick}
-      className="absolute flex flex-col items-center -translate-x-1/2"
+      className="absolute flex flex-col items-center"
       style={{
         left: `${pos.left}%`,
         bottom: `${pos.bottom}%`,
         // Perspective : plus le Pokémon est bas dans la scène, plus il passe devant
         // (plage 10–32, sous le bouton scanner (35) et les overlays (40+))
         zIndex: Math.round(40 - pos.bottom),
-        transition: `left ${duration}s linear, bottom ${duration}s linear`,
       }}
     >
       {/* Couche saut (une seule à la fois, pilotée par HomeTab) */}
