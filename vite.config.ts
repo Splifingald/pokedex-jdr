@@ -38,6 +38,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // Les sprites Pokémon (public/pokemon/) sont trop lourds pour le précache
+        // → mis en cache à la volée au premier affichage (runtimeCaching ci-dessous)
+        globIgnores: ['pokemon/**'],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
@@ -45,6 +48,14 @@ export default defineConfig({
             options: {
               cacheName: 'supabase-cache',
               expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 },
+            },
+          },
+          {
+            urlPattern: /\/pokemon\/.*\.png$/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'pokemon-sprites',
+              expiration: { maxEntries: 300, maxAgeSeconds: 60 * 60 * 24 * 30 },
             },
           },
         ],

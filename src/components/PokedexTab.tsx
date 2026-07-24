@@ -93,27 +93,28 @@ export function PokedexTab({
   // Ouverture automatique après un scan réussi : sélectionne la fiche et centre la grille dessus
   useEffect(() => {
     if (!autoOpenNumero) return
-    const target = pokemon.find((p) => p.numero === autoOpenNumero)
-    if (target) {
-      setSearch('')
-      setTypeFilter('')
-      setSelected(target)
-      requestAnimationFrame(() => {
-        cellRefs.current.get(autoOpenNumero)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-      })
-    }
-    onAutoOpenHandled?.()
+    const raf = requestAnimationFrame(() => {
+      const target = pokemon.find((p) => p.numero === autoOpenNumero)
+      if (target) {
+        setSearch('')
+        setTypeFilter('')
+        setSelected(target)
+        requestAnimationFrame(() => {
+          cellRefs.current.get(autoOpenNumero)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        })
+      }
+      onAutoOpenHandled?.()
+    })
+    return () => cancelAnimationFrame(raf)
   }, [autoOpenNumero]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Garde la fiche sélectionnée synchronisée si les données rechargent
-  useEffect(() => {
-    if (selected) {
-      const updated = pokemon.find((p) => p.id === selected.id)
-      if (updated && updated !== selected) setSelected(updated)
-    }
-  }, [pokemon]) // eslint-disable-line react-hooks/exhaustive-deps
+  const syncedSelected = useMemo(
+    () => (selected ? pokemon.find((p) => p.id === selected.id) ?? selected : null),
+    [selected, pokemon]
+  )
 
-  const ownedCount = selected ? roster.filter((r) => r.pokemon_nom === selected.nom).length : 0
+  const ownedCount = syncedSelected ? roster.filter((r) => r.pokemon_nom === syncedSelected.nom).length : 0
 
   const handleDiscoveryConfirm = async () => {
     if (!pendingDiscovery) return
@@ -241,17 +242,17 @@ export function PokedexTab({
         />
       )}
 
-      {selected && (
+      {syncedSelected && (
         <PokemonDetailSheet
           context="pokedex"
-          pokemon={selected}
+          pokemon={syncedSelected}
           attacksByName={attacksByName}
           isAdmin={isAdmin}
-          isDiscovered={discovered.has(selected.nom)}
+          isDiscovered={discovered.has(syncedSelected.nom)}
           teamFull={teamFull}
           ownedCount={ownedCount}
-          onAddToRoster={canAddToRoster ? () => onAddToRoster(selected) : undefined}
-          onUndiscover={() => { onUndiscover(selected); setSelected(null) }}
+          onAddToRoster={canAddToRoster ? () => onAddToRoster(syncedSelected) : undefined}
+          onUndiscover={() => { onUndiscover(syncedSelected); setSelected(null) }}
           onClose={() => setSelected(null)}
         />
       )}
