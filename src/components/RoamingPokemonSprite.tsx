@@ -74,7 +74,10 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
         left: `${pos.left}%`,
         bottom: `${pos.bottom}%`,
         // Perspective : plus le Pokémon est bas dans la scène, plus il passe devant
-        // (plage 10–32, sous le bouton scanner (35) et les overlays (40+))
+        // (plage 10–32, sous le bouton scanner (35) et les overlays (40+)).
+        // Le pied de croix "bottom" du bouton doit correspondre au pied du sprite —
+        // la pastille PV est donc positionnée en absolu plus bas (voir ci-dessous)
+        // pour ne pas décaler cette ancre vers le bas quand elle est affichée.
         zIndex: Math.round(40 - pos.bottom),
       }}
     >
@@ -100,9 +103,11 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
         </div>
       </div>
 
-      {/* PV affichés seulement si le Pokémon n'est pas au max */}
+      {/* PV affichés seulement si le Pokémon n'est pas au max — positionné en
+          absolu (hors flux) pour ne pas déplacer le bas réel du bouton, qui
+          doit rester aligné sur les pieds du sprite pour le calcul du zIndex */}
       {hp < maxHp && (
-        <span className="mt-1 px-1.5 py-0.5 rounded text-xs text-[#14320f] bg-cream/90 whitespace-nowrap">
+        <span className="absolute top-full left-1/2 -translate-x-1/2 mt-1 px-1.5 py-0.5 rounded text-xs text-[#14320f] bg-cream/90 whitespace-nowrap">
           {hp}/{maxHp} PV
         </span>
       )}
