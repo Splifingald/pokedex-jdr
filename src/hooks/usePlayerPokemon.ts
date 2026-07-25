@@ -96,12 +96,28 @@ export function usePlayerPokemon(playerId: number | null) {
     }
   }, [])
 
+  const updateNickname = useCallback(async (id: number, nickname: string | null) => {
+    setRoster((prev) => prev.map((r) => (r.id === id ? { ...r, nickname } : r)))
+    const { error } = await supabase.from('player_pokemon').update({ nickname }).eq('id', id)
+    if (error) {
+      console.error('Erreur lors du renommage :', error)
+    }
+  }, [])
+
   const toggleInTeam = useCallback(async (id: number, inTeam: boolean) => {
     setRoster((prev) => prev.map((r) => (r.id === id ? { ...r, in_team: inTeam } : r)))
     const { error } = await supabase.from('player_pokemon').update({ in_team: inTeam }).eq('id', id)
     if (error) {
       console.error("Erreur lors du changement d'équipe :", error)
       setRoster((prev) => prev.map((r) => (r.id === id ? { ...r, in_team: !inTeam } : r)))
+    }
+  }, [])
+
+  const setNextGiftAt = useCallback(async (id: number, nextGiftAt: string | null) => {
+    setRoster((prev) => prev.map((r) => (r.id === id ? { ...r, next_gift_at: nextGiftAt } : r)))
+    const { error } = await supabase.from('player_pokemon').update({ next_gift_at: nextGiftAt }).eq('id', id)
+    if (error) {
+      console.error('Erreur lors de la mise à jour du minuteur de cadeau :', error)
     }
   }, [])
 
@@ -141,7 +157,9 @@ export function usePlayerPokemon(playerId: number | null) {
     error,
     addOwnedPokemon,
     updateXp,
+    updateNickname,
     toggleInTeam,
+    setNextGiftAt,
     addMove,
     removeMove,
     deleteOwnedPokemon,

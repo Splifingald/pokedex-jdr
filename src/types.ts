@@ -172,10 +172,17 @@ export interface PlayerPokemon {
   player_id: number
   pokemon_nom: string
   pokemon_numero: string | null
+  nickname: string | null
   xp: number
   moves: string[]
   in_team: boolean
+  next_gift_at: string | null
   created_at: string
+}
+
+// Nom affiché d'une instance possédée : surnom personnalisé si défini, sinon nom d'espèce
+export function ownedPokemonName(pp: Pick<PlayerPokemon, 'nickname' | 'pokemon_nom'>): string {
+  return pp.nickname?.trim() || pp.pokemon_nom
 }
 
 export interface AdminParameters {
@@ -190,6 +197,7 @@ export interface AdminParameters {
   feature_pokemon_enabled: boolean
   feature_inventory_enabled: boolean
   feature_map_enabled: boolean
+  feature_gifting_enabled: boolean
 }
 
 // Fond par défaut de l'écran d'accueil (modifiable dans Admin → Paramètres)
@@ -228,6 +236,48 @@ export interface PlayerItem {
 
 export const POKEDOLLAR_ITEM_NAME = 'Pokédollar'
 export const sellValue = (cout: number) => Math.floor(cout / 2)
+
+// ── Cadeaux Pokémon (lootboxes) ───────────────────────────────
+export interface GiftLootbox {
+  id: number
+  nom: string
+  is_default: boolean
+  timer_min_hours: number
+  timer_max_hours: number
+  created_at: string
+}
+
+export interface GiftLootboxItem {
+  id: number
+  lootbox_id: number
+  item_nom: string // peut valoir POKEDOLLAR_ITEM_NAME
+  quantity: number
+  weight: number
+  created_at: string
+}
+
+export interface GiftLootboxSpecies {
+  pokemon_nom: string // clé primaire : une espèce = un seul lootbox
+  lootbox_id: number
+  created_at: string
+}
+
+export const DEFAULT_LOOTBOX_TIMER_MIN_HOURS = 60
+export const DEFAULT_LOOTBOX_TIMER_MAX_HOURS = 80
+
+// ── Fonds d'écran (accueil) ───────────────────────────────────
+export interface Background {
+  id: number
+  nom: string
+  image_url: string
+}
+
+export interface BackgroundCsvRow {
+  'Nom': string
+  'Image': string
+}
+
+export const BACKGROUND_CSV_REQUIRED_HEADERS: (keyof BackgroundCsvRow)[] = ['Nom', 'Image']
 
 // ── Rencontres ────────────────────────────────────────────────
 export interface Encounter {

@@ -8,19 +8,21 @@ interface Props {
   options: Item[]
   /** Quantités possédées par nom d'objet, pour afficher "n en sac" dans les résultats */
   ownedQty?: Map<string, number>
+  /** Inclure le Pokédollar dans les résultats (masqué par défaut, ex. Sac) */
+  includePokedollar?: boolean
   onSelect: (item: Item) => void
 }
 
-export function ItemSearchInput({ options, ownedQty, onSelect }: Props) {
+export function ItemSearchInput({ options, ownedQty, includePokedollar = false, onSelect }: Props) {
   const [query, setQuery] = useState('')
 
   const matches = useMemo(() => {
     const q = normalizeSearch(query.trim())
     if (!q) return []
     return options
-      .filter((i) => i.nom !== POKEDOLLAR_ITEM_NAME && normalizeSearch(i.nom).includes(q))
+      .filter((i) => (includePokedollar || i.nom !== POKEDOLLAR_ITEM_NAME) && normalizeSearch(i.nom).includes(q))
       .slice(0, 8)
-  }, [query, options])
+  }, [query, options, includePokedollar])
 
   const handleSelect = (item: Item) => {
     onSelect(item)

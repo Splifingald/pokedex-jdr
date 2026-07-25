@@ -121,6 +121,26 @@ export function usePlayerItems(playerId: number | null) {
     setInventory((prev) => (prev.some((r) => r.id === (data as PlayerItem).id) ? prev : [...prev, data as PlayerItem]))
   }, [playerId, inventory, setQuantity, fetchAll])
 
+  const addItems = useCallback(async (itemNom: string, quantity: number) => {
+    if (!playerId || quantity <= 0) return
+    const existing = inventory.find((r) => r.item_nom === itemNom)
+    if (existing) {
+      await setQuantity(existing, existing.quantity + quantity)
+      return
+    }
+    const { data, error } = await supabase
+      .from('player_items')
+      .insert({ player_id: playerId, item_nom: itemNom, quantity })
+      .select()
+      .single()
+    if (error) {
+      console.error("Erreur lors de l'ajout de l'objet :", error)
+      await fetchAll()
+      return
+    }
+    setInventory((prev) => (prev.some((r) => r.id === (data as PlayerItem).id) ? prev : [...prev, data as PlayerItem]))
+  }, [playerId, inventory, setQuantity, fetchAll])
+
   const setPokedollars = useCallback(async (quantity: number) => {
     if (!playerId) return
     const clamped = Math.max(0, quantity)
@@ -153,6 +173,7 @@ export function usePlayerItems(playerId: number | null) {
     loading,
     error,
     addItem,
+    addItems,
     setQuantity,
     sellOne,
     setPokedollars,

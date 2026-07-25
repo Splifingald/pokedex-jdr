@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import type { Pokemon, PlayerPokemon, Attack } from '../types'
+import { ownedPokemonName } from '../types'
 import { SheetShell } from './SheetShell'
+import { EditableName } from './EditableName'
 import { TypeBadge } from './TypeBadge'
 import { StatRow } from './StatRow'
 import { StatGrid } from './StatGrid'
@@ -38,6 +40,7 @@ interface Props {
   isNpc?: boolean
   maxMoves?: number
   onUpdateXp?: (id: number, xp: number) => void
+  onRename?: (id: number, nickname: string | null) => void
   onToggleInTeam?: (id: number, inTeam: boolean) => void
   onManageMoves?: () => void
   onDelete?: (id: number) => void
@@ -168,6 +171,7 @@ export function PokemonDetailSheet({
   isNpc = false,
   maxMoves,
   onUpdateXp,
+  onRename,
   onToggleInTeam,
   onManageMoves,
   onDelete,
@@ -183,7 +187,7 @@ export function PokemonDetailSheet({
 
   const isOwnedContext = context !== 'pokedex' && playerPokemon != null
 
-  const nom = playerPokemon?.pokemon_nom ?? pokemon?.nom ?? '???'
+  const nom = (playerPokemon ? ownedPokemonName(playerPokemon) : pokemon?.nom) ?? '???'
   const numero = pokemon?.numero ?? playerPokemon?.pokemon_numero ?? '???'
 
   const superEfficace = getSuperEfficace(pokemon)
@@ -226,7 +230,15 @@ export function PokemonDetailSheet({
                 <span className="ml-2 text-[10px] bg-purple-200 text-purple-900 border border-purple-700 rounded px-1.5 py-0.5">CACHÉ</span>
               )}
             </p>
-            <h2 className="text-[22px] leading-tight text-ink truncate">{nom}</h2>
+            {isOwnedContext && playerPokemon && onRename ? (
+              <EditableName
+                value={nom}
+                onCommit={(v) => onRename(playerPokemon.id, v || null)}
+                className="text-[22px] leading-tight text-ink"
+              />
+            ) : (
+              <h2 className="text-[22px] leading-tight text-ink truncate">{nom}</h2>
+            )}
             {pokemon && <TypeBadge type={pokemon.type} small />}
           </div>
 

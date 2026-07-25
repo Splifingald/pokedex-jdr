@@ -14,6 +14,7 @@ const DEFAULTS: AdminParameters = {
   feature_pokemon_enabled: true,
   feature_inventory_enabled: true,
   feature_map_enabled: true,
+  feature_gifting_enabled: true,
 }
 
 export function useAdminParameters() {

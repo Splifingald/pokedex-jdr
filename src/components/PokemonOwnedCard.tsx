@@ -1,4 +1,5 @@
 import type { PlayerPokemon, Pokemon } from '../types'
+import { ownedPokemonName } from '../types'
 import { TypeBadge } from './TypeBadge'
 import { HpGauge } from './HpGauge'
 import { XpMiniGauge } from './XpMiniGauge'
@@ -25,6 +26,7 @@ export function PokemonOwnedCard({ playerPokemon, pokemon, variant, showPcBadge 
   const milestones = getMilestones(pokemon)
   const maxXp = getMaxXp(pokemon)
   const isKo = hp <= 0
+  const displayName = ownedPokemonName(playerPokemon)
 
   const sprite = pokemon?.image_miniature ? (
     <img
@@ -47,7 +49,7 @@ export function PokemonOwnedCard({ playerPokemon, pokemon, variant, showPcBadge 
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-ink text-sm font-bold truncate">{playerPokemon.pokemon_nom}</span>
+            <span className="text-ink text-sm font-bold truncate">{displayName}</span>
             {status !== 'aucun' && (
               <span className="text-[10px] font-bold shrink-0" style={{ color: getStatusInfo(status).color }}>
                 {getStatusInfo(status).label}
@@ -81,7 +83,7 @@ export function PokemonOwnedCard({ playerPokemon, pokemon, variant, showPcBadge 
       </div>
 
       <div className="flex items-center justify-between gap-1.5 min-w-0">
-        <span className="text-ink text-sm font-bold truncate">{playerPokemon.pokemon_nom}</span>
+        <span className="text-ink text-sm font-bold truncate">{displayName}</span>
         {pokemon && <TypeBadge type={pokemon.type} small />}
       </div>
 

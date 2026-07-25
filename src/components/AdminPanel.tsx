@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import Papa from 'papaparse'
-import type { CsvRow, AttackCsvRow, CarteCsvRow, ItemCsvRow, EncounterCsvRow } from '../types'
-import { CSV_REQUIRED_HEADERS, ATTACK_CSV_REQUIRED_HEADERS, CARTE_CSV_REQUIRED_HEADERS, ITEM_CSV_REQUIRED_HEADERS, ENCOUNTER_CSV_REQUIRED_HEADERS } from '../types'
+import type { CsvRow, AttackCsvRow, CarteCsvRow, ItemCsvRow, EncounterCsvRow, BackgroundCsvRow } from '../types'
+import { CSV_REQUIRED_HEADERS, ATTACK_CSV_REQUIRED_HEADERS, CARTE_CSV_REQUIRED_HEADERS, ITEM_CSV_REQUIRED_HEADERS, ENCOUNTER_CSV_REQUIRED_HEADERS, BACKGROUND_CSV_REQUIRED_HEADERS } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 
 // L'import CSV passe par une Netlify Function côté serveur
@@ -11,6 +11,7 @@ const IMPORT_ATTACKS_URL = '/.netlify/functions/import-attacks'
 const IMPORT_CARTE_URL = '/.netlify/functions/import-carte'
 const IMPORT_ITEMS_URL = '/.netlify/functions/import-items'
 const IMPORT_ENCOUNTERS_URL = '/.netlify/functions/import-encounters'
+const IMPORT_BACKGROUNDS_URL = '/.netlify/functions/import-backgrounds'
 const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET as string
 
 interface Props {
@@ -110,6 +111,13 @@ function mapEncounterCsvRow(row: EncounterCsvRow) {
   }
 }
 
+function mapBackgroundCsvRow(row: BackgroundCsvRow) {
+  return {
+    nom:       row['Nom']?.trim() ?? '',
+    image_url: row['Image']?.trim() ?? '',
+  }
+}
+
 export function AdminPanel({ onImportSuccess }: Props) {
   const [status, setStatus] = useState<'idle' | 'parsing' | 'importing' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
@@ -138,6 +146,55 @@ export function AdminPanel({ onImportSuccess }: Props) {
         const isItemsCsv = fields.includes('Coût')
         // Une colonne "Lieu" n'existe que dans le CSV de rencontres
         const isEncountersCsv = fields.includes('Lieu')
+        // Le CSV de fonds d'écran ne contient que ces 2 colonnes (Nom + Image)
+        const isBackgroundsCsv = fields.length === 2 && fields.includes('Nom') && fields.includes('Image')
+
+        if (isBackgroundsCsv) {
+          const missing = BACKGROUND_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
+          if (missing.length > 0) {
+            setStatus('error')
+            setMessage(`Colonnes manquantes : ${missing.join(', ')}`)
+            return
+          }
+
+          const rows = (results.data as unknown as BackgroundCsvRow[])
+            .map(mapBackgroundCsvRow)
+            .filter((r) => r.nom)
+
+          if (rows.length === 0) {
+            setStatus('error')
+            setMessage('Aucune ligne valide trouvée dans le CSV.')
+            return
+          }
+
+          setStatus('importing')
+          setMessage(`Import de ${rows.length} fonds d'écran…`)
+
+          try {
+            const res = await fetch(IMPORT_BACKGROUNDS_URL, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${ADMIN_SECRET}`,
+              },
+              body: JSON.stringify({ rows }),
+            })
+
+            const data = await res.json()
+
+            if (!res.ok) {
+              throw new Error(data.error ?? `Erreur serveur ${res.status}`)
+            }
+
+            setStatus('success')
+            setMessage(`✅ ${data.imported} fonds d'écran importés avec succès !`)
+            onImportSuccess()
+          } catch (err) {
+            setStatus('error')
+            setMessage(err instanceof Error ? err.message : 'Erreur inconnue')
+          }
+          return
+        }
 
         if (isCarteCsv) {
           const missing = CARTE_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
@@ -392,7 +449,7 @@ export function AdminPanel({ onImportSuccess }: Props) {
 
         <div className="mb-5">
           <p className="text-ink-muted-2 text-sm mb-3">
-            Importer un CSV Pokémon, Capacités, Carte, Objets ou Rencontres (détecté automatiquement).<br />
+            Importer un CSV Pokémon, Capacités, Carte, Objets, Rencontres ou Fonds d'écran (détecté automatiquement).<br />
             <span className="text-[#a3841a] text-xs">⚠ Remplace toute la liste existante correspondante.</span>
           </p>
           <button

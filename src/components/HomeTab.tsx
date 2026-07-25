@@ -1,20 +1,26 @@
 import { useState, useEffect, useRef } from 'react'
-import type { Player, Pokemon, Attack } from '../types'
-import { DEFAULT_ACCUEIL_IMAGE_URL } from '../types'
+import type { Player, Pokemon, Attack, Item, PlayerPokemon } from '../types'
+import { DEFAULT_ACCUEIL_IMAGE_URL, ownedPokemonName, POKEDOLLAR_ITEM_NAME } from '../types'
 import { usePlayerPokemon } from '../hooks/usePlayerPokemon'
+import { usePlayerItems } from '../hooks/usePlayerItems'
 import { useAdminParameters } from '../hooks/useAdminParameters'
+import { useBackgrounds } from '../hooks/useBackgrounds'
+import { useGiftLootboxes } from '../hooks/useGiftLootboxes'
 import { useToast } from '../context/ToastContext'
 import { RoamingPokemonSprite } from './RoamingPokemonSprite'
 import { PokemonDetailSheet } from './PokemonDetailSheet'
+import { GiftPopup, type GiftReward } from './GiftPopup'
 import { MovesTab } from './MovesTab'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
+import { isGiftReady, resolveLootboxForSpecies, drawLootboxReward, randomNextGiftAt, maybeResetGiftTimerOnEntry } from '../lib/gifting'
 
 interface Props {
   player: Player | null
   isAdmin: boolean
   pokemonByName: Map<string, Pokemon>
   attacksByName: Map<string, Attack>
+  itemsByName: Map<string, Item>
   canScan: boolean
   onScan: () => void
   onRequestLogin: () => void
@@ -31,18 +37,36 @@ const homeBgStyle = (url: string): React.CSSProperties => ({
   backgroundRepeat: 'no-repeat',
 })
 
-export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, canScan, onScan, onRequestLogin }: Props) {
-  const { roster, updateXp, toggleInTeam, addMove, removeMove, deleteOwnedPokemon } = usePlayerPokemon(player?.id ?? null)
+export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsByName, canScan, onScan, onRequestLogin }: Props) {
+  const { roster, updateXp, updateNickname, toggleInTeam, setNextGiftAt, addMove, removeMove, deleteOwnedPokemon } = usePlayerPokemon(player?.id ?? null)
+  const { pokedollars, addItems, setPokedollars } = usePlayerItems(player?.id ?? null)
   const { parameters } = useAdminParameters()
+  const { backgrounds } = useBackgrounds()
+  const { lootboxes, lootboxItems, speciesAssignments } = useGiftLootboxes()
   const { showToast } = useToast()
 
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [managingMoves, setManagingMoves] = useState(false)
   const [jumpingId, setJumpingId] = useState<number | null>(null)
+  const [giftPokemonId, setGiftPokemonId] = useState<number | null>(null)
+  const [giftReward, setGiftReward] = useState<GiftReward | null>(null)
+
+  // Recalcul périodique de "maintenant" pour détecter les cadeaux devenus prêts
+  // pendant que l'app reste ouverte — pas de compte à rebours affiché, juste
+  // une réévaluation silencieuse toutes les 30s.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(interval)
+  }, [])
 
   const team = roster.filter((r) => r.in_team)
   const teamFull = player?.is_npc ? false : team.length >= parameters.max_team_size
   const selected = roster.find((r) => r.id === selectedId) ?? null
+  const giftPokemon = roster.find((r) => r.id === giftPokemonId) ?? null
+
+  const hasGift = (pp: PlayerPokemon) =>
+    parameters.feature_gifting_enabled && isGiftReady(pp, player?.is_npc ?? false, new Date(now))
 
   // Saut aléatoire : un seul membre de l'équipe à la fois, toutes les 5–10 s
   const teamRef = useRef(team)
@@ -75,16 +99,50 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, canScan
   }, [])
 
   const handleToggleInTeam = async (id: number, inTeam: boolean) => {
-    await toggleInTeam(id, inTeam)
     const pp = roster.find((r) => r.id === id)
-    showToast(`${pp?.pokemon_nom ?? 'Pokémon'} ${inTeam ? "ajouté à l'équipe" : 'mis au PC'} !`)
+    await toggleInTeam(id, inTeam)
+    if (pp) {
+      await maybeResetGiftTimerOnEntry({
+        giftingEnabled: parameters.feature_gifting_enabled,
+        isNpc: player?.is_npc ?? false,
+        wasInTeam: pp.in_team,
+        willBeInTeam: inTeam,
+        pokemonNom: pp.pokemon_nom,
+        playerPokemonId: id,
+        lootboxes,
+        speciesAssignments,
+        setNextGiftAt,
+      })
+    }
+    showToast(`${pp ? ownedPokemonName(pp) : 'Pokémon'} ${inTeam ? "ajouté à l'équipe" : 'mis au PC'} !`)
+  }
+
+  const openGift = (pp: PlayerPokemon) => {
+    const lootbox = resolveLootboxForSpecies(pp.pokemon_nom, lootboxes, speciesAssignments)
+    const drawn = lootbox ? drawLootboxReward(lootbox.id, lootboxItems) : null
+    setGiftReward(drawn ? { itemNom: drawn.item_nom, quantity: drawn.quantity } : null)
+    setGiftPokemonId(pp.id)
+  }
+
+  const handleClaimGift = async () => {
+    if (giftPokemon && giftReward) {
+      if (giftReward.itemNom === POKEDOLLAR_ITEM_NAME) {
+        await setPokedollars(pokedollars + giftReward.quantity)
+      } else {
+        await addItems(giftReward.itemNom, giftReward.quantity)
+      }
+      const lootbox = resolveLootboxForSpecies(giftPokemon.pokemon_nom, lootboxes, speciesAssignments)
+      if (lootbox) await setNextGiftAt(giftPokemon.id, randomNextGiftAt(lootbox))
+    }
+    setGiftPokemonId(null)
+    setGiftReward(null)
   }
 
   const handleDelete = async (id: number) => {
     const pp = roster.find((r) => r.id === id)
     await deleteOwnedPokemon(id)
     setSelectedId(null)
-    showToast(`${pp?.pokemon_nom ?? 'Pokémon'} supprimé.`)
+    showToast(`${pp ? ownedPokemonName(pp) : 'Pokémon'} supprimé.`)
   }
 
   // Gestion des capacités plein écran (comme depuis l'onglet Pokémon)
@@ -107,7 +165,7 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, canScan
   return (
     <div
       className="flex-1 relative overflow-hidden"
-      style={homeBgStyle(parameters.accueil_image_url?.trim() || DEFAULT_ACCUEIL_IMAGE_URL)}
+      style={homeBgStyle(parameters.accueil_image_url?.trim() || backgrounds[0]?.image_url || DEFAULT_ACCUEIL_IMAGE_URL)}
     >
       {/* Équipe en déambulation */}
       {team.map((pp, idx) => (
@@ -117,7 +175,8 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, canScan
           pokemon={pokemonByName.get(pp.pokemon_nom)}
           index={idx}
           isJumping={jumpingId === pp.id}
-          onClick={() => setSelectedId(pp.id)}
+          hasGift={hasGift(pp)}
+          onClick={() => (hasGift(pp) ? openGift(pp) : setSelectedId(pp.id))}
         />
       ))}
 
@@ -164,10 +223,21 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, canScan
           isNpc={player?.is_npc ?? false}
           maxMoves={parameters.max_moves}
           onUpdateXp={updateXp}
+          onRename={updateNickname}
           onToggleInTeam={handleToggleInTeam}
           onManageMoves={() => setManagingMoves(true)}
           onDelete={handleDelete}
           onClose={() => setSelectedId(null)}
+        />
+      )}
+
+      {giftPokemon && (
+        <GiftPopup
+          pokemonDisplayName={ownedPokemonName(giftPokemon)}
+          reward={giftReward}
+          itemsByName={itemsByName}
+          pokedollarImageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
+          onConfirm={handleClaimGift}
         />
       )}
     </div>

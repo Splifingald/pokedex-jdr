@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import type { PlayerPokemon, Pokemon, Attack } from '../types'
+import { ownedPokemonName } from '../types'
 import { OwnedPokemonHeader } from './OwnedPokemonHeader'
 import { MoveSearchInput } from './MoveSearchInput'
 import { AbilityCard } from './AbilityCard'
@@ -34,7 +35,7 @@ export function MovesTab({ playerPokemon, pokemon, maxMoves, attacksByName, onUp
   return (
     <div className="flex-1 flex flex-col overflow-y-auto">
       <OwnedPokemonHeader
-        pokemonNom={playerPokemon.pokemon_nom}
+        pokemonNom={ownedPokemonName(playerPokemon)}
         pokemon={pokemon}
         hp={hp}
         maxHp={maxHp}

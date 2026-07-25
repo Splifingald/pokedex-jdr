@@ -32,6 +32,7 @@
 -- ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS xp_90 text;
 -- ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS xp_100 text;
 -- ALTER TABLE player_pokemon DROP COLUMN IF EXISTS max_hp_override;
+-- ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS nickname text;
 -- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS carte_image_url text NOT NULL DEFAULT '';
 -- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS carte_couleurs_image_url text NOT NULL DEFAULT '';
 -- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS accueil_image_url text NOT NULL DEFAULT '';
@@ -42,6 +43,8 @@
 -- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_map_enabled boolean NOT NULL DEFAULT true;
 -- ALTER TABLE campaign_sessions ADD COLUMN IF NOT EXISTS done boolean NOT NULL DEFAULT false;
 -- ALTER TABLE campaign_chapters ADD COLUMN IF NOT EXISTS done boolean NOT NULL DEFAULT false;
+-- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_gifting_enabled boolean NOT NULL DEFAULT true;
+-- ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS next_gift_at timestamptz;
 -- ============================================================
 
 -- Table principale des pokémon
@@ -194,9 +197,11 @@ CREATE TABLE IF NOT EXISTS player_pokemon (
   player_id       bigint NOT NULL,
   pokemon_nom     text NOT NULL,     -- référence par nom vers pokemon.nom (pas de FK, survit aux réimports CSV)
   pokemon_numero  text,              -- copie du numéro pour résilience d'affichage
+  nickname        text,              -- surnom personnalisé donné par le joueur (affiché à la place de pokemon_nom si défini)
   xp              integer NOT NULL DEFAULT 0,
   moves           text[] NOT NULL DEFAULT '{}',
   in_team         boolean NOT NULL DEFAULT false,
+  next_gift_at    timestamptz,       -- prochain cadeau du pokémon (cadeaux Pokémon), NULL = aucun cadeau prévu
   created_at      timestamptz NOT NULL DEFAULT now()
 );
 
@@ -216,6 +221,7 @@ CREATE TABLE IF NOT EXISTS admin_parameters (
   feature_pokemon_enabled        boolean NOT NULL DEFAULT true,
   feature_inventory_enabled      boolean NOT NULL DEFAULT true,
   feature_map_enabled            boolean NOT NULL DEFAULT true,
+  feature_gifting_enabled        boolean NOT NULL DEFAULT true,
   CONSTRAINT single_row CHECK (id = 1)
 );
 INSERT INTO admin_parameters (id, max_moves, max_team_size)
@@ -343,6 +349,79 @@ CREATE POLICY "Public delete player_items"
   USING (true);
 
 -- ============================================================
+-- Cadeaux Pokémon (lootboxes)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS gift_lootboxes (
+  id                bigserial PRIMARY KEY,
+  nom               text NOT NULL,
+  is_default        boolean NOT NULL DEFAULT false,
+  timer_min_hours   integer NOT NULL DEFAULT 60,
+  timer_max_hours   integer NOT NULL DEFAULT 80,
+  created_at        timestamptz NOT NULL DEFAULT now()
+);
+
+-- Un seul lootbox par défaut à la fois
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gift_lootboxes_one_default
+  ON gift_lootboxes (is_default) WHERE is_default = true;
+
+-- Contenu pondéré de chaque lootbox : quantité fixe + poids (tirage pondéré à une
+-- entrée par cadeau). item_nom référence items.nom ou 'Pokédollar' — pas de FK
+-- (survit aux réimports CSV, comme le reste du catalogue).
+CREATE TABLE IF NOT EXISTS gift_lootbox_items (
+  id           bigserial PRIMARY KEY,
+  lootbox_id   bigint NOT NULL REFERENCES gift_lootboxes(id) ON DELETE CASCADE,
+  item_nom     text NOT NULL,
+  quantity     integer NOT NULL DEFAULT 1,
+  weight       integer NOT NULL DEFAULT 1,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_gift_lootbox_items_lootbox_id ON gift_lootbox_items(lootbox_id);
+
+-- Assignation espèce → lootbox : une espèce non listée utilise le lootbox par
+-- défaut. pokemon_nom = clé primaire (un seul lootbox par espèce), référence
+-- pokemon.nom sans FK (survit aux réimports CSV).
+CREATE TABLE IF NOT EXISTS gift_lootbox_species (
+  pokemon_nom  text PRIMARY KEY,
+  lootbox_id   bigint NOT NULL REFERENCES gift_lootboxes(id) ON DELETE CASCADE,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_gift_lootbox_species_lootbox_id ON gift_lootbox_species(lootbox_id);
+
+ALTER TABLE gift_lootboxes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE gift_lootbox_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE gift_lootbox_species ENABLE ROW LEVEL SECURITY;
+
+-- Lecture + écriture publiques (édité en direct depuis l'onglet Admin, comme
+-- admin_parameters/players — app sans vraie sécurité)
+CREATE POLICY "Public read gift_lootboxes"
+  ON gift_lootboxes FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert gift_lootboxes"
+  ON gift_lootboxes FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update gift_lootboxes"
+  ON gift_lootboxes FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete gift_lootboxes"
+  ON gift_lootboxes FOR DELETE TO anon USING (true);
+
+CREATE POLICY "Public read gift_lootbox_items"
+  ON gift_lootbox_items FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert gift_lootbox_items"
+  ON gift_lootbox_items FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update gift_lootbox_items"
+  ON gift_lootbox_items FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete gift_lootbox_items"
+  ON gift_lootbox_items FOR DELETE TO anon USING (true);
+
+CREATE POLICY "Public read gift_lootbox_species"
+  ON gift_lootbox_species FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert gift_lootbox_species"
+  ON gift_lootbox_species FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update gift_lootbox_species"
+  ON gift_lootbox_species FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete gift_lootbox_species"
+  ON gift_lootbox_species FOR DELETE TO anon USING (true);
+
+-- ============================================================
 -- Table de rencontres (importée par CSV via Netlify Function)
 -- ============================================================
 
@@ -359,6 +438,24 @@ ALTER TABLE encounters ENABLE ROW LEVEL SECURITY;
 -- encounters : lecture publique, écriture bloquée pour anon (via Netlify Function seulement)
 CREATE POLICY "Public read encounters"
   ON encounters FOR SELECT
+  TO anon
+  USING (true);
+
+-- ============================================================
+-- Fonds d'écran de l'accueil (importés par CSV via Netlify Function)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS backgrounds (
+  id          bigserial PRIMARY KEY,
+  nom         text NOT NULL UNIQUE,
+  image_url   text NOT NULL DEFAULT ''
+);
+
+ALTER TABLE backgrounds ENABLE ROW LEVEL SECURITY;
+
+-- backgrounds : lecture publique, écriture bloquée pour anon (via Netlify Function seulement)
+CREATE POLICY "Public read backgrounds"
+  ON backgrounds FOR SELECT
   TO anon
   USING (true);
 

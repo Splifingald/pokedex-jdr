@@ -1,10 +1,13 @@
 import { useState, useMemo } from 'react'
 import type { Player, Pokemon, Attack, PlayerPokemon } from '../types'
+import { ownedPokemonName } from '../types'
 import { usePlayerPokemon } from '../hooks/usePlayerPokemon'
 import { useAdminParameters } from '../hooks/useAdminParameters'
+import { useGiftLootboxes } from '../hooks/useGiftLootboxes'
 import { useToast } from '../context/ToastContext'
 import { restoreLocalHp } from '../hooks/useLocalHp'
 import { getMaxHp } from '../lib/maxHp'
+import { maybeResetGiftTimerOnEntry } from '../lib/gifting'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { Chip } from './Chip'
 import { PokemonOwnedCard } from './PokemonOwnedCard'
@@ -27,8 +30,9 @@ interface Props {
 }
 
 export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByName, attacksByName }: Props) {
-  const { roster, loading, addOwnedPokemon, updateXp, toggleInTeam, addMove, removeMove, deleteOwnedPokemon } = usePlayerPokemon(player.id)
+  const { roster, loading, addOwnedPokemon, updateXp, updateNickname, toggleInTeam, setNextGiftAt, addMove, removeMove, deleteOwnedPokemon } = usePlayerPokemon(player.id)
   const { parameters } = useAdminParameters()
+  const { lootboxes, speciesAssignments } = useGiftLootboxes()
   const { showToast } = useToast()
 
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -57,7 +61,7 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
         return ta.localeCompare(tb) || byNumero(a, b)
       })
     } else if (sortKey === 'alpha') {
-      list.sort((a, b) => a.pokemon_nom.localeCompare(b.pokemon_nom, 'fr'))
+      list.sort((a, b) => ownedPokemonName(a).localeCompare(ownedPokemonName(b), 'fr'))
     } else if (sortKey === 'equipe') {
       list.sort((a, b) => (b.in_team ? 1 : 0) - (a.in_team ? 1 : 0) || byNumero(a, b))
     } else {
@@ -70,21 +74,47 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
 
   const handleAddOwned = async (p: Pokemon) => {
     const inTeam = !teamFull
-    await addOwnedPokemon(p.nom, p.numero, inTeam)
+    const created = await addOwnedPokemon(p.nom, p.numero, inTeam)
+    if (created) {
+      await maybeResetGiftTimerOnEntry({
+        giftingEnabled: parameters.feature_gifting_enabled,
+        isNpc: player.is_npc,
+        wasInTeam: false,
+        willBeInTeam: inTeam,
+        pokemonNom: p.nom,
+        playerPokemonId: created.id,
+        lootboxes,
+        speciesAssignments,
+        setNextGiftAt,
+      })
+    }
     showToast(`${p.nom} ajouté ${inTeam ? "à l'équipe" : 'au PC'} !`)
   }
 
   const handleToggleInTeam = async (id: number, inTeam: boolean) => {
-    await toggleInTeam(id, inTeam)
     const pp = roster.find((r) => r.id === id)
-    showToast(`${pp?.pokemon_nom ?? 'Pokémon'} ${inTeam ? "ajouté à l'équipe" : 'mis au PC'} !`)
+    await toggleInTeam(id, inTeam)
+    if (pp) {
+      await maybeResetGiftTimerOnEntry({
+        giftingEnabled: parameters.feature_gifting_enabled,
+        isNpc: player.is_npc,
+        wasInTeam: pp.in_team,
+        willBeInTeam: inTeam,
+        pokemonNom: pp.pokemon_nom,
+        playerPokemonId: id,
+        lootboxes,
+        speciesAssignments,
+        setNextGiftAt,
+      })
+    }
+    showToast(`${pp ? ownedPokemonName(pp) : 'Pokémon'} ${inTeam ? "ajouté à l'équipe" : 'mis au PC'} !`)
   }
 
   const handleDeleteOwned = async (id: number) => {
     const pp = roster.find((r) => r.id === id)
     await deleteOwnedPokemon(id)
     setSelectedId(null)
-    showToast(`${pp?.pokemon_nom ?? 'Pokémon'} supprimé.`)
+    showToast(`${pp ? ownedPokemonName(pp) : 'Pokémon'} supprimé.`)
   }
 
   const handleRestoreAll = () => {
@@ -189,6 +219,7 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
           isNpc={player.is_npc}
           maxMoves={parameters.max_moves}
           onUpdateXp={updateXp}
+          onRename={updateNickname}
           onToggleInTeam={handleToggleInTeam}
           onManageMoves={() => setManagingMoves(true)}
           onDelete={handleDeleteOwned}

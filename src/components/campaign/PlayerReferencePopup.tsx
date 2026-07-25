@@ -7,6 +7,8 @@ import { PokemonDetailSheet } from '../PokemonDetailSheet'
 import { usePlayerPokemon } from '../../hooks/usePlayerPokemon'
 import { usePlayerItems } from '../../hooks/usePlayerItems'
 import { useAdminParameters } from '../../hooks/useAdminParameters'
+import { useGiftLootboxes } from '../../hooks/useGiftLootboxes'
+import { maybeResetGiftTimerOnEntry } from '../../lib/gifting'
 
 interface Props {
   player: Player
@@ -17,10 +19,29 @@ interface Props {
 }
 
 export function PlayerReferencePopup({ player, pokemonByName, attacksByName, itemsByName, onClose }: Props) {
-  const { roster, updateXp, toggleInTeam, deleteOwnedPokemon } = usePlayerPokemon(player.id)
+  const { roster, updateXp, updateNickname, toggleInTeam, setNextGiftAt, deleteOwnedPokemon } = usePlayerPokemon(player.id)
   const { pokedollars } = usePlayerItems(player.id)
   const { parameters } = useAdminParameters()
+  const { lootboxes, speciesAssignments } = useGiftLootboxes()
   const [selectedId, setSelectedId] = useState<number | null>(null)
+
+  const handleToggleInTeam = async (id: number, inTeam: boolean) => {
+    const pp = roster.find((r) => r.id === id)
+    await toggleInTeam(id, inTeam)
+    if (pp) {
+      await maybeResetGiftTimerOnEntry({
+        giftingEnabled: parameters.feature_gifting_enabled,
+        isNpc: player.is_npc,
+        wasInTeam: pp.in_team,
+        willBeInTeam: inTeam,
+        pokemonNom: pp.pokemon_nom,
+        playerPokemonId: id,
+        lootboxes,
+        speciesAssignments,
+        setNextGiftAt,
+      })
+    }
+  }
 
   const team = roster.filter((r) => r.in_team)
   const teamFull = player.is_npc ? false : team.length >= parameters.max_team_size
@@ -84,7 +105,8 @@ export function PlayerReferencePopup({ player, pokemonByName, attacksByName, ite
           isNpc={player.is_npc}
           maxMoves={parameters.max_moves}
           onUpdateXp={updateXp}
-          onToggleInTeam={toggleInTeam}
+          onRename={updateNickname}
+          onToggleInTeam={handleToggleInTeam}
           onDelete={deleteOwnedPokemon}
           onClose={() => setSelectedId(null)}
         />

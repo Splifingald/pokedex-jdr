@@ -6,9 +6,11 @@ import { usePlayerPokemon } from './hooks/usePlayerPokemon'
 import { useItems } from './hooks/useItems'
 import { usePlayerItems } from './hooks/usePlayerItems'
 import { useAdminParameters } from './hooks/useAdminParameters'
+import { useGiftLootboxes } from './hooks/useGiftLootboxes'
 import { useToast } from './context/ToastContext'
 import type { Pokemon } from './types'
 import { POKEDOLLAR_ITEM_NAME } from './types'
+import { maybeResetGiftTimerOnEntry } from './lib/gifting'
 import { AdminTab } from './components/AdminTab'
 import { AdminAttacksPanel } from './components/AdminAttacksPanel'
 import { RencontresTab } from './components/RencontresTab'
@@ -45,10 +47,11 @@ export default function App() {
   const { pokemon, discovered, discoverPokemon, undiscoverPokemon, refetch } = usePokemon()
   const { byName: attacksByName, refetch: refetchAttacks } = useAttacks()
   const { player, players, playersLoading, login, logout } = usePlayerContext()
-  const { roster, addOwnedPokemon } = usePlayerPokemon(player?.id ?? null)
+  const { roster, addOwnedPokemon, setNextGiftAt } = usePlayerPokemon(player?.id ?? null)
   const { items, byName: itemsByName, refetch: refetchItems } = useItems()
   const playerItems = usePlayerItems(player?.id ?? null)
   const { parameters } = useAdminParameters()
+  const { lootboxes, speciesAssignments } = useGiftLootboxes()
   const { showToast } = useToast()
   const { enter: enterFullscreen } = useFullscreen()
 
@@ -81,7 +84,20 @@ export default function App() {
 
   const handleAddToRoster = async (p: Pokemon) => {
     const inTeam = !teamFull
-    await addOwnedPokemon(p.nom, p.numero, inTeam)
+    const created = await addOwnedPokemon(p.nom, p.numero, inTeam)
+    if (created) {
+      await maybeResetGiftTimerOnEntry({
+        giftingEnabled: parameters.feature_gifting_enabled,
+        isNpc: player?.is_npc ?? false,
+        wasInTeam: false,
+        willBeInTeam: inTeam,
+        pokemonNom: p.nom,
+        playerPokemonId: created.id,
+        lootboxes,
+        speciesAssignments,
+        setNextGiftAt,
+      })
+    }
     showToast(`${p.nom} ajouté ${inTeam ? "à l'équipe" : 'au PC'} !`)
   }
 
@@ -152,6 +168,7 @@ export default function App() {
               isAdmin={isAdmin}
               pokemonByName={pokemonByName}
               attacksByName={attacksByName}
+              itemsByName={itemsByName}
               canScan={canScan}
               onScan={() => setShowScannerModal(true)}
               onRequestLogin={() => setShowLoginModal(true)}

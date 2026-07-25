@@ -9,6 +9,7 @@ interface Props {
   pokemon: Pokemon | undefined
   index: number
   isJumping: boolean
+  hasGift?: boolean
   onClick: () => void
 }
 
@@ -22,7 +23,7 @@ function speedBucket(nom: string): number {
 
 const CENTER = 'translateX(-50%)'
 
-export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping, onClick }: Props) {
+export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping, hasGift = false, onClick }: Props) {
   const speed = useMemo(() => speedBucket(playerPokemon.pokemon_nom), [playerPokemon.pokemon_nom])
   const { pos, duration } = useRoamPosition(playerPokemon.id, speed)
   const maxHp = getMaxHp(playerPokemon, pokemon)
@@ -81,14 +82,31 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
         zIndex: Math.round(40 - pos.bottom),
       }}
     >
-      {/* Couche saut (une seule à la fois, pilotée par HomeTab) */}
-      <div style={isJumping ? { animation: 'jump-pop 0.55s ease-out 1' } : undefined}>
+      {/* Couche saut : boucle continue (toutes les ~2s) tant qu'un cadeau est
+          prêt, sinon saut ponctuel piloté par HomeTab */}
+      <div
+        style={
+          hasGift
+            ? { animation: 'jump-pop 2s ease-out infinite' }
+            : isJumping
+              ? { animation: 'jump-pop 0.55s ease-out 1' }
+              : undefined
+        }
+      >
         {/* Couche flottement continu — conteneur transparent : simple zone cliquable,
             le Pokémon semble se déplacer librement dans la prairie */}
         <div
-          className="w-[304px] h-[304px] max-w-[80vw] max-h-[45vh] flex items-center justify-center"
+          className="relative w-[304px] h-[304px] max-w-[80vw] max-h-[45vh] flex items-center justify-center"
           style={{ animation: `idle-bob ${bobDuration}s ease-in-out ${bobDelay}s infinite` }}
         >
+          {hasGift && (
+            <span
+              className="absolute top-2 right-6 text-4xl z-10 [filter:drop-shadow(1px_2px_1px_rgba(0,0,0,0.4))]"
+              style={{ animation: 'gift-wiggle 0.6s ease-in-out infinite' }}
+            >
+              🎁
+            </span>
+          )}
           {pokemon?.image_miniature ? (
             // w-full h-full (et pas max-w/max-h) : l'image est agrandie pour remplir
             // la boîte même si son fichier source est plus petit
