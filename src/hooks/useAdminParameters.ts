@@ -9,6 +9,11 @@ const DEFAULTS: AdminParameters = {
   carte_image_url: '',
   carte_couleurs_image_url: '',
   accueil_image_url: '',
+  feature_pokedex_enabled: true,
+  feature_photo_capture_enabled: true,
+  feature_pokemon_enabled: true,
+  feature_inventory_enabled: true,
+  feature_map_enabled: true,
 }
 
 export function useAdminParameters() {
@@ -23,7 +28,7 @@ export function useAdminParameters() {
     try {
       const { data, error } = await supabase.from('admin_parameters').select('*').eq('id', 1).single()
       if (error) throw error
-      setParameters(data as AdminParameters)
+      setParameters({ ...DEFAULTS, ...(data as AdminParameters) })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur de chargement')
     } finally {
@@ -42,7 +47,7 @@ export function useAdminParameters() {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'admin_parameters' },
         (payload) => {
-          setParameters(payload.new as AdminParameters)
+          setParameters({ ...DEFAULTS, ...(payload.new as AdminParameters) })
         }
       )
       .subscribe()

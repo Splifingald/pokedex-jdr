@@ -1,17 +1,24 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { usePlayers } from '../hooks/usePlayers'
+import { usePokemon } from '../hooks/usePokemon'
+import { useAttacks } from '../hooks/useAttacks'
 import { PLAYER_COLORS } from '../types'
 import type { Player } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
+import { TeamTab } from './TeamTab'
 
 const emptyForm = { name: '', color: PLAYER_COLORS[0], image_url: '', is_npc: false }
 
 export function AdminPlayersPanel() {
   const { players, loading, createPlayer, updatePlayer, deletePlayer } = usePlayers()
+  const { pokemon, discovered } = usePokemon()
+  const { byName: attacksByName } = useAttacks()
+  const pokemonByName = useMemo(() => new Map(pokemon.map((p) => [p.nom, p])), [pokemon])
   const [editing, setEditing] = useState<Player | null>(null)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(null)
+  const [viewingTeamPlayer, setViewingTeamPlayer] = useState<Player | null>(null)
 
   const regularPlayers = players.filter((p) => !p.is_npc)
   const npcs = players.filter((p) => p.is_npc)
@@ -19,6 +26,28 @@ export function AdminPlayersPanel() {
   useEffect(() => {
     setForm(editing ? { name: editing.name, color: editing.color, image_url: editing.image_url, is_npc: editing.is_npc } : emptyForm)
   }, [editing])
+
+  if (viewingTeamPlayer) {
+    return (
+      <div className="w-full">
+        <button
+          onClick={() => setViewingTeamPlayer(null)}
+          className={`mb-3 text-sm rounded px-3 py-1.5 ${BUTTON_STYLE.gray}`}
+        >
+          ← Retour aux joueurs
+        </button>
+        <p className="text-[#a3841a] text-lg font-bold mb-2">Équipe de {viewingTeamPlayer.name}</p>
+        <TeamTab
+          player={viewingTeamPlayer}
+          pokemonList={pokemon}
+          discovered={discovered}
+          isAdmin={true}
+          pokemonByName={pokemonByName}
+          attacksByName={attacksByName}
+        />
+      </div>
+    )
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -83,6 +112,12 @@ export function AdminPlayersPanel() {
                     </>
                   ) : (
                     <>
+                      <button
+                        onClick={() => setViewingTeamPlayer(p)}
+                        className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
+                      >
+                        🐾 Équipe
+                      </button>
                       <button
                         onClick={() => setEditing(p)}
                         className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}

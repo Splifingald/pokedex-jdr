@@ -35,6 +35,11 @@
 -- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS carte_image_url text NOT NULL DEFAULT '';
 -- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS carte_couleurs_image_url text NOT NULL DEFAULT '';
 -- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS accueil_image_url text NOT NULL DEFAULT '';
+-- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_pokedex_enabled boolean NOT NULL DEFAULT true;
+-- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_photo_capture_enabled boolean NOT NULL DEFAULT true;
+-- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_pokemon_enabled boolean NOT NULL DEFAULT true;
+-- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_inventory_enabled boolean NOT NULL DEFAULT true;
+-- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_map_enabled boolean NOT NULL DEFAULT true;
 -- ============================================================
 
 -- Table principale des pokémon
@@ -204,6 +209,11 @@ CREATE TABLE IF NOT EXISTS admin_parameters (
   carte_image_url           text NOT NULL DEFAULT '',
   carte_couleurs_image_url  text NOT NULL DEFAULT '',
   accueil_image_url         text NOT NULL DEFAULT '',
+  feature_pokedex_enabled        boolean NOT NULL DEFAULT true,
+  feature_photo_capture_enabled  boolean NOT NULL DEFAULT true,
+  feature_pokemon_enabled        boolean NOT NULL DEFAULT true,
+  feature_inventory_enabled      boolean NOT NULL DEFAULT true,
+  feature_map_enabled            boolean NOT NULL DEFAULT true,
   CONSTRAINT single_row CHECK (id = 1)
 );
 INSERT INTO admin_parameters (id, max_moves, max_team_size)

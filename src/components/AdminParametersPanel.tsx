@@ -102,6 +102,57 @@ export function AdminParametersPanel() {
               className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
             />
           </div>
+
+          <div className="border-t-2 border-[#cfc7a8] pt-4">
+            <p className="text-ink-muted-2 text-sm mb-2">Fonctionnalités</p>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-sm text-ink-muted">
+                <input
+                  type="checkbox"
+                  checked={parameters.feature_pokedex_enabled}
+                  onChange={(e) => updateParameters({ feature_pokedex_enabled: e.target.checked })}
+                  className="w-4 h-4"
+                />
+                Pokédex
+              </label>
+              <label className="flex items-center gap-2 text-sm text-ink-muted ml-6">
+                <input
+                  type="checkbox"
+                  checked={parameters.feature_photo_capture_enabled}
+                  onChange={(e) => updateParameters({ feature_photo_capture_enabled: e.target.checked })}
+                  className="w-4 h-4"
+                />
+                Prise de photo (ajout d'un pokémon)
+              </label>
+              <label className="flex items-center gap-2 text-sm text-ink-muted">
+                <input
+                  type="checkbox"
+                  checked={parameters.feature_pokemon_enabled}
+                  onChange={(e) => updateParameters({ feature_pokemon_enabled: e.target.checked })}
+                  className="w-4 h-4"
+                />
+                Pokémon (équipe)
+              </label>
+              <label className="flex items-center gap-2 text-sm text-ink-muted">
+                <input
+                  type="checkbox"
+                  checked={parameters.feature_inventory_enabled}
+                  onChange={(e) => updateParameters({ feature_inventory_enabled: e.target.checked })}
+                  className="w-4 h-4"
+                />
+                Sac (inventaire)
+              </label>
+              <label className="flex items-center gap-2 text-sm text-ink-muted">
+                <input
+                  type="checkbox"
+                  checked={parameters.feature_map_enabled}
+                  onChange={(e) => updateParameters({ feature_map_enabled: e.target.checked })}
+                  className="w-4 h-4"
+                />
+                Carte
+              </label>
+            </div>
+          </div>
         </div>
       )}
     </div>

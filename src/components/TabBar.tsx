@@ -1,4 +1,4 @@
-export type TabId = 'accueil' | 'pokedex' | 'equipe' | 'sac' | 'carte' | 'admin'
+export type TabId = 'accueil' | 'pokedex' | 'equipe' | 'sac' | 'carte' | 'attaques' | 'admin'
 
 interface Tab {
   id: TabId
@@ -10,21 +10,24 @@ interface Tab {
 interface Props {
   activeTab: TabId
   onTabChange: (tab: TabId) => void
+  showPokedexTab: boolean
   showTeamTab: boolean
   showSacTab: boolean
   showCarteTab: boolean
+  showAttacksTab: boolean
   showAdminTab: boolean
   /** 'bottom' = barre d'icônes mobile, 'side' = barre latérale desktop */
   variant: 'bottom' | 'side'
 }
 
-export function TabBar({ activeTab, onTabChange, showTeamTab, showSacTab, showCarteTab, showAdminTab, variant }: Props) {
+export function TabBar({ activeTab, onTabChange, showPokedexTab, showTeamTab, showSacTab, showCarteTab, showAttacksTab, showAdminTab, variant }: Props) {
   const tabs: Tab[] = [
-    { id: 'pokedex', icon: '📖', label: 'Pokédex', visible: true },
+    { id: 'pokedex', icon: '📖', label: 'Pokédex', visible: showPokedexTab },
     { id: 'equipe', icon: '🐾', label: 'Pokémon', visible: showTeamTab },
     { id: 'accueil', icon: '🏠', label: 'Accueil', visible: true },
     { id: 'sac', icon: '🎒', label: 'Sac', visible: showSacTab },
     { id: 'carte', icon: '🗺️', label: 'Carte', visible: showCarteTab },
+    { id: 'attaques', icon: '💥', label: 'Capacités', visible: showAttacksTab },
     { id: 'admin', icon: '🛠️', label: 'Admin', visible: showAdminTab },
   ]
 

@@ -15,6 +15,7 @@ interface Props {
   isAdmin: boolean
   pokemonByName: Map<string, Pokemon>
   attacksByName: Map<string, Attack>
+  canScan: boolean
   onScan: () => void
   onRequestLogin: () => void
 }
@@ -30,7 +31,7 @@ const homeBgStyle = (url: string): React.CSSProperties => ({
   backgroundRepeat: 'no-repeat',
 })
 
-export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, onScan, onRequestLogin }: Props) {
+export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, canScan, onScan, onRequestLogin }: Props) {
   const { roster, updateXp, toggleInTeam, addMove, removeMove, deleteOwnedPokemon } = usePlayerPokemon(player?.id ?? null)
   const { parameters } = useAdminParameters()
   const { showToast } = useToast()
@@ -142,13 +143,15 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, onScan,
       ) : null}
 
       {/* Bouton scanner épinglé à droite */}
-      <button
-        onClick={onScan}
-        title="Scanner un Pokémon"
-        className="absolute right-3 top-1/2 -translate-y-1/2 w-14 h-14 rounded-full border-[3px] border-ink bg-cream text-2xl flex items-center justify-center shadow-[var(--shadow-pixel)] z-[35] active:shadow-none active:translate-x-[2px] active:translate-y-[calc(-50%+2px)] transition-all"
-      >
-        📷
-      </button>
+      {canScan && (
+        <button
+          onClick={onScan}
+          title="Scanner un Pokémon"
+          className="absolute right-3 top-1/2 -translate-y-1/2 w-14 h-14 rounded-full border-[3px] border-ink bg-cream text-2xl flex items-center justify-center shadow-[var(--shadow-pixel)] z-[35] active:shadow-none active:translate-x-[2px] active:translate-y-[calc(-50%+2px)] transition-all"
+        >
+          📷
+        </button>
+      )}
 
       {selected && !managingMoves && (
         <PokemonDetailSheet

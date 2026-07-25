@@ -185,6 +185,11 @@ export interface AdminParameters {
   carte_image_url: string
   carte_couleurs_image_url: string
   accueil_image_url: string
+  feature_pokedex_enabled: boolean
+  feature_photo_capture_enabled: boolean
+  feature_pokemon_enabled: boolean
+  feature_inventory_enabled: boolean
+  feature_map_enabled: boolean
 }
 
 // Fond par défaut de l'écran d'accueil (modifiable dans Admin → Paramètres)

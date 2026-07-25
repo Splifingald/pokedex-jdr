@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import type { Pokemon } from '../types'
 
 export function usePokemon() {
+  const channelId = useRef(Math.random().toString(36).slice(2))
   const [pokemon, setPokemon] = useState<Pokemon[]>([])
   const [discovered, setDiscovered] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
@@ -39,7 +40,7 @@ export function usePokemon() {
   // Abonnement temps réel : synchro INSERT et DELETE entre appareils
   useEffect(() => {
     const channel = supabase
-      .channel('discovered-pokemon-changes')
+      .channel(`discovered-pokemon-changes-${channelId.current}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'discovered_pokemon' },

@@ -25,6 +25,7 @@ interface Props {
   onAddToRoster: (p: Pokemon) => void
   onDiscover: (p: Pokemon) => Promise<void> | void
   onUndiscover: (p: Pokemon) => void
+  canScan: boolean
   onScan: () => void
   onManualDiscover: () => void
   /** Numéro à ouvrir/centrer automatiquement (après un scan réussi) */
@@ -45,6 +46,7 @@ export function PokedexTab({
   onAddToRoster,
   onDiscover,
   onUndiscover,
+  canScan,
   onScan,
   onManualDiscover,
   autoOpenNumero,
@@ -266,12 +268,14 @@ export function PokedexTab({
 
       {/* Boutons flottants : scanner + découverte manuelle */}
       <div className="absolute left-4 right-4 bottom-4 flex gap-2">
-        <button
-          onClick={onScan}
-          className="flex-1 py-3 rounded-lg border-2 border-ink bg-shell text-white font-bold text-sm shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
-        >
-          📷 Ajouter un Pokémon
-        </button>
+        {canScan && (
+          <button
+            onClick={onScan}
+            className="flex-1 py-3 rounded-lg border-2 border-ink bg-shell text-white font-bold text-sm shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+          >
+            📷 Ajouter un Pokémon
+          </button>
+        )}
         <button
           onClick={onManualDiscover}
           title="Ajouter un pokémon manuellement"

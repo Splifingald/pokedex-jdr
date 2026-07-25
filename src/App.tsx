@@ -10,6 +10,7 @@ import { useToast } from './context/ToastContext'
 import type { Pokemon } from './types'
 import { POKEDOLLAR_ITEM_NAME } from './types'
 import { AdminTab } from './components/AdminTab'
+import { AdminAttacksPanel } from './components/AdminAttacksPanel'
 import { ManualDiscoveryModal } from './components/ManualDiscoveryModal'
 import { ScannerModal } from './components/ScannerModal'
 import { TabBar, type TabId } from './components/TabBar'
@@ -31,6 +32,7 @@ const TAB_TITLES: Record<TabId, string> = {
   equipe: 'MES POKÉMON',
   sac: 'SAC',
   carte: 'CARTE',
+  attaques: 'CAPACITÉS',
   admin: 'ADMIN',
 }
 
@@ -59,11 +61,15 @@ export default function App() {
   const celebrationTimer = useRef<number | undefined>(undefined)
   useEffect(() => () => clearTimeout(celebrationTimer.current), [])
 
-  // Si l'onglet actif devient invisible (déconnexion, sortie du mode admin), on revient à l'accueil
+  // Si l'onglet actif devient invisible (déconnexion, sortie du mode admin, fonctionnalité désactivée), on revient à l'accueil
   useEffect(() => {
     if ((activeTab === 'equipe' || activeTab === 'sac') && !player) setActiveTab('accueil')
-    if (activeTab === 'admin' && !isAdmin) setActiveTab('accueil')
-  }, [activeTab, player, isAdmin])
+    if ((activeTab === 'admin' || activeTab === 'attaques') && !isAdmin) setActiveTab('accueil')
+    if (activeTab === 'pokedex' && !parameters.feature_pokedex_enabled) setActiveTab('accueil')
+    if (activeTab === 'equipe' && !parameters.feature_pokemon_enabled) setActiveTab('accueil')
+    if (activeTab === 'sac' && !parameters.feature_inventory_enabled) setActiveTab('accueil')
+    if (activeTab === 'carte' && !parameters.feature_map_enabled) setActiveTab('accueil')
+  }, [activeTab, player, isAdmin, parameters])
 
   const pokemonByName = useMemo(() => new Map(pokemon.map((p) => [p.nom, p])), [pokemon])
   const teamFull = player?.is_npc ? false : roster.filter((r) => r.in_team).length >= parameters.max_team_size
@@ -80,8 +86,10 @@ export default function App() {
     clearTimeout(celebrationTimer.current)
     celebrationTimer.current = window.setTimeout(() => {
       setCelebration(null)
-      setActiveTab('pokedex')
-      setAutoOpenNumero(p.numero)
+      if (parameters.feature_pokedex_enabled) {
+        setActiveTab('pokedex')
+        setAutoOpenNumero(p.numero)
+      }
     }, 1300)
   }
 
@@ -90,12 +98,16 @@ export default function App() {
     setIsAdmin(false)
   }
 
+  const canScan = parameters.feature_pokedex_enabled && parameters.feature_photo_capture_enabled
+
   const tabBarProps = {
     activeTab,
     onTabChange: setActiveTab,
-    showTeamTab: !!player,
-    showSacTab: !!player,
-    showCarteTab: true,
+    showPokedexTab: parameters.feature_pokedex_enabled,
+    showTeamTab: !!player && parameters.feature_pokemon_enabled,
+    showSacTab: !!player && parameters.feature_inventory_enabled,
+    showCarteTab: parameters.feature_map_enabled,
+    showAttacksTab: isAdmin,
     showAdminTab: isAdmin,
   }
 
@@ -133,12 +145,13 @@ export default function App() {
               isAdmin={isAdmin}
               pokemonByName={pokemonByName}
               attacksByName={attacksByName}
+              canScan={canScan}
               onScan={() => setShowScannerModal(true)}
               onRequestLogin={() => setShowLoginModal(true)}
             />
           )}
 
-          {activeTab === 'pokedex' && (
+          {activeTab === 'pokedex' && parameters.feature_pokedex_enabled && (
             <PokedexTab
               pokemon={pokemon}
               discovered={discovered}
@@ -150,6 +163,7 @@ export default function App() {
               onAddToRoster={handleAddToRoster}
               onDiscover={(p) => discoverPokemon(p.nom)}
               onUndiscover={(p) => undiscoverPokemon(p.nom)}
+              canScan={canScan}
               onScan={() => setShowScannerModal(true)}
               onManualDiscover={() => setShowManualModal(true)}
               autoOpenNumero={autoOpenNumero}
@@ -157,7 +171,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'equipe' && player && (
+          {activeTab === 'equipe' && player && parameters.feature_pokemon_enabled && (
             <TeamTab
               player={player}
               pokemonList={pokemon}
@@ -168,11 +182,17 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'sac' && player && (
+          {activeTab === 'sac' && player && parameters.feature_inventory_enabled && (
             <SacTab player={player} items={items} itemsByName={itemsByName} playerItems={playerItems} />
           )}
 
-          {activeTab === 'carte' && <CarteTab parameters={parameters} isAdmin={isAdmin} />}
+          {activeTab === 'carte' && parameters.feature_map_enabled && <CarteTab parameters={parameters} isAdmin={isAdmin} />}
+
+          {activeTab === 'attaques' && isAdmin && (
+            <div className="flex-1 overflow-y-auto p-4">
+              <AdminAttacksPanel />
+            </div>
+          )}
 
           {activeTab === 'admin' && isAdmin && (
             <AdminTab
