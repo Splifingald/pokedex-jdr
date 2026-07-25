@@ -45,6 +45,9 @@
 -- ALTER TABLE campaign_chapters ADD COLUMN IF NOT EXISTS done boolean NOT NULL DEFAULT false;
 -- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_gifting_enabled boolean NOT NULL DEFAULT true;
 -- ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS next_gift_at timestamptz;
+-- ALTER TABLE gift_lootboxes RENAME COLUMN timer_min_hours TO timer_min;
+-- ALTER TABLE gift_lootboxes RENAME COLUMN timer_max_hours TO timer_max;
+-- ALTER TABLE gift_lootboxes ADD COLUMN IF NOT EXISTS timer_unit text NOT NULL DEFAULT 'hours' CHECK (timer_unit IN ('hours', 'minutes'));
 -- ============================================================
 
 -- Table principale des pokémon
@@ -356,8 +359,9 @@ CREATE TABLE IF NOT EXISTS gift_lootboxes (
   id                bigserial PRIMARY KEY,
   nom               text NOT NULL,
   is_default        boolean NOT NULL DEFAULT false,
-  timer_min_hours   integer NOT NULL DEFAULT 60,
-  timer_max_hours   integer NOT NULL DEFAULT 80,
+  timer_min         integer NOT NULL DEFAULT 60,
+  timer_max         integer NOT NULL DEFAULT 80,
+  timer_unit        text NOT NULL DEFAULT 'hours' CHECK (timer_unit IN ('hours', 'minutes')),
   created_at        timestamptz NOT NULL DEFAULT now()
 );
 

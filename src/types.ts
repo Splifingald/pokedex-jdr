@@ -238,12 +238,15 @@ export const POKEDOLLAR_ITEM_NAME = 'Pokédollar'
 export const sellValue = (cout: number) => Math.floor(cout / 2)
 
 // ── Cadeaux Pokémon (lootboxes) ───────────────────────────────
+export type GiftTimerUnit = 'hours' | 'minutes'
+
 export interface GiftLootbox {
   id: number
   nom: string
   is_default: boolean
-  timer_min_hours: number
-  timer_max_hours: number
+  timer_min: number
+  timer_max: number
+  timer_unit: GiftTimerUnit
   created_at: string
 }
 

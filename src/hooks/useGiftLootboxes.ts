@@ -112,8 +112,9 @@ export function useGiftLootboxes() {
       .insert({
         nom,
         is_default: lootboxes.length === 0,
-        timer_min_hours: DEFAULT_LOOTBOX_TIMER_MIN_HOURS,
-        timer_max_hours: DEFAULT_LOOTBOX_TIMER_MAX_HOURS,
+        timer_min: DEFAULT_LOOTBOX_TIMER_MIN_HOURS,
+        timer_max: DEFAULT_LOOTBOX_TIMER_MAX_HOURS,
+        timer_unit: 'hours',
       })
       .select()
       .single()
@@ -126,7 +127,7 @@ export function useGiftLootboxes() {
     return row
   }, [lootboxes])
 
-  const updateLootbox = useCallback(async (id: number, patch: Partial<Pick<GiftLootbox, 'nom' | 'timer_min_hours' | 'timer_max_hours'>>) => {
+  const updateLootbox = useCallback(async (id: number, patch: Partial<Pick<GiftLootbox, 'nom' | 'timer_min' | 'timer_max' | 'timer_unit'>>) => {
     setLootboxes((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)))
     const { error } = await supabase.from('gift_lootboxes').update(patch).eq('id', id)
     if (error) {

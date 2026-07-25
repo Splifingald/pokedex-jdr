@@ -1,4 +1,4 @@
-import type { GiftLootbox, GiftLootboxItem, GiftLootboxSpecies, PlayerPokemon } from '../types'
+import type { GiftLootbox, GiftLootboxItem, GiftLootboxSpecies, GiftTimerUnit, PlayerPokemon } from '../types'
 
 // Résout le lootbox applicable à une espèce : celui assigné explicitement,
 // sinon celui marqué par défaut.
@@ -15,15 +15,21 @@ export function resolveLootboxForSpecies(
   return lootboxes.find((l) => l.is_default)
 }
 
+const TIMER_UNIT_MS: Record<GiftTimerUnit, number> = {
+  hours: 3_600_000,
+  minutes: 60_000,
+}
+
 // Prochain horodatage de cadeau : maintenant + une durée aléatoire dans la
-// plage du lootbox (en heures).
+// plage du lootbox, dans l'unité choisie par l'admin (heures ou minutes —
+// les minutes permettent de tester rapidement en dev).
 export function randomNextGiftAt(
-  lootbox: Pick<GiftLootbox, 'timer_min_hours' | 'timer_max_hours'>,
+  lootbox: Pick<GiftLootbox, 'timer_min' | 'timer_max' | 'timer_unit'>,
   from: Date = new Date()
 ): string {
-  const { timer_min_hours: min, timer_max_hours: max } = lootbox
-  const hours = min + Math.random() * Math.max(0, max - min)
-  return new Date(from.getTime() + hours * 3_600_000).toISOString()
+  const { timer_min: min, timer_max: max, timer_unit: unit } = lootbox
+  const amount = min + Math.random() * Math.max(0, max - min)
+  return new Date(from.getTime() + amount * TIMER_UNIT_MS[unit]).toISOString()
 }
 
 // Un pokémon a un cadeau prêt si : il est dans l'équipe, son dresseur n'est

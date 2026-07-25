@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { GiftTimerUnit } from '../types'
 import { useGiftLootboxes } from '../hooks/useGiftLootboxes'
 import { useItems } from '../hooks/useItems'
 import { usePokemon } from '../hooks/usePokemon'
@@ -124,24 +125,35 @@ export function AdminGiftingPanel() {
 
               <div className="flex gap-3">
                 <div className="flex-1">
-                  <label className="text-ink-muted-2 text-sm block mb-1">Minuteur min (h)</label>
+                  <label className="text-ink-muted-2 text-sm block mb-1">Minuteur min</label>
                   <NumberInput
                     min={0}
-                    fallback={selectedLootbox.timer_min_hours}
-                    value={selectedLootbox.timer_min_hours}
-                    onCommit={(v) => updateLootbox(selectedLootbox.id, { timer_min_hours: Math.max(0, v) })}
+                    fallback={selectedLootbox.timer_min}
+                    value={selectedLootbox.timer_min}
+                    onCommit={(v) => updateLootbox(selectedLootbox.id, { timer_min: Math.max(0, v) })}
                     className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
                   />
                 </div>
                 <div className="flex-1">
-                  <label className="text-ink-muted-2 text-sm block mb-1">Minuteur max (h)</label>
+                  <label className="text-ink-muted-2 text-sm block mb-1">Minuteur max</label>
                   <NumberInput
                     min={0}
-                    fallback={selectedLootbox.timer_max_hours}
-                    value={selectedLootbox.timer_max_hours}
-                    onCommit={(v) => updateLootbox(selectedLootbox.id, { timer_max_hours: Math.max(0, v) })}
+                    fallback={selectedLootbox.timer_max}
+                    value={selectedLootbox.timer_max}
+                    onCommit={(v) => updateLootbox(selectedLootbox.id, { timer_max: Math.max(0, v) })}
                     className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
                   />
+                </div>
+                <div className="flex-1">
+                  <label className="text-ink-muted-2 text-sm block mb-1">Unité</label>
+                  <select
+                    value={selectedLootbox.timer_unit}
+                    onChange={(e) => updateLootbox(selectedLootbox.id, { timer_unit: e.target.value as GiftTimerUnit })}
+                    className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+                  >
+                    <option value="hours">Heures</option>
+                    <option value="minutes">Minutes</option>
+                  </select>
                 </div>
               </div>
 
