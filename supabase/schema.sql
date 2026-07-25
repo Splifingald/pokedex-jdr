@@ -339,3 +339,23 @@ CREATE POLICY "Public delete player_items"
   ON player_items FOR DELETE
   TO anon
   USING (true);
+
+-- ============================================================
+-- Table de rencontres (importée par CSV via Netlify Function)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS encounters (
+  id          bigserial PRIMARY KEY,
+  lieu        text NOT NULL,
+  pokemon_nom text NOT NULL,
+  de          integer,
+  commentaire text
+);
+
+ALTER TABLE encounters ENABLE ROW LEVEL SECURITY;
+
+-- encounters : lecture publique, écriture bloquée pour anon (via Netlify Function seulement)
+CREATE POLICY "Public read encounters"
+  ON encounters FOR SELECT
+  TO anon
+  USING (true);

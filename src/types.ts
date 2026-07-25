@@ -228,3 +228,21 @@ export interface PlayerItem {
 
 export const POKEDOLLAR_ITEM_NAME = 'Pokédollar'
 export const sellValue = (cout: number) => Math.floor(cout / 2)
+
+// ── Rencontres ────────────────────────────────────────────────
+export interface Encounter {
+  id: number
+  lieu: string
+  pokemon_nom: string
+  de: number | null
+  commentaire: string | null
+}
+
+export interface EncounterCsvRow {
+  'Lieu': string
+  'Pokémon': string
+  'Dé': string
+  'Commentaire': string
+}
+
+export const ENCOUNTER_CSV_REQUIRED_HEADERS: (keyof EncounterCsvRow)[] = ['Lieu', 'Pokémon', 'Dé']

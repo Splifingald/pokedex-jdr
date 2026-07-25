@@ -11,6 +11,7 @@ import type { Pokemon } from './types'
 import { POKEDOLLAR_ITEM_NAME } from './types'
 import { AdminTab } from './components/AdminTab'
 import { AdminAttacksPanel } from './components/AdminAttacksPanel'
+import { RencontresTab } from './components/RencontresTab'
 import { ManualDiscoveryModal } from './components/ManualDiscoveryModal'
 import { ScannerModal } from './components/ScannerModal'
 import { TabBar, type TabId } from './components/TabBar'
@@ -33,6 +34,7 @@ const TAB_TITLES: Record<TabId, string> = {
   sac: 'SAC',
   carte: 'CARTE',
   attaques: 'CAPACITÉS',
+  rencontres: 'RENCONTRES',
   admin: 'ADMIN',
 }
 
@@ -64,7 +66,7 @@ export default function App() {
   // Si l'onglet actif devient invisible (déconnexion, sortie du mode admin, fonctionnalité désactivée), on revient à l'accueil
   useEffect(() => {
     if ((activeTab === 'equipe' || activeTab === 'sac') && !player) setActiveTab('accueil')
-    if ((activeTab === 'admin' || activeTab === 'attaques') && !isAdmin) setActiveTab('accueil')
+    if ((activeTab === 'admin' || activeTab === 'attaques' || activeTab === 'rencontres') && !isAdmin) setActiveTab('accueil')
     if (activeTab === 'pokedex' && !parameters.feature_pokedex_enabled) setActiveTab('accueil')
     if (activeTab === 'equipe' && !parameters.feature_pokemon_enabled) setActiveTab('accueil')
     if (activeTab === 'sac' && !parameters.feature_inventory_enabled) setActiveTab('accueil')
@@ -108,6 +110,7 @@ export default function App() {
     showSacTab: !!player && parameters.feature_inventory_enabled,
     showCarteTab: parameters.feature_map_enabled,
     showAttacksTab: isAdmin,
+    showRencontresTab: isAdmin,
     showAdminTab: isAdmin,
   }
 
@@ -192,6 +195,10 @@ export default function App() {
             <div className="flex-1 overflow-y-auto p-4">
               <AdminAttacksPanel />
             </div>
+          )}
+
+          {activeTab === 'rencontres' && isAdmin && (
+            <RencontresTab pokemonByName={pokemonByName} />
           )}
 
           {activeTab === 'admin' && isAdmin && (

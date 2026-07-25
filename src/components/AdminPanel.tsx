@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import Papa from 'papaparse'
-import type { CsvRow, AttackCsvRow, CarteCsvRow, ItemCsvRow } from '../types'
-import { CSV_REQUIRED_HEADERS, ATTACK_CSV_REQUIRED_HEADERS, CARTE_CSV_REQUIRED_HEADERS, ITEM_CSV_REQUIRED_HEADERS } from '../types'
+import type { CsvRow, AttackCsvRow, CarteCsvRow, ItemCsvRow, EncounterCsvRow } from '../types'
+import { CSV_REQUIRED_HEADERS, ATTACK_CSV_REQUIRED_HEADERS, CARTE_CSV_REQUIRED_HEADERS, ITEM_CSV_REQUIRED_HEADERS, ENCOUNTER_CSV_REQUIRED_HEADERS } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 
 // L'import CSV passe par une Netlify Function côté serveur
@@ -10,6 +10,7 @@ const IMPORT_POKEMON_URL = '/.netlify/functions/import-pokemon'
 const IMPORT_ATTACKS_URL = '/.netlify/functions/import-attacks'
 const IMPORT_CARTE_URL = '/.netlify/functions/import-carte'
 const IMPORT_ITEMS_URL = '/.netlify/functions/import-items'
+const IMPORT_ENCOUNTERS_URL = '/.netlify/functions/import-encounters'
 const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET as string
 
 interface Props {
@@ -100,6 +101,15 @@ function mapItemCsvRow(row: ItemCsvRow) {
   }
 }
 
+function mapEncounterCsvRow(row: EncounterCsvRow) {
+  return {
+    lieu:        row['Lieu']?.trim() ?? '',
+    pokemon_nom: row['Pokémon']?.trim() ?? '',
+    de:          row['Dé']?.trim() ? parseInt(row['Dé']) : null,
+    commentaire: row['Commentaire']?.trim() || null,
+  }
+}
+
 export function AdminPanel({ onImportSuccess }: Props) {
   const [status, setStatus] = useState<'idle' | 'parsing' | 'importing' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
@@ -126,6 +136,8 @@ export function AdminPanel({ onImportSuccess }: Props) {
         const isAttacksCsv = fields.includes('Attaque')
         // Une colonne "Coût" n'existe que dans le CSV d'objets
         const isItemsCsv = fields.includes('Coût')
+        // Une colonne "Lieu" n'existe que dans le CSV de rencontres
+        const isEncountersCsv = fields.includes('Lieu')
 
         if (isCarteCsv) {
           const missing = CARTE_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
@@ -268,6 +280,53 @@ export function AdminPanel({ onImportSuccess }: Props) {
           return
         }
 
+        if (isEncountersCsv) {
+          const missing = ENCOUNTER_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
+          if (missing.length > 0) {
+            setStatus('error')
+            setMessage(`Colonnes manquantes : ${missing.join(', ')}`)
+            return
+          }
+
+          const rows = (results.data as unknown as EncounterCsvRow[])
+            .map(mapEncounterCsvRow)
+            .filter((r) => r.lieu && r.pokemon_nom)
+
+          if (rows.length === 0) {
+            setStatus('error')
+            setMessage('Aucune ligne valide trouvée dans le CSV.')
+            return
+          }
+
+          setStatus('importing')
+          setMessage(`Import de ${rows.length} rencontres…`)
+
+          try {
+            const res = await fetch(IMPORT_ENCOUNTERS_URL, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${ADMIN_SECRET}`,
+              },
+              body: JSON.stringify({ rows }),
+            })
+
+            const data = await res.json()
+
+            if (!res.ok) {
+              throw new Error(data.error ?? `Erreur serveur ${res.status}`)
+            }
+
+            setStatus('success')
+            setMessage(`✅ ${data.imported} rencontres importées avec succès !`)
+            onImportSuccess()
+          } catch (err) {
+            setStatus('error')
+            setMessage(err instanceof Error ? err.message : 'Erreur inconnue')
+          }
+          return
+        }
+
         // Validation des en-têtes (CSV pokémon)
         const missing = CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
         if (missing.length > 0) {
@@ -333,7 +392,7 @@ export function AdminPanel({ onImportSuccess }: Props) {
 
         <div className="mb-5">
           <p className="text-ink-muted-2 text-sm mb-3">
-            Importer un CSV Pokémon, Capacités, Carte ou Objets (détecté automatiquement).<br />
+            Importer un CSV Pokémon, Capacités, Carte, Objets ou Rencontres (détecté automatiquement).<br />
             <span className="text-[#a3841a] text-xs">⚠ Remplace toute la liste existante correspondante.</span>
           </p>
           <button
