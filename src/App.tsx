@@ -189,7 +189,9 @@ export default function App() {
             <SacTab player={player} items={items} itemsByName={itemsByName} playerItems={playerItems} />
           )}
 
-          {activeTab === 'carte' && parameters.feature_map_enabled && <CarteTab parameters={parameters} isAdmin={isAdmin} />}
+          {activeTab === 'carte' && parameters.feature_map_enabled && (
+            <CarteTab parameters={parameters} isAdmin={isAdmin} pokemonByName={pokemonByName} />
+          )}
 
           {activeTab === 'attaques' && isAdmin && (
             <div className="flex-1 overflow-y-auto p-4">

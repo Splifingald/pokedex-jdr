@@ -1,12 +1,15 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-import type { AdminParameters, CarteLocation } from '../types'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import type { AdminParameters, CarteLocation, Pokemon } from '../types'
 import { useCarteLocations } from '../hooks/useCarteLocations'
+import { useEncounters } from '../hooks/useEncounters'
 import { CarteImageViewer } from './CarteImageViewer'
+import { EncounterTableModal } from './EncounterTableModal'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 
 interface Props {
   parameters: AdminParameters
   isAdmin: boolean
+  pokemonByName: Map<string, Pokemon>
 }
 
 const MAX_SCALE = 5
@@ -39,8 +42,9 @@ function hexToRgb(hex: string): [number, number, number] | null {
   return [r, g, b]
 }
 
-export function CarteTab({ parameters, isAdmin }: Props) {
+export function CarteTab({ parameters, isAdmin, pokemonByName }: Props) {
   const { locations } = useCarteLocations()
+  const { encounters } = useEncounters()
 
   const containerRef = useRef<HTMLDivElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
@@ -53,6 +57,13 @@ export function CarteTab({ parameters, isAdmin }: Props) {
   const [selected, setSelected] = useState<CarteLocation | null>(null)
   const [viewerOpen, setViewerOpen] = useState(false)
   const [colorMapError, setColorMapError] = useState(false)
+  const [encounterModalOpen, setEncounterModalOpen] = useState(false)
+
+  const matchingEncounterRows = useMemo(() => {
+    if (!selected) return []
+    const target = selected.titre.trim().toLowerCase()
+    return encounters.filter((e) => e.lieu.trim().toLowerCase() === target)
+  }, [selected, encounters])
 
   const pointers = useRef(new Map<number, { x: number; y: number }>())
   const dragStateRef = useRef<{ startX: number; startY: number; originX: number; originY: number; moved: number } | null>(null)
@@ -120,6 +131,7 @@ export function CarteTab({ parameters, isAdmin }: Props) {
     const fracY = (clientY - rect.top) / rect.height
     if (fracX < 0 || fracX > 1 || fracY < 0 || fracY > 1) {
       setSelected(null)
+      setEncounterModalOpen(false)
       return
     }
     const px = Math.min(canvas.width - 1, Math.max(0, Math.floor(fracX * canvas.width)))
@@ -140,6 +152,7 @@ export function CarteTab({ parameters, isAdmin }: Props) {
         }
       }
       setSelected(bestDist <= COLOR_MATCH_MAX_DIST_SQ ? best : null)
+      setEncounterModalOpen(false)
     } catch {
       setColorMapError(true)
     }
@@ -252,6 +265,15 @@ export function CarteTab({ parameters, isAdmin }: Props) {
               </span>
             )}
             <h3 className="text-ink font-bold flex-1">{selected.titre}</h3>
+            {isAdmin && matchingEncounterRows.length > 0 && (
+              <button
+                onClick={() => setEncounterModalOpen(true)}
+                title="Voir la table de rencontres"
+                className={`w-7 h-7 shrink-0 rounded-md text-sm ${BUTTON_STYLE.gray}`}
+              >
+                🎲
+              </button>
+            )}
             <button
               onClick={() => setSelected(null)}
               className={`w-7 h-7 shrink-0 rounded-md text-sm font-bold ${BUTTON_STYLE.gray}`}
@@ -281,6 +303,15 @@ export function CarteTab({ parameters, isAdmin }: Props) {
 
       {viewerOpen && selected?.image_url && (
         <CarteImageViewer imageUrl={selected.image_url} onClose={() => setViewerOpen(false)} />
+      )}
+
+      {encounterModalOpen && selected && matchingEncounterRows.length > 0 && (
+        <EncounterTableModal
+          lieu={selected.titre}
+          rows={matchingEncounterRows}
+          pokemonByName={pokemonByName}
+          onClose={() => setEncounterModalOpen(false)}
+        />
       )}
     </div>
   )
