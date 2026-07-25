@@ -37,14 +37,14 @@ export function TabBar({ activeTab, onTabChange, showPokedexTab, showTeamTab, sh
 
   if (variant === 'side') {
     return (
-      <nav className="shrink-0 hidden md:flex flex-col w-24 bg-tabbar-bg border-r-4 border-ink py-2">
+      <nav className="shrink-0 hidden md:flex flex-col w-24 bg-tabbar-bg border-r-4 border-ink py-2 overflow-y-auto">
         {visibleTabs.map((tab) => {
           const active = activeTab === tab.id
           return (
             <button
               key={tab.id}
               onClick={() => onTabChange(tab.id)}
-              className={`flex flex-col items-center gap-0.5 py-3 border-l-[3px] transition-colors ${
+              className={`shrink-0 flex flex-col items-center gap-0.5 py-3 border-l-[3px] transition-colors ${
                 active
                   ? 'border-shell bg-white/5 text-cream'
                   : 'border-transparent text-tabbar-inactive hover:text-cream'
@@ -60,7 +60,7 @@ export function TabBar({ activeTab, onTabChange, showPokedexTab, showTeamTab, sh
   }
 
   return (
-    <nav className="shrink-0 flex md:hidden bg-tabbar-bg border-t-4 border-ink">
+    <nav className="shrink-0 flex md:hidden bg-tabbar-bg border-t-4 border-ink overflow-x-auto">
       {visibleTabs.map((tab) => {
         const active = activeTab === tab.id
         return (
@@ -68,7 +68,7 @@ export function TabBar({ activeTab, onTabChange, showPokedexTab, showTeamTab, sh
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
             aria-label={tab.label}
-            className={`flex-1 flex items-center justify-center py-3 border-t-[3px] transition-colors ${
+            className={`flex-1 min-w-16 flex items-center justify-center py-3 border-t-[3px] transition-colors ${
               active
                 ? 'border-shell bg-white/5 text-cream'
                 : 'border-transparent text-tabbar-inactive'
