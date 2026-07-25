@@ -4,7 +4,9 @@ import type { ReferenceIndex } from '../../hooks/useReferenceIndex'
 import { useCampaignChapters } from '../../hooks/useCampaignChapters'
 import { ChapterCard } from './ChapterCard'
 import { ChapterEditor } from './ChapterEditor'
+import { ChapterViewPopup } from './ChapterViewPopup'
 import { EmojiPickerButton } from './EmojiPickerButton'
+import { DoneToggle } from './DoneToggle'
 import { ImageLightbox } from '../ImageLightbox'
 import { ConfirmPopup } from '../ConfirmPopup'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
@@ -13,7 +15,7 @@ import { formatDateFr } from '../../lib/formatDate'
 
 interface Props {
   session: CampaignSession
-  onUpdateSession: (id: number, data: { title?: string; icon?: string; session_date?: string | null; image_url?: string | null }) => void
+  onUpdateSession: (id: number, data: { title?: string; icon?: string; session_date?: string | null; image_url?: string | null; done?: boolean }) => void
   onDeleteSession: (id: number) => void
   onBack: () => void
   referenceIndex: ReferenceIndex
@@ -40,6 +42,7 @@ export function SessionDetailView({
 }: Props) {
   const { chapters, loading, createChapter, updateChapter, deleteChapter } = useCampaignChapters(session.id)
   const [selectedChapterId, setSelectedChapterId] = useState<number | null>(null)
+  const [viewingChapterId, setViewingChapterId] = useState<number | null>(null)
   const [viewerOpen, setViewerOpen] = useState(false)
   const [confirmDeleteSession, setConfirmDeleteSession] = useState(false)
 
@@ -59,9 +62,13 @@ export function SessionDetailView({
     if (selectedChapterId != null && !chapters.some((c) => c.id === selectedChapterId)) {
       setSelectedChapterId(null)
     }
-  }, [chapters, selectedChapterId])
+    if (viewingChapterId != null && !chapters.some((c) => c.id === viewingChapterId)) {
+      setViewingChapterId(null)
+    }
+  }, [chapters, selectedChapterId, viewingChapterId])
 
   const selectedChapter = chapters.find((c) => c.id === selectedChapterId) ?? null
+  const viewingChapter = chapters.find((c) => c.id === viewingChapterId) ?? null
 
   if (selectedChapter) {
     return (
@@ -167,11 +174,12 @@ export function SessionDetailView({
         <div className="flex items-center gap-2 mb-4">
           <span className="text-3xl shrink-0">{session.icon}</span>
           <div className="flex-1 min-w-0">
-            <h2 className="text-ink text-lg font-bold truncate">{session.title}</h2>
+            <h2 className="text-cream text-lg font-bold truncate">{session.title}</h2>
             {session.session_date && (
-              <p className="text-ink-muted-2 text-xs">{formatDateFr(session.session_date)}</p>
+              <p className="text-[#7a7c9a] text-xs">{formatDateFr(session.session_date)}</p>
             )}
           </div>
+          <DoneToggle done={session.done} onToggle={() => onUpdateSession(session.id, { done: !session.done })} />
           <button onClick={() => setEditingSession(true)} className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}>
             Éditer
           </button>
@@ -182,7 +190,7 @@ export function SessionDetailView({
       )}
 
       <div className="flex items-center justify-between mb-2">
-        <p className="text-ink-muted-2 text-xs font-bold">CHAPITRES</p>
+        <p className="text-[#7a7c9a] text-xs font-bold">CHAPITRES</p>
         <button onClick={() => setShowChapterForm((s) => !s)} className={`text-xs rounded px-2 py-1 font-bold ${BUTTON_STYLE.yellow}`}>
           + Nouveau chapitre
         </button>
@@ -222,19 +230,38 @@ export function SessionDetailView({
       )}
 
       {loading ? (
-        <p className="text-ink-muted-2 text-sm">Chargement…</p>
+        <p className="text-[#7a7c9a] text-sm">Chargement…</p>
       ) : chapters.length === 0 ? (
-        <p className="text-ink-muted-2 text-sm">Aucun chapitre pour l'instant.</p>
+        <p className="text-[#7a7c9a] text-sm">Aucun chapitre pour l'instant.</p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {chapters.map((chapter) => (
-            <ChapterCard key={chapter.id} chapter={chapter} onClick={() => setSelectedChapterId(chapter.id)} />
+            <ChapterCard
+              key={chapter.id}
+              chapter={chapter}
+              onClick={() => setSelectedChapterId(chapter.id)}
+              onView={() => setViewingChapterId(chapter.id)}
+            />
           ))}
         </div>
       )}
 
       {viewerOpen && session.image_url && (
         <ImageLightbox src={session.image_url} alt={session.title} onClose={() => setViewerOpen(false)} />
+      )}
+
+      {viewingChapter && (
+        <ChapterViewPopup
+          chapter={viewingChapter}
+          referenceIndex={referenceIndex}
+          pokemonByName={pokemonByName}
+          attacksByName={attacksByName}
+          itemsByName={itemsByName}
+          playersByName={playersByName}
+          locationsByName={locationsByName}
+          onToggleDone={() => updateChapter(viewingChapter.id, { done: !viewingChapter.done })}
+          onClose={() => setViewingChapterId(null)}
+        />
       )}
 
       {confirmDeleteSession && (

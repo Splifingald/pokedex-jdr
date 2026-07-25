@@ -10,15 +10,12 @@ import type { ReferenceEntry, ReferenceIndex } from '../../hooks/useReferenceInd
 import { ReferenceHighlight, forceReferenceRecompute } from '../../lib/referenceExtension'
 import { EditorToolbar } from './EditorToolbar'
 import { EmojiPickerButton } from './EmojiPickerButton'
-import { PlayerReferencePopup } from './PlayerReferencePopup'
-import { LocationReferencePopup } from './LocationReferencePopup'
-import { AbilityReferencePopup } from './AbilityReferencePopup'
-import { ItemReferencePopup } from './ItemReferencePopup'
-import { PokemonDetailSheet } from '../PokemonDetailSheet'
+import { ReferenceDispatcher } from './ReferenceDispatcher'
 import { ImageLightbox } from '../ImageLightbox'
 import { ConfirmPopup } from '../ConfirmPopup'
+import { DoneToggle } from './DoneToggle'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
-import { PIXEL_BORDER_SM } from '../../lib/panelStyles'
+import { PANEL_LG, PIXEL_BORDER_SM } from '../../lib/panelStyles'
 
 interface Props {
   chapter: CampaignChapter
@@ -28,7 +25,7 @@ interface Props {
   itemsByName: Map<string, Item>
   playersByName: Map<string, Player>
   locationsByName: Map<string, CarteLocation>
-  onUpdate: (id: number, data: { title?: string; icon?: string; image_url?: string | null; content?: CampaignChapter['content'] }) => void
+  onUpdate: (id: number, data: { title?: string; icon?: string; image_url?: string | null; content?: CampaignChapter['content']; done?: boolean }) => void
   onDelete: (id: number) => void
   onBack: () => void
 }
@@ -90,11 +87,31 @@ export function ChapterEditor({
     setDirty(false)
   }
 
+  // Raccourci Ctrl+S / Cmd+S pour enregistrer
+  const handleSaveRef = useRef(handleSave)
+  useEffect(() => { handleSaveRef.current = handleSave })
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        handleSaveRef.current()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
   const handleBack = () => {
     if (dirty) {
       setConfirmBack(true)
       return
     }
+    onBack()
+  }
+
+  const handleSaveAndQuit = () => {
+    handleSave()
+    setConfirmBack(false)
     onBack()
   }
 
@@ -105,8 +122,9 @@ export function ChapterEditor({
           <button onClick={handleBack} className={`text-sm rounded px-3 py-1.5 ${BUTTON_STYLE.gray}`}>
             ← Retour
           </button>
+          <DoneToggle done={chapter.done} onToggle={() => onUpdate(chapter.id, { done: !chapter.done })} />
           <span className="flex-1" />
-          {dirty && <span className="text-xs text-[#a3841a] font-bold">● Non enregistré</span>}
+          {dirty && <span className="text-xs text-[#ffd75e] font-bold">● Non enregistré</span>}
           <button onClick={handleSave} className={`text-sm rounded px-3 py-1.5 font-bold ${BUTTON_STYLE.green}`}>
             💾 Enregistrer
           </button>
@@ -158,14 +176,34 @@ export function ChapterEditor({
       )}
 
       {confirmBack && (
-        <ConfirmPopup
-          title="Quitter sans enregistrer ?"
-          message="Les modifications non enregistrées seront perdues."
-          confirmLabel="Quitter"
-          danger
-          onConfirm={() => { setConfirmBack(false); onBack() }}
-          onCancel={() => setConfirmBack(false)}
-        />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className={`${PANEL_LG} max-w-xs w-full p-6`}>
+            <div className="text-center mb-5">
+              <h3 className="text-ink text-lg">Modifications non enregistrées</h3>
+              <p className="text-ink-muted text-sm mt-2">Que voulez-vous faire avant de quitter ?</p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={handleSaveAndQuit}
+                className={`py-2.5 rounded text-sm font-bold ${BUTTON_STYLE.green}`}
+              >
+                💾 Enregistrer et quitter
+              </button>
+              <button
+                onClick={() => { setConfirmBack(false); onBack() }}
+                className={`py-2.5 rounded text-sm font-bold ${BUTTON_STYLE.red}`}
+              >
+                Quitter sans enregistrer
+              </button>
+              <button
+                onClick={() => setConfirmBack(false)}
+                className={`py-2.5 rounded text-sm font-bold ${BUTTON_STYLE.gray}`}
+              >
+                Annuler
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {confirmDelete && (
@@ -179,43 +217,15 @@ export function ChapterEditor({
         />
       )}
 
-      {activeReference?.type === 'pokemon' && (
-        <PokemonDetailSheet
-          context="pokedex"
-          pokemon={pokemonByName.get(activeReference.name)}
-          attacksByName={attacksByName}
-          isAdmin={true}
-          isDiscovered={true}
-          onClose={() => setActiveReference(null)}
-        />
-      )}
-      {activeReference?.type === 'player' && playersByName.get(activeReference.name) && (
-        <PlayerReferencePopup
-          player={playersByName.get(activeReference.name)!}
-          pokemonByName={pokemonByName}
-          attacksByName={attacksByName}
-          itemsByName={itemsByName}
-          onClose={() => setActiveReference(null)}
-        />
-      )}
-      {activeReference?.type === 'location' && locationsByName.get(activeReference.name) && (
-        <LocationReferencePopup
-          location={locationsByName.get(activeReference.name)!}
-          onClose={() => setActiveReference(null)}
-        />
-      )}
-      {activeReference?.type === 'ability' && attacksByName.get(activeReference.name) && (
-        <AbilityReferencePopup
-          attack={attacksByName.get(activeReference.name)!}
-          onClose={() => setActiveReference(null)}
-        />
-      )}
-      {activeReference?.type === 'item' && itemsByName.get(activeReference.name) && (
-        <ItemReferencePopup
-          item={itemsByName.get(activeReference.name)!}
-          onClose={() => setActiveReference(null)}
-        />
-      )}
+      <ReferenceDispatcher
+        activeReference={activeReference}
+        pokemonByName={pokemonByName}
+        attacksByName={attacksByName}
+        itemsByName={itemsByName}
+        playersByName={playersByName}
+        locationsByName={locationsByName}
+        onClose={() => setActiveReference(null)}
+      />
     </div>
   )
 }

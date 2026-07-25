@@ -1,6 +1,7 @@
 import type { CampaignSession } from '../../types'
-import { PANEL } from '../../lib/panelStyles'
+import { PANEL, PANEL_DONE } from '../../lib/panelStyles'
 import { formatDateFr } from '../../lib/formatDate'
+import { DoneBadge } from './DoneBadge'
 
 interface Props {
   session: CampaignSession
@@ -9,7 +10,8 @@ interface Props {
 
 export function SessionCard({ session, onClick }: Props) {
   return (
-    <button onClick={onClick} className={`${PANEL} flex flex-col overflow-hidden text-left w-full`}>
+    <button onClick={onClick} className={`${session.done ? PANEL_DONE : PANEL} relative flex flex-col overflow-hidden text-left w-full`}>
+      {session.done && <DoneBadge />}
       {session.image_url && (
         <div className="h-20 w-full overflow-hidden border-b-2 border-ink">
           <img src={session.image_url} alt={session.title} className="w-full h-full object-cover" />

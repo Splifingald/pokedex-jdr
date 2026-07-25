@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import type { CampaignChapter } from '../types'
 import { EMPTY_CHAPTER_CONTENT } from '../types'
 
-type ChapterInput = { title: string; icon: string; image_url: string | null; content?: CampaignChapter['content'] }
+type ChapterInput = { title: string; icon: string; image_url: string | null; content?: CampaignChapter['content']; done?: boolean }
 
 export function useCampaignChapters(sessionId: number | null) {
   const channelId = useRef(Math.random().toString(36).slice(2))

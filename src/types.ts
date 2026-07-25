@@ -254,6 +254,7 @@ export interface CampaignSession {
   icon: string
   session_date: string | null
   image_url: string | null
+  done: boolean
   created_at: string
 }
 
@@ -264,6 +265,7 @@ export interface CampaignChapter {
   icon: string
   image_url: string | null
   content: import('@tiptap/core').JSONContent
+  done: boolean
   created_at: string
 }
 

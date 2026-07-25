@@ -74,7 +74,7 @@ export function CampagneTab({ pokemonByName, attacksByName }: Props) {
   return (
     <div className="flex-1 overflow-y-auto p-4">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-ink text-lg font-bold">📓 Journal de campagne</h2>
+        <h2 className="text-cream text-lg font-bold">📓 Journal de campagne</h2>
         <button onClick={() => setShowForm((s) => !s)} className={`text-sm rounded px-3 py-1.5 font-bold ${BUTTON_STYLE.yellow}`}>
           + Nouvelle session
         </button>
@@ -120,9 +120,9 @@ export function CampagneTab({ pokemonByName, attacksByName }: Props) {
       )}
 
       {loading ? (
-        <p className="text-ink-muted-2 text-sm">Chargement…</p>
+        <p className="text-[#7a7c9a] text-sm">Chargement…</p>
       ) : sessions.length === 0 ? (
-        <p className="text-ink-muted-2 text-sm">Aucune session pour l'instant.</p>
+        <p className="text-[#7a7c9a] text-sm">Aucune session pour l'instant.</p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {sessions.map((session) => (

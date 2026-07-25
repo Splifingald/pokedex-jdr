@@ -40,6 +40,8 @@
 -- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_pokemon_enabled boolean NOT NULL DEFAULT true;
 -- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_inventory_enabled boolean NOT NULL DEFAULT true;
 -- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_map_enabled boolean NOT NULL DEFAULT true;
+-- ALTER TABLE campaign_sessions ADD COLUMN IF NOT EXISTS done boolean NOT NULL DEFAULT false;
+-- ALTER TABLE campaign_chapters ADD COLUMN IF NOT EXISTS done boolean NOT NULL DEFAULT false;
 -- ============================================================
 
 -- Table principale des pokémon
@@ -370,6 +372,7 @@ CREATE TABLE IF NOT EXISTS campaign_sessions (
   icon         text NOT NULL DEFAULT '📓',
   session_date date,
   image_url    text,
+  done         boolean NOT NULL DEFAULT false,
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
@@ -380,6 +383,7 @@ CREATE TABLE IF NOT EXISTS campaign_chapters (
   icon         text NOT NULL DEFAULT '📄',
   image_url    text,
   content      jsonb NOT NULL DEFAULT '{"type":"doc","content":[{"type":"paragraph"}]}'::jsonb,
+  done         boolean NOT NULL DEFAULT false,
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_campaign_chapters_session_id ON campaign_chapters(session_id);
