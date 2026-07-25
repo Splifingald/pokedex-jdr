@@ -68,6 +68,44 @@ html, body, #root {
   100% { transform: scale(1); opacity: 1; }
 }
 
+/* Journal de campagne : mots référencés (Pokémon/joueurs/lieux/capacités/objets) */
+.ref-highlight {
+  color: var(--color-xp-blue);
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Journal de campagne : styles de base du contenu Tiptap (Tailwind preflight enlève
+   tout le style par défaut des titres/listes/citations) */
+.ProseMirror {
+  outline: none;
+}
+.ProseMirror p {
+  margin: 0 0 0.6em;
+}
+.ProseMirror h1, .ProseMirror h2, .ProseMirror h3 {
+  font-weight: 700;
+  margin: 0.8em 0 0.4em;
+  color: var(--color-ink);
+}
+.ProseMirror h1 { font-size: 1.6em; }
+.ProseMirror h2 { font-size: 1.35em; }
+.ProseMirror h3 { font-size: 1.15em; }
+.ProseMirror blockquote {
+  border-left: 3px solid var(--color-ink-muted-2);
+  margin: 0.6em 0;
+  padding-left: 0.8em;
+  color: var(--color-ink-muted);
+  font-style: italic;
+}
+.ProseMirror ul, .ProseMirror ol {
+  padding-left: 1.4em;
+  margin: 0 0 0.6em;
+}
+.ProseMirror ul { list-style: disc; }
+.ProseMirror ol { list-style: decimal; }
+
 /* Pixel art images sans lissage */
 .pixelated {
   image-rendering: pixelated;

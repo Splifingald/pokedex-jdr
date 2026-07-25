@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react'
 import { usePokemon } from './hooks/usePokemon'
 import { useAttacks } from './hooks/useAttacks'
 import { usePlayerContext } from './context/PlayerContext'
@@ -27,6 +27,8 @@ import { FullscreenPromptModal } from './components/FullscreenPromptModal'
 import { useFullscreen } from './hooks/useFullscreen'
 import { PANEL_LG, PIXEL_BORDER_SM } from './lib/panelStyles'
 
+const CampagneTab = lazy(() => import('./components/campaign/CampagneTab').then((m) => ({ default: m.CampagneTab })))
+
 const TAB_TITLES: Record<TabId, string> = {
   accueil: 'ACCUEIL',
   pokedex: 'POKÉDEX',
@@ -35,6 +37,7 @@ const TAB_TITLES: Record<TabId, string> = {
   carte: 'CARTE',
   attaques: 'CAPACITÉS',
   rencontres: 'RENCONTRES',
+  campagne: 'JOURNAL DE CAMPAGNE',
   admin: 'ADMIN',
 }
 
@@ -66,7 +69,7 @@ export default function App() {
   // Si l'onglet actif devient invisible (déconnexion, sortie du mode admin, fonctionnalité désactivée), on revient à l'accueil
   useEffect(() => {
     if ((activeTab === 'equipe' || activeTab === 'sac') && !player) setActiveTab('accueil')
-    if ((activeTab === 'admin' || activeTab === 'attaques' || activeTab === 'rencontres') && !isAdmin) setActiveTab('accueil')
+    if ((activeTab === 'admin' || activeTab === 'attaques' || activeTab === 'rencontres' || activeTab === 'campagne') && !isAdmin) setActiveTab('accueil')
     if (activeTab === 'pokedex' && !parameters.feature_pokedex_enabled) setActiveTab('accueil')
     if (activeTab === 'equipe' && !parameters.feature_pokemon_enabled) setActiveTab('accueil')
     if (activeTab === 'sac' && !parameters.feature_inventory_enabled) setActiveTab('accueil')
@@ -111,6 +114,7 @@ export default function App() {
     showCarteTab: parameters.feature_map_enabled,
     showAttacksTab: isAdmin,
     showRencontresTab: isAdmin,
+    showCampagneTab: isAdmin,
     showAdminTab: isAdmin,
   }
 
@@ -201,6 +205,12 @@ export default function App() {
 
           {activeTab === 'rencontres' && isAdmin && (
             <RencontresTab pokemonByName={pokemonByName} />
+          )}
+
+          {activeTab === 'campagne' && isAdmin && (
+            <Suspense fallback={<div className="flex-1 flex items-center justify-center text-ink-muted">Chargement…</div>}>
+              <CampagneTab pokemonByName={pokemonByName} attacksByName={attacksByName} />
+            </Suspense>
           )}
 
           {activeTab === 'admin' && isAdmin && (

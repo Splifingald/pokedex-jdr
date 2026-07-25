@@ -246,3 +246,28 @@ export interface EncounterCsvRow {
 }
 
 export const ENCOUNTER_CSV_REQUIRED_HEADERS: (keyof EncounterCsvRow)[] = ['Lieu', 'Pokémon', 'Dé']
+
+// ── Journal de campagne ──────────────────────────────────────────
+export interface CampaignSession {
+  id: number
+  title: string
+  icon: string
+  session_date: string | null
+  image_url: string | null
+  created_at: string
+}
+
+export interface CampaignChapter {
+  id: number
+  session_id: number
+  title: string
+  icon: string
+  image_url: string | null
+  content: import('@tiptap/core').JSONContent
+  created_at: string
+}
+
+export const EMPTY_CHAPTER_CONTENT: import('@tiptap/core').JSONContent = {
+  type: 'doc',
+  content: [{ type: 'paragraph' }],
+}

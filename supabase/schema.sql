@@ -359,3 +359,74 @@ CREATE POLICY "Public read encounters"
   ON encounters FOR SELECT
   TO anon
   USING (true);
+
+-- ============================================================
+-- Journal de campagne (Sessions / Chapitres)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS campaign_sessions (
+  id           bigserial PRIMARY KEY,
+  title        text NOT NULL,
+  icon         text NOT NULL DEFAULT '📓',
+  session_date date,
+  image_url    text,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS campaign_chapters (
+  id           bigserial PRIMARY KEY,
+  session_id   bigint NOT NULL REFERENCES campaign_sessions(id) ON DELETE CASCADE,
+  title        text NOT NULL,
+  icon         text NOT NULL DEFAULT '📄',
+  image_url    text,
+  content      jsonb NOT NULL DEFAULT '{"type":"doc","content":[{"type":"paragraph"}]}'::jsonb,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_campaign_chapters_session_id ON campaign_chapters(session_id);
+
+ALTER TABLE campaign_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE campaign_chapters ENABLE ROW LEVEL SECURITY;
+
+-- campaign_sessions / campaign_chapters : lecture + écriture publiques
+-- (app sans vraie sécurité, édité en direct depuis le client comme players/admin_parameters)
+CREATE POLICY "Public read campaign_sessions"
+  ON campaign_sessions FOR SELECT
+  TO anon
+  USING (true);
+
+CREATE POLICY "Public insert campaign_sessions"
+  ON campaign_sessions FOR INSERT
+  TO anon
+  WITH CHECK (true);
+
+CREATE POLICY "Public update campaign_sessions"
+  ON campaign_sessions FOR UPDATE
+  TO anon
+  USING (true)
+  WITH CHECK (true);
+
+CREATE POLICY "Public delete campaign_sessions"
+  ON campaign_sessions FOR DELETE
+  TO anon
+  USING (true);
+
+CREATE POLICY "Public read campaign_chapters"
+  ON campaign_chapters FOR SELECT
+  TO anon
+  USING (true);
+
+CREATE POLICY "Public insert campaign_chapters"
+  ON campaign_chapters FOR INSERT
+  TO anon
+  WITH CHECK (true);
+
+CREATE POLICY "Public update campaign_chapters"
+  ON campaign_chapters FOR UPDATE
+  TO anon
+  USING (true)
+  WITH CHECK (true);
+
+CREATE POLICY "Public delete campaign_chapters"
+  ON campaign_chapters FOR DELETE
+  TO anon
+  USING (true);
