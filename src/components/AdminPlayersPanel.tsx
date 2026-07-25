@@ -170,6 +170,12 @@ export function AdminPlayersPanel() {
                     ) : (
                       <>
                         <button
+                          onClick={() => setViewingTeamPlayer(p)}
+                          className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
+                        >
+                          🐾 Équipe
+                        </button>
+                        <button
                           onClick={() => setEditing(p)}
                           className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
                         >
