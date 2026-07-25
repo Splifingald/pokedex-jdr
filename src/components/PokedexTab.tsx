@@ -193,6 +193,7 @@ export function PokedexTab({
           <div className="grid gap-2.5" style={{ gridTemplateColumns: POKEDEX_GRID_COLS }}>
             {filteredPokemon.map((p) => {
               const isDiscovered = discovered.has(p.nom)
+              const revealed = isAdmin || isDiscovered
               const owned = roster.some((r) => r.pokemon_nom === p.nom)
               return (
                 <button
@@ -201,13 +202,17 @@ export function PokedexTab({
                     if (el) cellRefs.current.set(p.numero, el)
                     else cellRefs.current.delete(p.numero)
                   }}
-                  onClick={() => (isDiscovered ? setSelected(p) : setPendingDiscovery(p))}
+                  onClick={() => (revealed ? setSelected(p) : setPendingDiscovery(p))}
                   className="flex flex-col items-center gap-1"
                 >
-                  {isDiscovered ? (
+                  {revealed ? (
                     <div className={`relative w-full aspect-square rounded-md ${PIXEL_BORDER_SM} bg-cream flex items-center justify-center overflow-hidden shadow-[var(--shadow-pixel-sm)]`}>
                       {p.image_miniature ? (
-                        <img src={p.image_miniature} alt={p.nom} className="pixelated w-full h-full object-contain" />
+                        <img
+                          src={p.image_miniature}
+                          alt={p.nom}
+                          className={`pixelated w-full h-full object-contain ${isAdmin && !isDiscovered ? 'grayscale opacity-60' : ''}`}
+                        />
                       ) : (
                         <span className="text-ink-muted-2 text-2xl">?</span>
                       )}
@@ -232,6 +237,7 @@ export function PokedexTab({
           <div className="flex flex-col gap-2">
             {filteredPokemon.map((p) => {
               const isDiscovered = discovered.has(p.nom)
+              const revealed = isAdmin || isDiscovered
               const owned = roster.some((r) => r.pokemon_nom === p.nom)
               return (
                 <button
@@ -240,25 +246,29 @@ export function PokedexTab({
                     if (el) cellRefs.current.set(p.numero, el)
                     else cellRefs.current.delete(p.numero)
                   }}
-                  onClick={() => (isDiscovered ? setSelected(p) : setPendingDiscovery(p))}
-                  className={`${PANEL} flex items-center gap-2.5 p-2 text-left w-full ${isDiscovered ? '' : 'opacity-75'}`}
+                  onClick={() => (revealed ? setSelected(p) : setPendingDiscovery(p))}
+                  className={`${PANEL} flex items-center gap-2.5 p-2 text-left w-full ${!isDiscovered && !isAdmin ? 'opacity-75' : ''}`}
                 >
-                  <div className={`w-11 h-11 shrink-0 rounded-md border-2 border-ink flex items-center justify-center overflow-hidden ${isDiscovered ? 'bg-cream-secondary' : 'bg-[#2a2c48]'}`}>
-                    {isDiscovered && p.image_miniature ? (
-                      <img src={p.image_miniature} alt={p.nom} className="pixelated w-full h-full object-contain" />
+                  <div className={`w-11 h-11 shrink-0 rounded-md border-2 border-ink flex items-center justify-center overflow-hidden ${revealed ? 'bg-cream-secondary' : 'bg-[#2a2c48]'}`}>
+                    {revealed && p.image_miniature ? (
+                      <img
+                        src={p.image_miniature}
+                        alt={p.nom}
+                        className={`pixelated w-full h-full object-contain ${isAdmin && !isDiscovered ? 'grayscale opacity-60' : ''}`}
+                      />
                     ) : (
-                      <span className={`text-xl ${isDiscovered ? 'text-ink-muted-2' : 'text-[#5a5c78]'}`}>?</span>
+                      <span className={`text-xl ${revealed ? 'text-ink-muted-2' : 'text-[#5a5c78]'}`}>?</span>
                     )}
                   </div>
                   <span className="text-xs text-ink-muted-2 shrink-0">#{p.numero}</span>
                   <span className="flex-1 text-ink text-sm font-bold truncate">
-                    {isDiscovered ? p.nom : '???'}
+                    {revealed ? p.nom : '???'}
                     {isAdmin && p.cache && (
                       <span className="ml-2 text-[9px] bg-purple-200 text-purple-900 border border-purple-700 rounded px-1 align-middle">C</span>
                     )}
                   </span>
                   {owned && <span className="text-sm shrink-0" title="Dans votre roster">⭐</span>}
-                  {isDiscovered && <TypeBadge type={p.type} small />}
+                  {revealed && <TypeBadge type={p.type} small />}
                 </button>
               )
             })}
@@ -304,6 +314,7 @@ export function PokedexTab({
           ownedCount={ownedCount}
           onAddToRoster={canAddToRoster ? () => onAddToRoster(syncedSelected) : undefined}
           onUndiscover={() => { onUndiscover(syncedSelected); setSelected(null) }}
+          onDiscover={() => onDiscover(syncedSelected)}
           onClose={() => setSelected(null)}
         />
       )}

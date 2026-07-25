@@ -47,6 +47,7 @@ interface Props {
   ownedCount?: number
   onAddToRoster?: () => void
   onUndiscover?: () => void
+  onDiscover?: () => void
 }
 
 const TRANSPORT_ICONS: Record<string, string> = {
@@ -174,6 +175,7 @@ export function PokemonDetailSheet({
   ownedCount = 0,
   onAddToRoster,
   onUndiscover,
+  onDiscover,
 }: Props) {
   const [lightboxOpen, setLightboxOpen] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -422,12 +424,12 @@ export function PokemonDetailSheet({
             </div>
           )}
 
-          {context === 'pokedex' && isDiscovered && (
+          {context === 'pokedex' && (isDiscovered || isAdmin) && (
             <div className="flex flex-col gap-2">
-              {ownedCount > 0 && (
+              {isDiscovered && ownedCount > 0 && (
                 <p className="text-center text-xs text-[#5c8f6a]">✓ Déjà dans votre roster ({ownedCount})</p>
               )}
-              {onAddToRoster && (
+              {isDiscovered && onAddToRoster && (
                 <button
                   onClick={onAddToRoster}
                   className={`w-full py-2.5 rounded-lg text-sm font-bold ${BUTTON_STYLE.blue}`}
@@ -435,13 +437,21 @@ export function PokemonDetailSheet({
                   + {teamFull ? 'Ajouter à mon PC' : 'Ajouter à mon équipe'}
                 </button>
               )}
-              {!isAdmin && onUndiscover && (
+              {isDiscovered && !isAdmin && onUndiscover && (
                 <button
                   onClick={onUndiscover}
                   className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs ${BUTTON_STYLE.gray}`}
                 >
                   <EyeOffIcon className="w-3.5 h-3.5" />
                   Marquer comme non découvert
+                </button>
+              )}
+              {isAdmin && !isDiscovered && onDiscover && (
+                <button
+                  onClick={onDiscover}
+                  className={`w-full py-2.5 rounded-lg text-sm font-bold ${BUTTON_STYLE.green}`}
+                >
+                  ✓ Marquer comme découvert
                 </button>
               )}
             </div>
