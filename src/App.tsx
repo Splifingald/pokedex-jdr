@@ -169,6 +169,7 @@ export default function App() {
               pokemonByName={pokemonByName}
               attacksByName={attacksByName}
               itemsByName={itemsByName}
+              playerItems={playerItems}
               canScan={canScan}
               onScan={() => setShowScannerModal(true)}
               onRequestLogin={() => setShowLoginModal(true)}

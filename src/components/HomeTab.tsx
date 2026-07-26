@@ -21,6 +21,7 @@ interface Props {
   pokemonByName: Map<string, Pokemon>
   attacksByName: Map<string, Attack>
   itemsByName: Map<string, Item>
+  playerItems: ReturnType<typeof usePlayerItems>
   canScan: boolean
   onScan: () => void
   onRequestLogin: () => void
@@ -37,9 +38,9 @@ const homeBgStyle = (url: string): React.CSSProperties => ({
   backgroundRepeat: 'no-repeat',
 })
 
-export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsByName, canScan, onScan, onRequestLogin }: Props) {
+export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsByName, playerItems, canScan, onScan, onRequestLogin }: Props) {
   const { roster, updateXp, updateNickname, toggleInTeam, setNextGiftAt, addMove, removeMove, deleteOwnedPokemon } = usePlayerPokemon(player?.id ?? null)
-  const { pokedollars, addItems, setPokedollars } = usePlayerItems(player?.id ?? null)
+  const { pokedollars, addItems, setPokedollars } = playerItems
   const { parameters } = useAdminParameters()
   const { backgrounds } = useBackgrounds()
   const { lootboxes, lootboxItems, speciesAssignments } = useGiftLootboxes()
