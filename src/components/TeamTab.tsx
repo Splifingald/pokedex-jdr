@@ -13,7 +13,6 @@ import { Chip } from './Chip'
 import { PokemonOwnedCard } from './PokemonOwnedCard'
 import { PokemonSearchInput } from './PokemonSearchInput'
 import { PokemonDetailSheet } from './PokemonDetailSheet'
-import { MovesTab } from './MovesTab'
 
 type SortKey = 'numero' | 'type' | 'alpha' | 'equipe'
 type LayoutKey = 'grid' | 'list'
@@ -36,7 +35,6 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
   const { showToast } = useToast()
 
   const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [managingMoves, setManagingMoves] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>('numero')
   const [layout, setLayout] = useState<LayoutKey>('grid')
 
@@ -124,22 +122,6 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
     showToast('Pokémon soignés !')
   }
 
-  if (selected && managingMoves) {
-    return (
-      <MovesTab
-        playerPokemon={selected}
-        pokemon={pokemonByName.get(selected.pokemon_nom)}
-        maxMoves={parameters.max_moves}
-        attacksByName={attacksByName}
-        onUpdateXp={updateXp}
-        onAddMove={addMove}
-        onRemoveMove={removeMove}
-        onGoToInfo={() => setManagingMoves(false)}
-        onBack={() => { setManagingMoves(false); setSelectedId(null) }}
-      />
-    )
-  }
-
   return (
     <div className="flex-1 overflow-y-auto p-4">
       <div className="mb-4">
@@ -208,7 +190,7 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
         </div>
       )}
 
-      {selected && !managingMoves && (
+      {selected && (
         <PokemonDetailSheet
           context="pokemon"
           pokemon={pokemonByName.get(selected.pokemon_nom)}
@@ -221,7 +203,8 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
           onUpdateXp={updateXp}
           onRename={updateNickname}
           onToggleInTeam={handleToggleInTeam}
-          onManageMoves={() => setManagingMoves(true)}
+          onAddMove={addMove}
+          onRemoveMove={removeMove}
           onDelete={handleDeleteOwned}
           onClose={() => setSelectedId(null)}
         />

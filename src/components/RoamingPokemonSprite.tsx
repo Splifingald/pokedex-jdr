@@ -1,4 +1,4 @@
-import { useMemo, useRef, useLayoutEffect } from 'react'
+import { useMemo, useRef, useLayoutEffect, type RefObject } from 'react'
 import type { Pokemon, PlayerPokemon } from '../types'
 import { useRoamPosition } from '../hooks/useRoamPosition'
 import { useLocalHp } from '../hooks/useLocalHp'
@@ -10,6 +10,7 @@ interface Props {
   index: number
   isJumping: boolean
   hasGift?: boolean
+  containerRef: RefObject<HTMLElement | null>
   onClick: () => void
 }
 
@@ -23,9 +24,9 @@ function speedBucket(nom: string): number {
 
 const CENTER = 'translateX(-50%)'
 
-export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping, hasGift = false, onClick }: Props) {
+export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping, hasGift = false, containerRef, onClick }: Props) {
   const speed = useMemo(() => speedBucket(playerPokemon.pokemon_nom), [playerPokemon.pokemon_nom])
-  const { pos, duration } = useRoamPosition(playerPokemon.id, speed)
+  const { pos, duration } = useRoamPosition(playerPokemon.id, speed, containerRef)
   const maxHp = getMaxHp(playerPokemon, pokemon)
   const [hp] = useLocalHp(playerPokemon.id, maxHp)
   const isKo = hp <= 0

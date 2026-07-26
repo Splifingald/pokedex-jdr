@@ -308,6 +308,7 @@ export interface CampaignSession {
   session_date: string | null
   image_url: string | null
   done: boolean
+  notes: import('@tiptap/core').JSONContent
   created_at: string
 }
 
@@ -318,7 +319,9 @@ export interface CampaignChapter {
   icon: string
   image_url: string | null
   content: import('@tiptap/core').JSONContent
+  notes: import('@tiptap/core').JSONContent
   done: boolean
+  position: number
   created_at: string
 }
 

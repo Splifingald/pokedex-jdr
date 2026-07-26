@@ -11,6 +11,29 @@ export interface ReferenceHighlightOptions {
 
 const referencePluginKey = new PluginKey<DecorationSet>('reference-highlight')
 
+function createReferenceWidget(entry: ReferenceEntry): HTMLElement | null {
+  if ((entry.type === 'pokemon' || entry.type === 'item') && entry.icon) {
+    const img = document.createElement('img')
+    img.src = entry.icon
+    img.alt = ''
+    img.className = entry.type === 'pokemon' ? 'ref-icon ref-icon-pokemon' : 'ref-icon'
+    return img
+  }
+  if (entry.type === 'location') {
+    const span = document.createElement('span')
+    span.className = 'ref-icon'
+    span.textContent = '📍'
+    return span
+  }
+  if (entry.type === 'ability') {
+    const span = document.createElement('span')
+    span.className = 'ref-icon'
+    span.textContent = '💥'
+    return span
+  }
+  return null
+}
+
 function buildDecorations(doc: PMNode, index: ReferenceIndex): DecorationSet {
   const decorations: Decoration[] = []
   const { matcher, lookup } = index
@@ -23,11 +46,15 @@ function buildDecorations(doc: PMNode, index: ReferenceIndex): DecorationSet {
       if (entry) {
         const from = pos + m.index
         const to = from + m[0].length
+        if (entry.icon || entry.type === 'location' || entry.type === 'ability') {
+          decorations.push(Decoration.widget(from, () => createReferenceWidget(entry)!, { side: -1 }))
+        }
         decorations.push(
           Decoration.inline(from, to, {
             class: 'ref-highlight',
             'data-ref-type': entry.type,
             'data-ref-id': String(entry.id),
+            style: entry.color ? `color: ${entry.color}` : '',
           })
         )
       }

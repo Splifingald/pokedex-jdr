@@ -26,8 +26,10 @@ import { CarteTab } from './components/CarteTab'
 import { PokedollarChip } from './components/PokedollarChip'
 import { SettingsPopup } from './components/SettingsPopup'
 import { FullscreenPromptModal } from './components/FullscreenPromptModal'
+import { PixelIcon } from './components/icons/PixelIcon'
 import { useFullscreen } from './hooks/useFullscreen'
 import { PANEL_LG, PIXEL_BORDER_SM } from './lib/panelStyles'
+import { SETTINGS_ICON } from './lib/icons'
 
 const CampagneTab = lazy(() => import('./components/campaign/CampagneTab').then((m) => ({ default: m.CampagneTab })))
 
@@ -151,9 +153,9 @@ export default function App() {
         <button
           onClick={() => setShowSettings(true)}
           title="Paramètres"
-          className={`w-8 h-8 shrink-0 rounded-lg ${PIXEL_BORDER_SM} bg-black/20 text-cream text-sm flex items-center justify-center`}
+          className={`w-8 h-8 shrink-0 rounded-lg ${PIXEL_BORDER_SM} bg-black/20 flex items-center justify-center`}
         >
-          ⚙️
+          <PixelIcon src={SETTINGS_ICON} size={20} alt="Paramètres" />
         </button>
       </header>
 

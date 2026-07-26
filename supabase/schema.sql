@@ -48,6 +48,14 @@
 -- ALTER TABLE gift_lootboxes RENAME COLUMN timer_min_hours TO timer_min;
 -- ALTER TABLE gift_lootboxes RENAME COLUMN timer_max_hours TO timer_max;
 -- ALTER TABLE gift_lootboxes ADD COLUMN IF NOT EXISTS timer_unit text NOT NULL DEFAULT 'hours' CHECK (timer_unit IN ('hours', 'minutes'));
+-- ALTER TABLE campaign_chapters ADD COLUMN IF NOT EXISTS position integer NOT NULL DEFAULT 0;
+-- WITH ranked AS (
+--   SELECT id, ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY created_at) - 1 AS rn
+--   FROM campaign_chapters
+-- )
+-- UPDATE campaign_chapters c SET position = ranked.rn FROM ranked WHERE ranked.id = c.id;
+-- ALTER TABLE campaign_sessions ADD COLUMN IF NOT EXISTS notes jsonb NOT NULL DEFAULT '{"type":"doc","content":[{"type":"paragraph"}]}'::jsonb;
+-- ALTER TABLE campaign_chapters ADD COLUMN IF NOT EXISTS notes jsonb NOT NULL DEFAULT '{"type":"doc","content":[{"type":"paragraph"}]}'::jsonb;
 -- ============================================================
 
 -- Table principale des pokémon
@@ -474,6 +482,7 @@ CREATE TABLE IF NOT EXISTS campaign_sessions (
   session_date date,
   image_url    text,
   done         boolean NOT NULL DEFAULT false,
+  notes        jsonb NOT NULL DEFAULT '{"type":"doc","content":[{"type":"paragraph"}]}'::jsonb,
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
@@ -484,7 +493,9 @@ CREATE TABLE IF NOT EXISTS campaign_chapters (
   icon         text NOT NULL DEFAULT '📄',
   image_url    text,
   content      jsonb NOT NULL DEFAULT '{"type":"doc","content":[{"type":"paragraph"}]}'::jsonb,
+  notes        jsonb NOT NULL DEFAULT '{"type":"doc","content":[{"type":"paragraph"}]}'::jsonb,
   done         boolean NOT NULL DEFAULT false,
+  position     integer NOT NULL DEFAULT 0,
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_campaign_chapters_session_id ON campaign_chapters(session_id);

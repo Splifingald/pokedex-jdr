@@ -10,7 +10,6 @@ import { useToast } from '../context/ToastContext'
 import { RoamingPokemonSprite } from './RoamingPokemonSprite'
 import { PokemonDetailSheet } from './PokemonDetailSheet'
 import { GiftPopup, type GiftReward } from './GiftPopup'
-import { MovesTab } from './MovesTab'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { isGiftReady, resolveLootboxForSpecies, drawLootboxReward, randomNextGiftAt, maybeResetGiftTimerOnEntry } from '../lib/gifting'
@@ -46,8 +45,8 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
   const { lootboxes, lootboxItems, speciesAssignments } = useGiftLootboxes()
   const { showToast } = useToast()
 
+  const sceneRef = useRef<HTMLDivElement>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [managingMoves, setManagingMoves] = useState(false)
   const [jumpingId, setJumpingId] = useState<number | null>(null)
   const [giftPokemonId, setGiftPokemonId] = useState<number | null>(null)
   const [giftReward, setGiftReward] = useState<GiftReward | null>(null)
@@ -146,25 +145,9 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
     showToast(`${pp ? ownedPokemonName(pp) : 'Pokémon'} supprimé.`)
   }
 
-  // Gestion des capacités plein écran (comme depuis l'onglet Pokémon)
-  if (selected && managingMoves) {
-    return (
-      <MovesTab
-        playerPokemon={selected}
-        pokemon={pokemonByName.get(selected.pokemon_nom)}
-        maxMoves={parameters.max_moves}
-        attacksByName={attacksByName}
-        onUpdateXp={updateXp}
-        onAddMove={addMove}
-        onRemoveMove={removeMove}
-        onGoToInfo={() => setManagingMoves(false)}
-        onBack={() => { setManagingMoves(false); setSelectedId(null) }}
-      />
-    )
-  }
-
   return (
     <div
+      ref={sceneRef}
       className="flex-1 relative overflow-hidden"
       style={homeBgStyle(parameters.accueil_image_url?.trim() || backgrounds[0]?.image_url || DEFAULT_ACCUEIL_IMAGE_URL)}
     >
@@ -177,6 +160,7 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           index={idx}
           isJumping={jumpingId === pp.id}
           hasGift={hasGift(pp)}
+          containerRef={sceneRef}
           onClick={() => (hasGift(pp) ? openGift(pp) : setSelectedId(pp.id))}
         />
       ))}
@@ -213,7 +197,7 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
         </button>
       )}
 
-      {selected && !managingMoves && (
+      {selected && (
         <PokemonDetailSheet
           context="home"
           pokemon={pokemonByName.get(selected.pokemon_nom)}
@@ -226,7 +210,8 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           onUpdateXp={updateXp}
           onRename={updateNickname}
           onToggleInTeam={handleToggleInTeam}
-          onManageMoves={() => setManagingMoves(true)}
+          onAddMove={addMove}
+          onRemoveMove={removeMove}
           onDelete={handleDelete}
           onClose={() => setSelectedId(null)}
         />

@@ -48,7 +48,7 @@ export function PlayerReferencePopup({ player, pokemonByName, attacksByName, ite
   const selected: PlayerPokemon | null = roster.find((r) => r.id === selectedId) ?? null
 
   return (
-    <ReferencePopupShell icon="🧑" title={player.name} onClose={onClose}>
+    <ReferencePopupShell onClose={onClose}>
       <div className="flex items-center gap-3 mb-4">
         <div className="w-14 h-14 rounded-full overflow-hidden shrink-0 border-2" style={{ borderColor: player.color }}>
           {player.image_url ? (
@@ -81,13 +81,13 @@ export function PlayerReferencePopup({ player, pokemonByName, attacksByName, ite
       {team.length === 0 ? (
         <p className="text-ink-muted-2 text-sm">Aucun Pokémon dans l'équipe.</p>
       ) : (
-        <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))' }}>
+        <div className="flex flex-col gap-2">
           {team.map((pp) => (
             <PokemonOwnedCard
               key={pp.id}
               playerPokemon={pp}
               pokemon={pokemonByName.get(pp.pokemon_nom)}
-              variant="grid"
+              variant="list"
               onClick={() => setSelectedId(pp.id)}
             />
           ))}

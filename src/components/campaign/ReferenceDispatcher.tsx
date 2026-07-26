@@ -1,4 +1,4 @@
-import type { Player, CarteLocation, Attack, Item, Pokemon } from '../../types'
+import type { Player, CarteLocation, Attack, Item, Pokemon, Encounter } from '../../types'
 import type { ReferenceEntry } from '../../hooks/useReferenceIndex'
 import { PlayerReferencePopup } from './PlayerReferencePopup'
 import { LocationReferencePopup } from './LocationReferencePopup'
@@ -13,6 +13,7 @@ interface Props {
   itemsByName: Map<string, Item>
   playersByName: Map<string, Player>
   locationsByName: Map<string, CarteLocation>
+  encountersByLieu: Map<string, Encounter[]>
   onClose: () => void
 }
 
@@ -24,6 +25,7 @@ export function ReferenceDispatcher({
   itemsByName,
   playersByName,
   locationsByName,
+  encountersByLieu,
   onClose,
 }: Props) {
   if (!activeReference) return null
@@ -56,7 +58,14 @@ export function ReferenceDispatcher({
   if (activeReference.type === 'location') {
     const location = locationsByName.get(activeReference.name)
     if (!location) return null
-    return <LocationReferencePopup location={location} onClose={onClose} />
+    return (
+      <LocationReferencePopup
+        location={location}
+        encounters={encountersByLieu.get(location.titre) ?? []}
+        pokemonByName={pokemonByName}
+        onClose={onClose}
+      />
+    )
   }
   if (activeReference.type === 'ability') {
     const attack = attacksByName.get(activeReference.name)

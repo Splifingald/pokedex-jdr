@@ -1,21 +1,27 @@
 import { useEffect, useState } from 'react'
-import type { CampaignSession, Player, CarteLocation, Attack, Item, Pokemon } from '../../types'
-import type { ReferenceIndex } from '../../hooks/useReferenceIndex'
+import type { CampaignSession, Player, CarteLocation, Attack, Item, Pokemon, Encounter } from '../../types'
+import { EMPTY_CHAPTER_CONTENT } from '../../types'
+import type { ReferenceEntry, ReferenceIndex } from '../../hooks/useReferenceIndex'
 import { useCampaignChapters } from '../../hooks/useCampaignChapters'
 import { ChapterCard } from './ChapterCard'
 import { ChapterEditor } from './ChapterEditor'
 import { ChapterViewPopup } from './ChapterViewPopup'
+import { SessionViewPopup } from './SessionViewPopup'
+import { ReferenceDispatcher } from './ReferenceDispatcher'
 import { EmojiPickerButton } from './EmojiPickerButton'
 import { DoneToggle } from './DoneToggle'
+import { NotesFab } from './NotesFab'
 import { ImageLightbox } from '../ImageLightbox'
 import { ConfirmPopup } from '../ConfirmPopup'
+import { PixelIcon } from '../icons/PixelIcon'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../../lib/panelStyles'
 import { formatDateFr } from '../../lib/formatDate'
+import { SAVE_ICON } from '../../lib/icons'
 
 interface Props {
   session: CampaignSession
-  onUpdateSession: (id: number, data: { title?: string; icon?: string; session_date?: string | null; image_url?: string | null; done?: boolean }) => void
+  onUpdateSession: (id: number, data: { title?: string; icon?: string; session_date?: string | null; image_url?: string | null; done?: boolean; notes?: CampaignSession['notes'] }) => void
   onDeleteSession: (id: number) => void
   onBack: () => void
   referenceIndex: ReferenceIndex
@@ -24,6 +30,7 @@ interface Props {
   itemsByName: Map<string, Item>
   playersByName: Map<string, Player>
   locationsByName: Map<string, CarteLocation>
+  encountersByLieu: Map<string, Encounter[]>
 }
 
 const emptyChapterForm = { title: '', icon: '📄', image_url: '' }
@@ -39,12 +46,16 @@ export function SessionDetailView({
   itemsByName,
   playersByName,
   locationsByName,
+  encountersByLieu,
 }: Props) {
-  const { chapters, loading, createChapter, updateChapter, deleteChapter } = useCampaignChapters(session.id)
+  const { chapters, loading, createChapter, updateChapter, deleteChapter, reorderChapters } = useCampaignChapters(session.id)
   const [selectedChapterId, setSelectedChapterId] = useState<number | null>(null)
   const [viewingChapterId, setViewingChapterId] = useState<number | null>(null)
+  const [viewingSession, setViewingSession] = useState(false)
   const [viewerOpen, setViewerOpen] = useState(false)
   const [confirmDeleteSession, setConfirmDeleteSession] = useState(false)
+  const [draggedChapterId, setDraggedChapterId] = useState<number | null>(null)
+  const [sessionNotesReference, setSessionNotesReference] = useState<ReferenceEntry | null>(null)
 
   const [editingSession, setEditingSession] = useState(false)
   const [sessionForm, setSessionForm] = useState({
@@ -81,6 +92,7 @@ export function SessionDetailView({
         itemsByName={itemsByName}
         playersByName={playersByName}
         locationsByName={locationsByName}
+        encountersByLieu={encountersByLieu}
         onUpdate={(id, data) => updateChapter(id, data)}
         onDelete={(id) => { deleteChapter(id); setSelectedChapterId(null) }}
         onBack={() => setSelectedChapterId(null)}
@@ -111,6 +123,19 @@ export function SessionDetailView({
     setChapterForm(emptyChapterForm)
     setShowChapterForm(false)
     if (created) setSelectedChapterId(created.id)
+  }
+
+  const handleDrop = (targetId: number) => {
+    if (draggedChapterId == null || draggedChapterId === targetId) {
+      setDraggedChapterId(null)
+      return
+    }
+    const ids = chapters.map((c) => c.id)
+    const from = ids.indexOf(draggedChapterId)
+    const to = ids.indexOf(targetId)
+    ids.splice(to, 0, ids.splice(from, 1)[0])
+    reorderChapters(ids)
+    setDraggedChapterId(null)
   }
 
   return (
@@ -164,8 +189,9 @@ export function SessionDetailView({
             <button
               onClick={handleSaveSession}
               disabled={!sessionForm.title.trim()}
-              className={`py-2 rounded text-sm font-bold disabled:opacity-50 ${BUTTON_STYLE.yellow}`}
+              className={`py-2 rounded text-sm font-bold inline-flex items-center justify-center gap-1.5 disabled:opacity-50 ${BUTTON_STYLE.yellow}`}
             >
+              <PixelIcon src={SAVE_ICON} size={16} />
               Enregistrer
             </button>
           </div>
@@ -180,6 +206,13 @@ export function SessionDetailView({
             )}
           </div>
           <DoneToggle done={session.done} onToggle={() => onUpdateSession(session.id, { done: !session.done })} />
+          <button
+            onClick={() => setViewingSession(true)}
+            title="Voir toute la session"
+            className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
+          >
+            👁 Voir tout
+          </button>
           <button onClick={() => setEditingSession(true)} className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}>
             Éditer
           </button>
@@ -236,12 +269,21 @@ export function SessionDetailView({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {chapters.map((chapter) => (
-            <ChapterCard
+            <div
               key={chapter.id}
-              chapter={chapter}
-              onClick={() => setSelectedChapterId(chapter.id)}
-              onView={() => setViewingChapterId(chapter.id)}
-            />
+              draggable
+              onDragStart={() => setDraggedChapterId(chapter.id)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => handleDrop(chapter.id)}
+              onDragEnd={() => setDraggedChapterId(null)}
+              className={draggedChapterId === chapter.id ? 'opacity-40' : ''}
+            >
+              <ChapterCard
+                chapter={chapter}
+                onClick={() => setSelectedChapterId(chapter.id)}
+                onView={() => setViewingChapterId(chapter.id)}
+              />
+            </div>
           ))}
         </div>
       )}
@@ -259,10 +301,47 @@ export function SessionDetailView({
           itemsByName={itemsByName}
           playersByName={playersByName}
           locationsByName={locationsByName}
+          encountersByLieu={encountersByLieu}
           onToggleDone={() => updateChapter(viewingChapter.id, { done: !viewingChapter.done })}
+          onSaveNotes={(notes) => updateChapter(viewingChapter.id, { notes })}
           onClose={() => setViewingChapterId(null)}
         />
       )}
+
+      {viewingSession && (
+        <SessionViewPopup
+          session={session}
+          chapters={chapters}
+          referenceIndex={referenceIndex}
+          pokemonByName={pokemonByName}
+          attacksByName={attacksByName}
+          itemsByName={itemsByName}
+          playersByName={playersByName}
+          locationsByName={locationsByName}
+          encountersByLieu={encountersByLieu}
+          onClose={() => setViewingSession(false)}
+        />
+      )}
+
+      {!editingSession && !viewingChapter && !viewingSession && (
+        <NotesFab
+          notes={session.notes ?? EMPTY_CHAPTER_CONTENT}
+          onSave={(notes) => onUpdateSession(session.id, { notes })}
+          referenceIndex={referenceIndex}
+          onReferenceClick={(entry) => setSessionNotesReference(entry)}
+        />
+      )}
+
+      <ReferenceDispatcher
+        activeReference={sessionNotesReference}
+        pokemonByName={pokemonByName}
+        attacksByName={attacksByName}
+        itemsByName={itemsByName}
+        playersByName={playersByName}
+        locationsByName={locationsByName}
+        encountersByLieu={encountersByLieu}
+        onClose={() => setSessionNotesReference(null)}
+      />
 
       {confirmDeleteSession && (
         <ConfirmPopup

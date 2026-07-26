@@ -4,12 +4,13 @@ import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import { TextStyle } from '@tiptap/extension-text-style'
 import Color from '@tiptap/extension-color'
-import type { CampaignChapter, Player, CarteLocation, Attack, Item, Pokemon } from '../../types'
+import type { CampaignChapter, Player, CarteLocation, Attack, Item, Pokemon, Encounter } from '../../types'
 import { EMPTY_CHAPTER_CONTENT } from '../../types'
 import type { ReferenceEntry, ReferenceIndex } from '../../hooks/useReferenceIndex'
 import { ReferenceHighlight, forceReferenceRecompute } from '../../lib/referenceExtension'
 import { ReferenceDispatcher } from './ReferenceDispatcher'
 import { DoneToggle } from './DoneToggle'
+import { NotesFab } from './NotesFab'
 import { PANEL_LG } from '../../lib/panelStyles'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 
@@ -21,7 +22,9 @@ interface Props {
   itemsByName: Map<string, Item>
   playersByName: Map<string, Player>
   locationsByName: Map<string, CarteLocation>
+  encountersByLieu: Map<string, Encounter[]>
   onToggleDone: () => void
+  onSaveNotes: (notes: CampaignChapter['notes']) => void
   onClose: () => void
 }
 
@@ -33,7 +36,9 @@ export function ChapterViewPopup({
   itemsByName,
   playersByName,
   locationsByName,
+  encountersByLieu,
   onToggleDone,
+  onSaveNotes,
   onClose,
 }: Props) {
   const [activeReference, setActiveReference] = useState<ReferenceEntry | null>(null)
@@ -96,6 +101,13 @@ export function ChapterViewPopup({
         </div>
       </div>
 
+      <NotesFab
+        notes={chapter.notes ?? EMPTY_CHAPTER_CONTENT}
+        onSave={onSaveNotes}
+        referenceIndex={referenceIndex}
+        onReferenceClick={(entry) => setActiveReference(entry)}
+      />
+
       <ReferenceDispatcher
         activeReference={activeReference}
         pokemonByName={pokemonByName}
@@ -103,6 +115,7 @@ export function ChapterViewPopup({
         itemsByName={itemsByName}
         playersByName={playersByName}
         locationsByName={locationsByName}
+        encountersByLieu={encountersByLieu}
         onClose={() => setActiveReference(null)}
       />
     </div>

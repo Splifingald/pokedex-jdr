@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import type { Pokemon, Player, CarteLocation, Attack, Item } from '../types'
+import { TYPE_COLORS } from '../lib/typeColors'
 
 export type ReferenceType = 'pokemon' | 'player' | 'location' | 'ability' | 'item'
 
@@ -7,6 +8,10 @@ export interface ReferenceEntry {
   type: ReferenceType
   id: number
   name: string
+  /** URL de sprite (pokemon) ou d'icône (item) à afficher devant le texte référencé */
+  icon?: string
+  /** Couleur du type (capacités), remplace la couleur bleue par défaut du surlignage */
+  color?: string
 }
 
 export interface ReferenceIndex {
@@ -38,11 +43,11 @@ export function useReferenceIndex(
 ): ReferenceIndex {
   return useMemo(() => {
     const raw: ReferenceEntry[] = [
-      ...pokemon.map((p): ReferenceEntry => ({ type: 'pokemon', id: p.id, name: p.nom })),
+      ...pokemon.map((p): ReferenceEntry => ({ type: 'pokemon', id: p.id, name: p.nom, icon: p.image_miniature || undefined })),
       ...players.map((p): ReferenceEntry => ({ type: 'player', id: p.id, name: p.name })),
       ...locations.map((l): ReferenceEntry => ({ type: 'location', id: l.id, name: l.titre })),
-      ...attacks.map((a): ReferenceEntry => ({ type: 'ability', id: a.id, name: a.nom })),
-      ...items.map((i): ReferenceEntry => ({ type: 'item', id: i.id, name: i.nom })),
+      ...attacks.map((a): ReferenceEntry => ({ type: 'ability', id: a.id, name: a.nom, color: TYPE_COLORS[a.type] })),
+      ...items.map((i): ReferenceEntry => ({ type: 'item', id: i.id, name: i.nom, icon: i.image_url ?? undefined })),
     ].filter((e) => e.name && e.name.trim())
 
     // Déduplique les collisions exactes de nom (insensible à la casse) selon la priorité de type

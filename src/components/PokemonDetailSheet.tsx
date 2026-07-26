@@ -8,6 +8,7 @@ import { StatRow } from './StatRow'
 import { StatGrid } from './StatGrid'
 import { StatCell } from './StatCell'
 import { AbilityCard } from './AbilityCard'
+import { MoveSearchInput } from './MoveSearchInput'
 import { HpGauge } from './HpGauge'
 import { XpGauge } from './XpGauge'
 import { NumberInput } from './NumberInput'
@@ -15,6 +16,8 @@ import { ImageLightbox } from './ImageLightbox'
 import { AudioDescriptionPlayer } from './AudioDescriptionPlayer'
 import { ConfirmPopup } from './ConfirmPopup'
 import { EyeOffIcon } from './icons/EyeOffIcon'
+import { PixelIcon } from './icons/PixelIcon'
+import { STAT_ICON } from '../lib/icons'
 import { useLocalHp } from '../hooks/useLocalHp'
 import { useLocalStatus } from '../hooks/useLocalStatus'
 import { useHoldRepeat } from '../hooks/useHoldRepeat'
@@ -42,7 +45,8 @@ interface Props {
   onUpdateXp?: (id: number, xp: number) => void
   onRename?: (id: number, nickname: string | null) => void
   onToggleInTeam?: (id: number, inTeam: boolean) => void
-  onManageMoves?: () => void
+  onAddMove?: (id: number, moveName: string) => void
+  onRemoveMove?: (id: number, moveName: string) => void
   onDelete?: (id: number) => void
 
   // Context pokédex
@@ -51,12 +55,6 @@ interface Props {
   onAddToRoster?: () => void
   onUndiscover?: () => void
   onDiscover?: () => void
-}
-
-const TRANSPORT_ICONS: Record<string, string> = {
-  Vol: '🕊️',
-  Nage: '🏊',
-  Sol: '🐾',
 }
 
 // Bloc PV / Statut / XP d'une instance possédée — composant séparé pour isoler
@@ -83,8 +81,8 @@ function OwnedVitals({
 
   return (
     <div className="mb-3">
-      <div className="flex items-center gap-4 flex-wrap mb-2">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3 mb-2">
+        <div className="flex items-center gap-2 shrink-0">
           <span className="text-ink-muted-2 text-xs">PV</span>
           <button
             {...decrementHold}
@@ -105,18 +103,15 @@ function OwnedVitals({
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-ink-muted-2 text-xs">Statut</span>
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value as typeof status)}
-            className="bg-white border-2 border-ink rounded px-2 py-1 text-ink text-sm outline-none"
-          >
-            {STATUS_LIST.map((s) => (
-              <option key={s.id} value={s.id}>{s.label}</option>
-            ))}
-          </select>
-        </div>
+        <select
+          value={status}
+          onChange={(e) => setStatus(e.target.value as typeof status)}
+          className="min-w-0 max-w-[140px] truncate bg-white border-2 border-ink rounded px-2 py-1 text-ink text-sm outline-none"
+        >
+          {STATUS_LIST.map((s) => (
+            <option key={s.id} value={s.id}>{s.icon ? `${s.icon} ` : ''}{s.label}</option>
+          ))}
+        </select>
       </div>
 
       {status !== 'aucun' && (
@@ -173,7 +168,8 @@ export function PokemonDetailSheet({
   onUpdateXp,
   onRename,
   onToggleInTeam,
-  onManageMoves,
+  onAddMove,
+  onRemoveMove,
   onDelete,
   isDiscovered = true,
   ownedCount = 0,
@@ -206,6 +202,11 @@ export function PokemonDetailSheet({
     : pokemon?.degats_base ?? '—'
 
   const knownMoves = playerPokemon?.moves ?? []
+  const addableMoves = useMemo(
+    () => [...attacksByName.values()].filter((a) => !(playerPokemon?.moves ?? []).includes(a.nom)),
+    [attacksByName, playerPokemon?.moves]
+  )
+  const atMoveCap = maxMoves != null && knownMoves.length >= maxMoves
 
   return (
     <SheetShell onClose={onClose}>
@@ -257,29 +258,33 @@ export function PokemonDetailSheet({
           <OwnedVitals playerPokemon={playerPokemon} pokemon={pokemon} onUpdateXp={onUpdateXp} />
         )}
 
-        {/* Grille de stats */}
+        {/* Grille de stats numériques : icône + valeur uniquement */}
         <div className="mb-3">
           <StatGrid>
-            <StatCell label="PV DE BASE" value={pvValue} />
-            <StatCell label="DÉGÂTS BASE" value={degValue} />
+            <StatCell icon={<PixelIcon src={STAT_ICON.hp} size={22} />} title="PV de base" value={pvValue} />
+            <StatCell icon={<PixelIcon src={STAT_ICON.damage} size={22} />} title="Dégâts de base" value={degValue} />
+            {pokemon && (
+              <StatCell icon={<PixelIcon src={STAT_ICON.distance} size={22} />} title="Distance de déplacement" value={`${pokemon.distance_deplacement} cases`} />
+            )}
+            {isAdmin && pokemon?.chances_capture && (
+              <StatCell icon="🎯" title="Chances de capture (info admin)" value={pokemon.chances_capture} adminOnly />
+            )}
           </StatGrid>
         </div>
 
         {pokemon && (
           <>
-            <StatRow icon="👟" label="Distance" value={`${pokemon.distance_deplacement} cases`} />
-
             {pokemon.transport && (
               <StatRow
-                icon={TRANSPORT_ICONS[pokemon.transport] ?? '🚚'}
-                label="Transport"
+                icon={<PixelIcon src={STAT_ICON.transport} size={22} />}
+                title={`Transport : ${pokemon.transport}`}
                 value={`${pokemon.transport}${pokemon.transport_value != null ? ` (${pokemon.transport_value})` : ''}`}
               />
             )}
 
             <StatRow
-              icon="✨"
-              label="Super Efficace"
+              icon="✖️"
+              title="Super efficace contre"
               value={
                 superEfficace.length > 0 ? (
                   <div className="flex flex-wrap gap-1">
@@ -295,7 +300,9 @@ export function PokemonDetailSheet({
 
             {(pokemon.nom_talent || pokemon.description_talent) && (
               <div className="flex items-start gap-3 py-2 border-b border-ink/20">
-                <span className="text-xl w-7 shrink-0 text-center">⭐</span>
+                <span className="w-7 shrink-0 flex items-center justify-center">
+                  <PixelIcon src={STAT_ICON.talent} size={22} />
+                </span>
                 <div className="flex-1">
                   {pokemon.nom_talent && (
                     <p className="text-hp-orange text-sm font-bold">{pokemon.nom_talent}</p>
@@ -308,8 +315,8 @@ export function PokemonDetailSheet({
             )}
 
             <StatRow
-              icon="📍"
-              label="Localisation"
+              icon={<PixelIcon src={STAT_ICON.location} size={22} />}
+              title="Localisation"
               value={
                 localisations.length > 0 ? (
                   <div className="flex flex-col gap-0.5">
@@ -322,14 +329,6 @@ export function PokemonDetailSheet({
                 )
               }
             />
-
-            {isAdmin && pokemon.chances_capture && (
-              <div className="flex items-start gap-3 py-2 border-b border-ink/20 bg-yellow-100/60 -mx-4 px-4">
-                <span className="text-xl w-7 shrink-0 text-center">🎯</span>
-                <span className="text-ink-muted-2 text-sm w-32 shrink-0">Capture</span>
-                <span className="text-ink text-sm font-bold">{pokemon.chances_capture}</span>
-              </div>
-            )}
           </>
         )}
 
@@ -337,49 +336,56 @@ export function PokemonDetailSheet({
         {isOwnedContext && playerPokemon ? (
           <div className="mt-3">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-ink font-bold">
-                🥊 Capacités{maxMoves != null ? ` (${knownMoves.length}/${maxMoves})` : ''}
+              <span className="text-sm text-ink font-bold inline-flex items-center gap-1.5">
+                <PixelIcon src={STAT_ICON.abilities} size={18} />
+                Capacités{maxMoves != null ? ` (${knownMoves.length}/${maxMoves})` : ''}
               </span>
-              <div className="flex items-center gap-1.5">
-                {onManageMoves && (
-                  <button
-                    onClick={onManageMoves}
-                    className={`text-xs px-2.5 py-1 rounded-md font-bold ${BUTTON_STYLE.orange}`}
-                  >
-                    Gérer
-                  </button>
-                )}
-                <button
-                  onClick={() => setAbilitiesOpen((o) => !o)}
-                  className={`text-xs px-2.5 py-1 rounded-md ${BUTTON_STYLE.gray}`}
-                >
-                  {abilitiesOpen ? 'Masquer' : 'Afficher'}
-                </button>
-              </div>
+              <button
+                onClick={() => setAbilitiesOpen((o) => !o)}
+                className={`text-xs px-2.5 py-1 rounded-md ${BUTTON_STYLE.gray}`}
+              >
+                {abilitiesOpen ? 'Masquer' : 'Afficher'}
+              </button>
             </div>
             {abilitiesOpen && (
-              knownMoves.length === 0 ? (
-                <p className="text-ink-muted-2 text-sm">Aucune capacité apprise.</p>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {knownMoves.map((moveName) => {
-                    const atk = attacksByName.get(moveName)
-                    return atk ? (
-                      <AbilityCard key={moveName} attack={atk} />
-                    ) : (
-                      <span key={moveName} className="text-xs text-ink-muted-2 border border-ink/30 rounded px-1.5 py-0.5 self-start">
-                        {moveName}
-                      </span>
-                    )
-                  })}
-                </div>
-              )
+              <>
+                {knownMoves.length === 0 ? (
+                  <p className="text-ink-muted-2 text-sm mb-2">Aucune capacité apprise.</p>
+                ) : (
+                  <div className="flex flex-col gap-2 mb-2">
+                    {knownMoves.map((moveName) => {
+                      const atk = attacksByName.get(moveName)
+                      return atk ? (
+                        <AbilityCard
+                          key={moveName}
+                          attack={atk}
+                          onRemove={onRemoveMove ? () => onRemoveMove(playerPokemon.id, moveName) : undefined}
+                        />
+                      ) : (
+                        <span key={moveName} className="text-xs text-ink-muted-2 border border-ink/30 rounded px-1.5 py-0.5 self-start">
+                          {moveName}
+                        </span>
+                      )
+                    })}
+                  </div>
+                )}
+                {onAddMove && !atMoveCap && (
+                  <MoveSearchInput
+                    options={addableMoves}
+                    disabled={false}
+                    onSelect={(a) => onAddMove(playerPokemon.id, a.nom)}
+                  />
+                )}
+              </>
             )}
           </div>
         ) : (
           canShowAttaques && learnableAttaques.length > 0 && (
             <div className="mt-3">
-              <span className="text-sm text-ink font-bold block mb-2">🥊 Capacités apprenables</span>
+              <span className="text-sm text-ink font-bold inline-flex items-center gap-1.5 mb-2">
+              <PixelIcon src={STAT_ICON.abilities} size={18} />
+              Capacités apprenables
+            </span>
               <div className="flex flex-wrap gap-1.5">
                 {learnableAttaques.map((moveName) => {
                   const atk = attacksByName.get(moveName)

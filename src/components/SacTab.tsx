@@ -31,7 +31,7 @@ function PokedollarRow({ itemsByName, playerItems }: Pick<Props, 'itemsByName' |
           <span className="text-2xl">💰</span>
         )}
       </div>
-      <span className="text-ink font-bold flex-1">Pokédollars</span>
+      <span className="text-ink font-bold flex-1 min-w-0 truncate">Pokédollars</span>
       <div className="flex items-center gap-2">
         <button
           onClick={() => setPokedollars(pokedollars - 1)}

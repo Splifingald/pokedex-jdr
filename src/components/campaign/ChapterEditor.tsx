@@ -4,7 +4,7 @@ import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import { TextStyle } from '@tiptap/extension-text-style'
 import Color from '@tiptap/extension-color'
-import type { CampaignChapter, Player, CarteLocation, Attack, Item, Pokemon } from '../../types'
+import type { CampaignChapter, Player, CarteLocation, Attack, Item, Pokemon, Encounter } from '../../types'
 import { EMPTY_CHAPTER_CONTENT } from '../../types'
 import type { ReferenceEntry, ReferenceIndex } from '../../hooks/useReferenceIndex'
 import { ReferenceHighlight, forceReferenceRecompute } from '../../lib/referenceExtension'
@@ -14,8 +14,10 @@ import { ReferenceDispatcher } from './ReferenceDispatcher'
 import { ImageLightbox } from '../ImageLightbox'
 import { ConfirmPopup } from '../ConfirmPopup'
 import { DoneToggle } from './DoneToggle'
+import { PixelIcon } from '../icons/PixelIcon'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 import { PANEL_LG, PIXEL_BORDER_SM } from '../../lib/panelStyles'
+import { SAVE_ICON } from '../../lib/icons'
 
 interface Props {
   chapter: CampaignChapter
@@ -25,6 +27,7 @@ interface Props {
   itemsByName: Map<string, Item>
   playersByName: Map<string, Player>
   locationsByName: Map<string, CarteLocation>
+  encountersByLieu: Map<string, Encounter[]>
   onUpdate: (id: number, data: { title?: string; icon?: string; image_url?: string | null; content?: CampaignChapter['content']; done?: boolean }) => void
   onDelete: (id: number) => void
   onBack: () => void
@@ -38,6 +41,7 @@ export function ChapterEditor({
   itemsByName,
   playersByName,
   locationsByName,
+  encountersByLieu,
   onUpdate,
   onDelete,
   onBack,
@@ -125,8 +129,9 @@ export function ChapterEditor({
           <DoneToggle done={chapter.done} onToggle={() => onUpdate(chapter.id, { done: !chapter.done })} />
           <span className="flex-1" />
           {dirty && <span className="text-xs text-[#ffd75e] font-bold">● Non enregistré</span>}
-          <button onClick={handleSave} className={`text-sm rounded px-3 py-1.5 font-bold ${BUTTON_STYLE.green}`}>
-            💾 Enregistrer
+          <button onClick={handleSave} className={`text-sm rounded px-3 py-1.5 font-bold inline-flex items-center gap-1.5 ${BUTTON_STYLE.green}`}>
+            <PixelIcon src={SAVE_ICON} size={16} />
+            Enregistrer
           </button>
           <button onClick={() => setConfirmDelete(true)} className={`text-sm rounded px-3 py-1.5 ${BUTTON_STYLE.red}`}>
             🗑
@@ -185,9 +190,10 @@ export function ChapterEditor({
             <div className="flex flex-col gap-2">
               <button
                 onClick={handleSaveAndQuit}
-                className={`py-2.5 rounded text-sm font-bold ${BUTTON_STYLE.green}`}
+                className={`py-2.5 rounded text-sm font-bold inline-flex items-center justify-center gap-1.5 ${BUTTON_STYLE.green}`}
               >
-                💾 Enregistrer et quitter
+                <PixelIcon src={SAVE_ICON} size={16} />
+                Enregistrer et quitter
               </button>
               <button
                 onClick={() => { setConfirmBack(false); onBack() }}
@@ -224,6 +230,7 @@ export function ChapterEditor({
         itemsByName={itemsByName}
         playersByName={playersByName}
         locationsByName={locationsByName}
+        encountersByLieu={encountersByLieu}
         onClose={() => setActiveReference(null)}
       />
     </div>

@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import type { CampaignChapter } from '../types'
 import { EMPTY_CHAPTER_CONTENT } from '../types'
 
-type ChapterInput = { title: string; icon: string; image_url: string | null; content?: CampaignChapter['content']; done?: boolean }
+type ChapterInput = { title: string; icon: string; image_url: string | null; content?: CampaignChapter['content']; notes?: CampaignChapter['notes']; done?: boolean; position?: number }
 
 export function useCampaignChapters(sessionId: number | null) {
   const channelId = useRef(Math.random().toString(36).slice(2))
@@ -24,7 +24,7 @@ export function useCampaignChapters(sessionId: number | null) {
         .from('campaign_chapters')
         .select('*')
         .eq('session_id', sessionId)
-        .order('created_at')
+        .order('position')
       if (error) throw error
       setChapters(data ?? [])
     } catch (err) {
@@ -80,7 +80,7 @@ export function useCampaignChapters(sessionId: number | null) {
     if (!sessionId) return null
     const { data: created, error } = await supabase
       .from('campaign_chapters')
-      .insert({ session_id: sessionId, content: EMPTY_CHAPTER_CONTENT, ...data })
+      .insert({ session_id: sessionId, content: EMPTY_CHAPTER_CONTENT, position: chapters.length, ...data })
       .select()
       .single()
     if (error) {
@@ -89,13 +89,27 @@ export function useCampaignChapters(sessionId: number | null) {
     }
     setChapters((prev) => [...prev, created as CampaignChapter])
     return created as CampaignChapter
-  }, [sessionId])
+  }, [sessionId, chapters.length])
 
   const updateChapter = useCallback(async (id: number, data: Partial<ChapterInput>) => {
     setChapters((prev) => prev.map((c) => (c.id === id ? { ...c, ...data } : c)))
     const { error } = await supabase.from('campaign_chapters').update(data).eq('id', id)
     if (error) {
       console.error('Erreur lors de la mise à jour du chapitre :', error)
+      await fetchAll()
+    }
+  }, [fetchAll])
+
+  const reorderChapters = useCallback(async (orderedIds: number[]) => {
+    setChapters((prev) => {
+      const byId = new Map(prev.map((c) => [c.id, c]))
+      return orderedIds.map((id, i) => ({ ...byId.get(id)!, position: i }))
+    })
+    const results = await Promise.all(
+      orderedIds.map((id, i) => supabase.from('campaign_chapters').update({ position: i }).eq('id', id))
+    )
+    if (results.some((r) => r.error)) {
+      console.error('Erreur lors de la réorganisation des chapitres :', results.find((r) => r.error)?.error)
       await fetchAll()
     }
   }, [fetchAll])
@@ -109,5 +123,5 @@ export function useCampaignChapters(sessionId: number | null) {
     }
   }, [fetchAll])
 
-  return { chapters, loading, error, createChapter, updateChapter, deleteChapter, refetch: fetchAll }
+  return { chapters, loading, error, createChapter, updateChapter, deleteChapter, reorderChapters, refetch: fetchAll }
 }

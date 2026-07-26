@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
-import type { Pokemon, Attack } from '../../types'
+import type { Pokemon, Attack, Encounter } from '../../types'
 import { usePlayers } from '../../hooks/usePlayers'
 import { useCarteLocations } from '../../hooks/useCarteLocations'
 import { useItems } from '../../hooks/useItems'
+import { useEncounters } from '../../hooks/useEncounters'
 import { useCampaignSessions } from '../../hooks/useCampaignSessions'
 import { useReferenceIndex } from '../../hooks/useReferenceIndex'
 import { SessionCard } from './SessionCard'
@@ -22,6 +23,7 @@ export function CampagneTab({ pokemonByName, attacksByName }: Props) {
   const { players } = usePlayers()
   const { locations } = useCarteLocations()
   const { items, byName: itemsByName } = useItems()
+  const { encounters } = useEncounters()
   const { sessions, loading, createSession, updateSession, deleteSession } = useCampaignSessions()
 
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null)
@@ -33,6 +35,15 @@ export function CampagneTab({ pokemonByName, attacksByName }: Props) {
   const attacksList = useMemo(() => [...attacksByName.values()], [attacksByName])
   const playersByName = useMemo(() => new Map(players.map((p) => [p.name, p])), [players])
   const locationsByName = useMemo(() => new Map(locations.map((l) => [l.titre, l])), [locations])
+  const encountersByLieu = useMemo(() => {
+    const map = new Map<string, Encounter[]>()
+    for (const enc of encounters) {
+      const list = map.get(enc.lieu) ?? []
+      list.push(enc)
+      map.set(enc.lieu, list)
+    }
+    return map
+  }, [encounters])
 
   const referenceIndex = useReferenceIndex(pokemonList, players, locations, attacksList, items)
 
@@ -51,6 +62,7 @@ export function CampagneTab({ pokemonByName, attacksByName }: Props) {
         itemsByName={itemsByName}
         playersByName={playersByName}
         locationsByName={locationsByName}
+        encountersByLieu={encountersByLieu}
       />
     )
   }

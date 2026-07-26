@@ -1,10 +1,24 @@
+import { NAV_ICON } from '../lib/icons'
+import { PixelIcon } from './icons/PixelIcon'
+
 export type TabId = 'accueil' | 'pokedex' | 'equipe' | 'sac' | 'carte' | 'attaques' | 'rencontres' | 'campagne' | 'admin'
 
 interface Tab {
   id: TabId
+  /** Emoji de secours, utilisé si aucune icône custom n'existe pour cet onglet (ex : Rencontres) */
   icon: string
   label: string
   visible: boolean
+}
+
+// Icône custom (public/website_icons/) si elle existe pour cet onglet, sinon emoji de secours
+function TabIcon({ tab }: { tab: Tab }) {
+  const src = NAV_ICON[tab.id]
+  return src ? (
+    <PixelIcon src={src} size={28} alt={tab.label} colored />
+  ) : (
+    <span className="text-2xl leading-none">{tab.icon}</span>
+  )
 }
 
 interface Props {
@@ -36,6 +50,9 @@ export function TabBar({ activeTab, onTabChange, showPokedexTab, showTeamTab, sh
   ]
 
   const visibleTabs = tabs.filter((t) => t.visible)
+  // 5 tabs ou moins (mode non-admin) : tout doit tenir sans scroll.
+  // Au-delà (mode admin), le scroll horizontal redevient nécessaire.
+  const scrollable = visibleTabs.length > 5
 
   if (variant === 'side') {
     return (
@@ -52,7 +69,7 @@ export function TabBar({ activeTab, onTabChange, showPokedexTab, showTeamTab, sh
                   : 'border-transparent text-tabbar-inactive hover:text-cream'
               }`}
             >
-              <span className="text-2xl leading-none">{tab.icon}</span>
+              <TabIcon tab={tab} />
               <span className="text-xs">{tab.label}</span>
             </button>
           )
@@ -62,7 +79,7 @@ export function TabBar({ activeTab, onTabChange, showPokedexTab, showTeamTab, sh
   }
 
   return (
-    <nav className="shrink-0 flex md:hidden bg-tabbar-bg border-t-4 border-ink overflow-x-auto">
+    <nav className={`shrink-0 flex md:hidden bg-tabbar-bg border-t-4 border-ink ${scrollable ? 'overflow-x-auto' : 'overflow-hidden'}`}>
       {visibleTabs.map((tab) => {
         const active = activeTab === tab.id
         return (
@@ -70,13 +87,13 @@ export function TabBar({ activeTab, onTabChange, showPokedexTab, showTeamTab, sh
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
             aria-label={tab.label}
-            className={`flex-1 min-w-16 flex items-center justify-center py-3 border-t-[3px] transition-colors ${
+            className={`flex-1 ${scrollable ? 'min-w-16' : 'min-w-0'} flex items-center justify-center py-3 border-t-[3px] transition-colors ${
               active
                 ? 'border-shell bg-white/5 text-cream'
                 : 'border-transparent text-tabbar-inactive'
             }`}
           >
-            <span className="text-2xl leading-none">{tab.icon}</span>
+            <TabIcon tab={tab} />
           </button>
         )
       })}
