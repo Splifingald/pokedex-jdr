@@ -7,6 +7,8 @@ import { PokemonDetailSheet } from './PokemonDetailSheet'
 import { normalizeSearch } from '../lib/normalizeSearch'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PANEL, PIXEL_BORDER_SM } from '../lib/panelStyles'
+import { PixelIcon } from './icons/PixelIcon'
+import { NAV_ICON } from '../lib/icons'
 
 type SortKey = 'numero' | 'type' | 'alpha'
 type LayoutKey = 'grid' | 'list'
@@ -217,7 +219,9 @@ export function PokedexTab({
                         <span className="text-ink-muted-2 text-2xl">?</span>
                       )}
                       {owned && (
-                        <span className="absolute top-1 right-1 text-[11px]" title="Dans votre roster">⭐</span>
+                        <span className="absolute top-1 right-1 text-hp-red" title="Dans votre roster">
+                          <PixelIcon src={NAV_ICON.equipe!} size={16} colored />
+                        </span>
                       )}
                       {isAdmin && p.cache && (
                         <span className="absolute top-1 left-1 text-[9px] bg-purple-200 text-purple-900 border border-purple-700 rounded px-1">C</span>
@@ -267,7 +271,11 @@ export function PokedexTab({
                       <span className="ml-2 text-[9px] bg-purple-200 text-purple-900 border border-purple-700 rounded px-1 align-middle">C</span>
                     )}
                   </span>
-                  {owned && <span className="text-sm shrink-0" title="Dans votre roster">⭐</span>}
+                  {owned && (
+                    <span className="shrink-0 text-hp-red" title="Dans votre roster">
+                      <PixelIcon src={NAV_ICON.equipe!} size={18} colored />
+                    </span>
+                  )}
                   {revealed && <TypeBadge type={p.type} small />}
                 </button>
               )

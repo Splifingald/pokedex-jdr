@@ -7,9 +7,11 @@ interface Props {
   onChange?: (value: number) => void
   /** Affiche le texte "current / max" au-dessus de la barre (défaut: true) */
   showValue?: boolean
+  /** Classes de bordure de la barre (défaut: fin liseré ink) — pour un contour plus marqué sur fond chargé */
+  barBorderClassName?: string
 }
 
-export function HpGauge({ current, max, onChange, showValue = true }: Props) {
+export function HpGauge({ current, max, onChange, showValue = true, barBorderClassName = 'border border-ink' }: Props) {
   // Ref plutôt que state : évite un re-render (donc un ré-attachement de listener)
   // entre le pointerdown et le premier pointermove du drag.
   const dragging = useRef(false)
@@ -43,7 +45,7 @@ export function HpGauge({ current, max, onChange, showValue = true }: Props) {
 
   const bar = (
     <div
-      className={`h-2.5 rounded-full bg-[#cfc7a8] border border-ink overflow-hidden ${onChange ? 'cursor-pointer touch-none select-none' : ''}`}
+      className={`h-2.5 rounded-full bg-[#cfc7a8] ${barBorderClassName} overflow-hidden ${onChange ? 'cursor-pointer touch-none select-none' : ''}`}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={stopDragging}

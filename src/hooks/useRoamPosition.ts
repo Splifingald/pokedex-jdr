@@ -1,4 +1,4 @@
-import { useState, useEffect, type RefObject } from 'react'
+import { useState, useEffect, useCallback, type RefObject } from 'react'
 
 export interface RoamPos {
   left: number
@@ -120,5 +120,13 @@ export function useRoamPosition(id: number, speedBucket: number, containerRef: R
     }
   }, [duration, id, containerRef])
 
-  return { pos, duration }
+  // Permet un déplacement manuel (drag) : met à jour la position affichée et
+  // les registres partagés, sans perturber le minuteur de déambulation auto.
+  const setManualPos = useCallback((p: RoamPos) => {
+    registry.set(id, p)
+    lastPos.set(id, p)
+    setPos(p)
+  }, [id])
+
+  return { pos, duration, setPos: setManualPos }
 }
