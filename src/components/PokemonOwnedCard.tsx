@@ -7,14 +7,14 @@ import { useLocalHp } from '../hooks/useLocalHp'
 import { useLocalStatus } from '../hooks/useLocalStatus'
 import { getMaxHp } from '../lib/maxHp'
 import { getStatusInfo } from '../lib/status'
-import { STATUS_ICON } from '../lib/icons'
+import { STATUS_ICON, PC_ICON } from '../lib/icons'
 import { PANEL } from '../lib/panelStyles'
 
 interface Props {
   playerPokemon: PlayerPokemon
   pokemon: Pokemon | undefined
   variant: 'grid' | 'list'
-  /** Affiche le badge 💻 "au PC" (Pokémon hors équipe active) */
+  /** Affiche le badge "au PC" (Pokémon hors équipe active) */
   showPcBadge?: boolean
   onClick: () => void
 }
@@ -54,8 +54,10 @@ export function PokemonOwnedCard({ playerPokemon, pokemon, variant, showPcBadge 
         style={statusOutlineStyle}
         className={`${PANEL} relative flex items-center gap-2.5 p-2 text-left w-full`}
       >
-        <div className="relative w-11 h-11 shrink-0 rounded-md border-2 border-ink bg-cream-secondary flex items-center justify-center overflow-hidden">
-          {sprite}
+        <div className="relative w-11 h-11 shrink-0">
+          <div className="w-full h-full rounded-md border-2 border-ink bg-cream-secondary flex items-center justify-center overflow-hidden">
+            {sprite}
+          </div>
           {showBadge && badgeSrc && (
             <span
               className="absolute -top-1 -left-1 z-[1] flex items-center justify-center bg-cream/95 border-2 border-ink rounded px-0.5"
@@ -83,19 +85,19 @@ export function PokemonOwnedCard({ playerPokemon, pokemon, variant, showPcBadge 
     >
       {showBadge && badgeSrc && (
         <span
-          className="absolute top-1.5 left-1.5 z-[1] flex items-center justify-center bg-cream/95 border-2 border-ink rounded-md px-1"
+          className="absolute top-1.5 left-1.5 z-[1] w-7 h-7 flex items-center justify-center bg-cream/95 border-2 border-ink rounded-md"
           title={badgeTitle}
         >
-          <PixelIcon src={badgeSrc} size={18} />
+          <PixelIcon src={badgeSrc} size={22} />
         </span>
       )}
 
       {showPcBadge && (
         <span
-          className="absolute top-1.5 right-1.5 z-[1] text-sm bg-cream/95 border-2 border-ink rounded-md px-1"
+          className="absolute top-1.5 right-1.5 z-[1] w-7 h-7 flex items-center justify-center bg-cream/95 border-2 border-ink rounded-md"
           title="Au PC"
         >
-          💻
+          <PixelIcon src={PC_ICON} size={22} />
         </span>
       )}
 
@@ -108,7 +110,7 @@ export function PokemonOwnedCard({ playerPokemon, pokemon, variant, showPcBadge 
         {pokemon && <TypeBadge type={pokemon.type} small />}
       </div>
 
-      <HpGauge current={hp} max={maxHp} />
+      <HpGauge current={hp} max={maxHp} showValue={false} />
     </button>
   )
 }

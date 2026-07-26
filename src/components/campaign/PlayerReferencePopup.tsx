@@ -9,6 +9,8 @@ import { usePlayerItems } from '../../hooks/usePlayerItems'
 import { useAdminParameters } from '../../hooks/useAdminParameters'
 import { useGiftLootboxes } from '../../hooks/useGiftLootboxes'
 import { maybeResetGiftTimerOnEntry } from '../../lib/gifting'
+import { PixelIcon } from '../icons/PixelIcon'
+import { NAV_ICON } from '../../lib/icons'
 
 interface Props {
   player: Player
@@ -75,8 +77,9 @@ export function PlayerReferencePopup({ player, pokemonByName, attacksByName, ite
         </div>
       </div>
 
-      <p className="text-ink-muted-2 text-xs font-bold mb-2">
-        🐾 Équipe {player.is_npc ? `(${team.length})` : `(${team.length} / ${parameters.max_team_size})`}
+      <p className="text-ink-muted-2 text-xs font-bold mb-2 flex items-center gap-1">
+        <PixelIcon src={NAV_ICON.equipe!} size={14} colored />
+        Équipe {player.is_npc ? `(${team.length})` : `(${team.length} / ${parameters.max_team_size})`}
       </p>
       {team.length === 0 ? (
         <p className="text-ink-muted-2 text-sm">Aucun Pokémon dans l'équipe.</p>

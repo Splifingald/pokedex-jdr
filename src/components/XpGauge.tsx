@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import type { CSSProperties } from 'react'
 import type { Milestone } from '../lib/xpBonuses'
 import { clampXp } from '../lib/xpBonuses'
@@ -27,7 +28,13 @@ function markerAlign(value: number, max: number): keyof typeof ALIGN_CLASS {
 }
 
 export function XpGauge({ xp, max, milestones, onXpChange }: Props) {
+  const dragging = useRef(false)
   const pct = max > 0 ? Math.max(0, Math.min(100, (xp / max) * 100)) : 0
+
+  const valueFromPointer = (clientX: number, rect: DOMRect) => {
+    const frac = (clientX - rect.left) / rect.width
+    return clampXp(Math.round(frac * max), max)
+  }
 
   return (
     <div>
@@ -50,13 +57,19 @@ export function XpGauge({ xp, max, milestones, onXpChange }: Props) {
       </div>
 
       <div
-        className="h-2.5 rounded-full bg-[#cfc7a8] border border-ink overflow-hidden cursor-pointer"
-        title="Cliquer pour régler l'XP"
-        onClick={(e) => {
-          const rect = e.currentTarget.getBoundingClientRect()
-          const frac = (e.clientX - rect.left) / rect.width
-          onXpChange(clampXp(Math.round(frac * max), max))
+        className="h-2.5 rounded-full bg-[#cfc7a8] border border-ink overflow-hidden cursor-pointer touch-none select-none"
+        title="Cliquer ou glisser pour régler l'XP"
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId)
+          dragging.current = true
+          onXpChange(valueFromPointer(e.clientX, e.currentTarget.getBoundingClientRect()))
         }}
+        onPointerMove={(e) => {
+          if (!dragging.current) return
+          onXpChange(valueFromPointer(e.clientX, e.currentTarget.getBoundingClientRect()))
+        }}
+        onPointerUp={() => { dragging.current = false }}
+        onPointerCancel={() => { dragging.current = false }}
       >
         <div className="h-full rounded-full bg-xp-blue transition-all" style={{ width: `${pct}%` }} />
       </div>

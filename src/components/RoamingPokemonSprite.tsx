@@ -3,6 +3,8 @@ import type { Pokemon, PlayerPokemon } from '../types'
 import { useRoamPosition } from '../hooks/useRoamPosition'
 import { useLocalHp } from '../hooks/useLocalHp'
 import { getMaxHp } from '../lib/maxHp'
+import { PixelIcon } from './icons/PixelIcon'
+import { GIFT_ICON } from '../lib/icons'
 
 interface Props {
   playerPokemon: PlayerPokemon
@@ -102,10 +104,10 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
         >
           {hasGift && (
             <span
-              className="absolute top-2 right-6 text-4xl z-10 [filter:drop-shadow(1px_2px_1px_rgba(0,0,0,0.4))]"
+              className="absolute top-[33%] left-[67%] -translate-x-1/2 -translate-y-1/2 z-10 [filter:drop-shadow(1px_2px_1px_rgba(0,0,0,0.4))]"
               style={{ animation: 'gift-wiggle 0.6s ease-in-out infinite' }}
             >
-              🎁
+              <PixelIcon src={GIFT_ICON} size={64} />
             </span>
           )}
           {pokemon?.image_miniature ? (

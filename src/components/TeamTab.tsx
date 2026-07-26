@@ -15,7 +15,6 @@ import { PokemonSearchInput } from './PokemonSearchInput'
 import { PokemonDetailSheet } from './PokemonDetailSheet'
 
 type SortKey = 'numero' | 'type' | 'alpha' | 'equipe'
-type LayoutKey = 'grid' | 'list'
 
 const SORT_LABELS: Record<SortKey, string> = { numero: '#', type: 'Type', alpha: 'A-Z', equipe: 'Équipe' }
 
@@ -36,7 +35,6 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
 
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('numero')
-  const [layout, setLayout] = useState<LayoutKey>('grid')
 
   const addableOptions = useMemo(
     () => pokemonList.filter((p) => isAdmin || discovered.has(p.nom)),
@@ -137,13 +135,6 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
         {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
           <Chip key={k} label={SORT_LABELS[k]} active={sortKey === k} onClick={() => setSortKey(k)} />
         ))}
-        <button
-          onClick={() => setLayout((l) => (l === 'grid' ? 'list' : 'grid'))}
-          title={layout === 'grid' ? 'Vue liste' : 'Vue grille'}
-          className={`px-2.5 py-1 rounded-md text-sm ${BUTTON_STYLE.gray}`}
-        >
-          {layout === 'grid' ? '☰' : '▦'}
-        </button>
         <span className="flex-1" />
         <span className="text-[#9a9cba] text-xs">
           Équipe : {player.is_npc ? team.length : `${team.length} / ${parameters.max_team_size}`}
@@ -162,7 +153,7 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
         <p className="text-[#7a7c9a] text-sm">Chargement…</p>
       ) : sortedRoster.length === 0 ? (
         <p className="text-[#7a7c9a] text-sm">Aucun Pokémon possédé.</p>
-      ) : layout === 'grid' ? (
+      ) : (
         <div className="grid gap-2.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(max(150px, 11.5%), 1fr))' }}>
           {sortedRoster.map((pp) => (
             <PokemonOwnedCard
@@ -170,19 +161,6 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
               playerPokemon={pp}
               pokemon={pokemonByName.get(pp.pokemon_nom)}
               variant="grid"
-              showPcBadge={!player.is_npc && !pp.in_team}
-              onClick={() => setSelectedId(pp.id)}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {sortedRoster.map((pp) => (
-            <PokemonOwnedCard
-              key={pp.id}
-              playerPokemon={pp}
-              pokemon={pokemonByName.get(pp.pokemon_nom)}
-              variant="list"
               showPcBadge={!player.is_npc && !pp.in_team}
               onClick={() => setSelectedId(pp.id)}
             />

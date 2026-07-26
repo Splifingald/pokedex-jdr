@@ -9,6 +9,8 @@ import { PokemonSearchInput } from './PokemonSearchInput'
 import { ConfirmPopup } from './ConfirmPopup'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
+import { PixelIcon } from './icons/PixelIcon'
+import { GIFT_ICON } from '../lib/icons'
 
 export function AdminGiftingPanel() {
   const {
@@ -47,7 +49,7 @@ export function AdminGiftingPanel() {
   return (
     <div className="bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] max-w-2xl w-full p-6">
       <div className="flex items-center gap-2 mb-5">
-        <span className="text-2xl">🎁</span>
+        <PixelIcon src={GIFT_ICON} size={24} />
         <h3 className="text-[#a3841a] text-lg font-bold">Cadeaux Pokémon</h3>
       </div>
 

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Item } from '../types'
 import { POKEDOLLAR_ITEM_NAME } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
+import { GIFT_ICON } from '../lib/icons'
 
 export interface GiftReward {
   itemNom: string
@@ -42,10 +43,10 @@ export function GiftPopup({ pokemonDisplayName, reward, itemsByName, pokedollarI
               {pokemonDisplayName} a trouvé quelque chose pour toi !
             </p>
             <span
-              className="text-8xl [filter:drop-shadow(2px_4px_2px_rgba(0,0,0,0.3))]"
+              className="inline-block w-24 h-24 [filter:drop-shadow(2px_4px_2px_rgba(0,0,0,0.3))]"
               style={{ animation: 'gift-wiggle 0.6s ease-in-out infinite' }}
             >
-              🎁
+              <img src={GIFT_ICON} alt="" className="pixelated w-full h-full object-contain" />
             </span>
           </button>
         ) : (
@@ -60,7 +61,7 @@ export function GiftPopup({ pokemonDisplayName, reward, itemsByName, pokedollarI
                   ) : item?.image_url ? (
                     <img src={item.image_url} alt={reward.itemNom} className="w-full h-full object-contain" />
                   ) : (
-                    <span className="text-5xl">🎁</span>
+                    <img src={GIFT_ICON} alt="" className="pixelated w-full h-full object-contain" />
                   )}
                 </div>
                 <h3 className="text-ink text-lg mb-1">

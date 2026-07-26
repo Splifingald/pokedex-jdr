@@ -23,7 +23,8 @@ import { useLocalStatus } from '../hooks/useLocalStatus'
 import { useHoldRepeat } from '../hooks/useHoldRepeat'
 import { getMaxHp } from '../lib/maxHp'
 import { getHpBreakdown, getDamageBreakdown, getMilestones, getMaxXp } from '../lib/xpBonuses'
-import { STATUS_LIST, getStatusInfo } from '../lib/status'
+import { getStatusInfo } from '../lib/status'
+import { StatusSelect } from './StatusSelect'
 import { getSuperEfficace, getLocalisations, getAttaques } from '../lib/pokemonFacts'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
@@ -103,15 +104,7 @@ function OwnedVitals({
           </button>
         </div>
 
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value as typeof status)}
-          className="min-w-0 max-w-[140px] truncate bg-white border-2 border-ink rounded px-2 py-1 text-ink text-sm outline-none"
-        >
-          {STATUS_LIST.map((s) => (
-            <option key={s.id} value={s.id}>{s.icon ? `${s.icon} ` : ''}{s.label}</option>
-          ))}
-        </select>
+        <StatusSelect value={status} onChange={setStatus} />
       </div>
 
       {status !== 'aucun' && (
@@ -267,7 +260,7 @@ export function PokemonDetailSheet({
               <StatCell icon={<PixelIcon src={STAT_ICON.distance} size={22} />} title="Distance de déplacement" value={`${pokemon.distance_deplacement} cases`} />
             )}
             {isAdmin && pokemon?.chances_capture && (
-              <StatCell icon="🎯" title="Chances de capture (info admin)" value={pokemon.chances_capture} adminOnly />
+              <StatCell icon={<PixelIcon src={STAT_ICON.catchrate} size={22} />} title="Chances de capture (info admin)" value={pokemon.chances_capture} adminOnly />
             )}
           </StatGrid>
         </div>
@@ -283,7 +276,7 @@ export function PokemonDetailSheet({
             )}
 
             <StatRow
-              icon="✖️"
+              icon={<PixelIcon src={STAT_ICON.supereffective} size={22} />}
               title="Super efficace contre"
               value={
                 superEfficace.length > 0 ? (
@@ -314,21 +307,19 @@ export function PokemonDetailSheet({
               </div>
             )}
 
-            <StatRow
-              icon={<PixelIcon src={STAT_ICON.location} size={22} />}
-              title="Localisation"
-              value={
-                localisations.length > 0 ? (
+            {localisations.length > 0 && (
+              <StatRow
+                icon={<PixelIcon src={STAT_ICON.location} size={22} />}
+                title="Localisation"
+                value={
                   <div className="flex flex-col gap-0.5">
                     {localisations.map((l) => (
                       <span key={l}>{l}</span>
                     ))}
                   </div>
-                ) : (
-                  <span className="text-ink-muted-2">—</span>
-                )
-              }
-            />
+                }
+              />
+            )}
           </>
         )}
 
@@ -337,7 +328,7 @@ export function PokemonDetailSheet({
           <div className="mt-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm text-ink font-bold inline-flex items-center gap-1.5">
-                <PixelIcon src={STAT_ICON.abilities} size={18} />
+                <PixelIcon src={STAT_ICON.abilities} size={22} />
                 Capacités{maxMoves != null ? ` (${knownMoves.length}/${maxMoves})` : ''}
               </span>
               <button
@@ -383,7 +374,7 @@ export function PokemonDetailSheet({
           canShowAttaques && learnableAttaques.length > 0 && (
             <div className="mt-3">
               <span className="text-sm text-ink font-bold inline-flex items-center gap-1.5 mb-2">
-              <PixelIcon src={STAT_ICON.abilities} size={18} />
+              <PixelIcon src={STAT_ICON.abilities} size={22} />
               Capacités apprenables
             </span>
               <div className="flex flex-wrap gap-1.5">

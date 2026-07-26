@@ -22,6 +22,8 @@ export const STAT_ICON = {
   talent: `${BASE}/icon_stat_talent.png`,
   transport: `${BASE}/icon_stat_transport.png`,
   abilities: `${BASE}/icon_stat_abilities.png`,
+  catchrate: `${BASE}/icon_stat_catchrate.png`,
+  supereffective: `${BASE}/icon_stat_supereffective.png`,
 }
 
 export const STATUS_ICON = {
@@ -37,3 +39,5 @@ export const STATUS_ICON = {
 
 export const SETTINGS_ICON = `${BASE}/icon_settings.png`
 export const SAVE_ICON = `${BASE}/icon_save.png`
+export const PC_ICON = `${BASE}/icon_pokemon_box.png`
+export const GIFT_ICON = `${BASE}/image_pokemon_gift.png`
