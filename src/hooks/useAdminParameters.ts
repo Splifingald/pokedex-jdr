@@ -15,6 +15,7 @@ const DEFAULTS: AdminParameters = {
   feature_inventory_enabled: true,
   feature_map_enabled: true,
   feature_gifting_enabled: true,
+  feature_casino_enabled: true,
 }
 
 export function useAdminParameters() {

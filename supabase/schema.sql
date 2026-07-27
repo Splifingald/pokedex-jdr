@@ -56,6 +56,13 @@
 -- UPDATE campaign_chapters c SET position = ranked.rn FROM ranked WHERE ranked.id = c.id;
 -- ALTER TABLE campaign_sessions ADD COLUMN IF NOT EXISTS notes jsonb NOT NULL DEFAULT '{"type":"doc","content":[{"type":"paragraph"}]}'::jsonb;
 -- ALTER TABLE campaign_chapters ADD COLUMN IF NOT EXISTS notes jsonb NOT NULL DEFAULT '{"type":"doc","content":[{"type":"paragraph"}]}'::jsonb;
+-- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_casino_enabled boolean NOT NULL DEFAULT true;
+-- ALTER TABLE casino_config ADD COLUMN IF NOT EXISTS slots_pokeball_weight integer NOT NULL DEFAULT 1;
+-- ALTER TABLE casino_config ADD COLUMN IF NOT EXISTS slots_superball_weight integer NOT NULL DEFAULT 1;
+-- ALTER TABLE casino_config ADD COLUMN IF NOT EXISTS slots_hyperball_weight integer NOT NULL DEFAULT 1;
+-- ALTER TABLE casino_config ADD COLUMN IF NOT EXISTS slots_masterball_weight integer NOT NULL DEFAULT 1;
+-- ALTER TABLE casino_config ADD COLUMN IF NOT EXISTS dice_opponent_name text NOT NULL DEFAULT 'Le Croupier';
+-- ALTER TABLE casino_config ADD COLUMN IF NOT EXISTS dice_opponent_image_url text NOT NULL DEFAULT '';
 -- ============================================================
 
 -- Table principale des pokémon
@@ -233,6 +240,7 @@ CREATE TABLE IF NOT EXISTS admin_parameters (
   feature_inventory_enabled      boolean NOT NULL DEFAULT true,
   feature_map_enabled            boolean NOT NULL DEFAULT true,
   feature_gifting_enabled        boolean NOT NULL DEFAULT true,
+  feature_casino_enabled         boolean NOT NULL DEFAULT true,
   CONSTRAINT single_row CHECK (id = 1)
 );
 INSERT INTO admin_parameters (id, max_moves, max_team_size)
@@ -546,3 +554,83 @@ CREATE POLICY "Public delete campaign_chapters"
   ON campaign_chapters FOR DELETE
   TO anon
   USING (true);
+
+-- ============================================================
+-- Casino
+-- ============================================================
+
+-- Objet "Ticket Casino" du catalogue (le stock par joueur vit dans player_items,
+-- comme Pokédollar). RLS bloque l'écriture anon sur items — cette ligne doit
+-- être insérée une fois via le SQL Editor (contourne RLS).
+INSERT INTO items (nom, type, cout, description, image_url)
+VALUES ('Ticket Casino', 'Monnaie', 0, 'Permet de jouer au Casino.', '/website_icons/icon_casino_ticket.png')
+ON CONFLICT (nom) DO NOTHING;
+
+-- Paramètres admin du Casino (une seule ligne, id fixe = 1) — même schéma que
+-- admin_parameters : économie des tickets + config des deux jeux (jusqu'à 3,
+-- un 3e jeu ajoutera simplement ses propres colonnes préfixées plus tard).
+CREATE TABLE IF NOT EXISTS casino_config (
+  id                          bigint PRIMARY KEY DEFAULT 1,
+  -- Économie des tickets
+  ticket_max                  integer NOT NULL DEFAULT 3,
+  ticket_regen_amount         integer NOT NULL DEFAULT 24,
+  ticket_regen_unit           text NOT NULL DEFAULT 'hours' CHECK (ticket_regen_unit IN ('hours', 'minutes')),
+  ticket_buy_cost             integer NOT NULL DEFAULT 100,
+  ticket_daily_buy_cap        integer NOT NULL DEFAULT 3,
+  -- Jeu 1 : Chance de Miaouss (machine à sous)
+  slots_enabled               boolean NOT NULL DEFAULT true,
+  slots_nom                   text NOT NULL DEFAULT 'Chance de Miaouss',
+  slots_icon_url              text NOT NULL DEFAULT '',
+  slots_banner_url            text NOT NULL DEFAULT '',
+  slots_pokeball_value        integer NOT NULL DEFAULT 10,
+  slots_superball_value       integer NOT NULL DEFAULT 20,
+  slots_hyperball_value       integer NOT NULL DEFAULT 50,
+  slots_masterball_value      integer NOT NULL DEFAULT 200,
+  -- Poids relatifs de tirage (probabilité = poids / somme des poids)
+  slots_pokeball_weight       integer NOT NULL DEFAULT 1,
+  slots_superball_weight      integer NOT NULL DEFAULT 1,
+  slots_hyperball_weight      integer NOT NULL DEFAULT 1,
+  slots_masterball_weight     integer NOT NULL DEFAULT 1,
+  slots_match2_multiplier     integer NOT NULL DEFAULT 3,
+  slots_match3_multiplier     integer NOT NULL DEFAULT 10,
+  -- Jeu 2 : Dé Chance (dés contre l'IA)
+  dice_enabled                boolean NOT NULL DEFAULT true,
+  dice_nom                    text NOT NULL DEFAULT 'Dé Chance',
+  dice_icon_url               text NOT NULL DEFAULT '',
+  dice_banner_url             text NOT NULL DEFAULT '',
+  dice_max_rounds             integer NOT NULL DEFAULT 3,
+  dice_initial_gain           integer NOT NULL DEFAULT 100,
+  dice_ai_target_min          integer NOT NULL DEFAULT 13,
+  dice_ai_target_max          integer NOT NULL DEFAULT 17,
+  dice_opponent_name          text NOT NULL DEFAULT 'Le Croupier',
+  dice_opponent_image_url     text NOT NULL DEFAULT '',
+  CONSTRAINT single_row CHECK (id = 1)
+);
+INSERT INTO casino_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- État casino par joueur : minuteur du prochain ticket gratuit + suivi des
+-- achats du jour (plafond quotidien, réinitialisé à minuit local côté client).
+CREATE TABLE IF NOT EXISTS casino_player_state (
+  player_id      bigint PRIMARY KEY,
+  next_ticket_at timestamptz,
+  purchase_count integer NOT NULL DEFAULT 0,
+  purchase_date  date,
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE casino_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE casino_player_state ENABLE ROW LEVEL SECURITY;
+
+-- Lecture + écriture publiques (édité en direct depuis l'onglet Admin, comme
+-- admin_parameters/gift_lootboxes — app sans vraie sécurité)
+CREATE POLICY "Public read casino_config"
+  ON casino_config FOR SELECT TO anon USING (true);
+CREATE POLICY "Public update casino_config"
+  ON casino_config FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "Public read casino_player_state"
+  ON casino_player_state FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert casino_player_state"
+  ON casino_player_state FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update casino_player_state"
+  ON casino_player_state FOR UPDATE TO anon USING (true) WITH CHECK (true);

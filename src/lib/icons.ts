@@ -37,7 +37,28 @@ export const STATUS_ICON = {
   ko: `${BASE}/icon_status_KO.png`,
 }
 
+export const PHOTO_ICON = `${BASE}/icon_photo_pokemon.png`
+
 export const SETTINGS_ICON = `${BASE}/icon_settings.png`
 export const SAVE_ICON = `${BASE}/icon_save.png`
 export const PC_ICON = `${BASE}/icon_pokemon_box.png`
 export const GIFT_ICON = `${BASE}/image_pokemon_gift.png`
+
+export const CASINO_ICON = {
+  pokeball: `${BASE}/icon_casino_pokeball.png`,
+  superball: `${BASE}/icon_casino_superball.png`,
+  hyperball: `${BASE}/icon_casino_hyperball.png`,
+  masterball: `${BASE}/icon_casino_masterball.png`,
+  ticket: `${BASE}/icon_casino_ticket.png`,
+}
+
+export const CASINO_MASCOT_ICON = `${BASE}/icon_casino.png`
+
+export const DICE_ICON: Record<number, string> = {
+  1: `${BASE}/Dice_1.png`,
+  2: `${BASE}/Dice_2.png`,
+  3: `${BASE}/Dice_3.png`,
+  4: `${BASE}/Dice_4.png`,
+  5: `${BASE}/Dice_5.png`,
+  6: `${BASE}/Dice_6.png`,
+}

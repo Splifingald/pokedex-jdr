@@ -3,9 +3,10 @@ import { AdminPanel } from './AdminPanel'
 import { AdminPlayersPanel } from './AdminPlayersPanel'
 import { AdminParametersPanel } from './AdminParametersPanel'
 import { AdminGiftingPanel } from './AdminGiftingPanel'
+import { AdminCasinoPanel } from './AdminCasinoPanel'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 
-type Section = 'import' | 'joueurs' | 'parametres' | 'cadeaux'
+type Section = 'import' | 'joueurs' | 'parametres' | 'cadeaux' | 'casino'
 
 interface Props {
   onImportSuccess: () => void
@@ -19,11 +20,12 @@ export function AdminTab({ onImportSuccess }: Props) {
     { id: 'joueurs', label: 'Joueurs' },
     { id: 'parametres', label: 'Paramètres' },
     { id: 'cadeaux', label: 'Cadeaux Pokémon' },
+    { id: 'casino', label: 'Casino' },
   ]
 
   return (
     <div className="flex-1 overflow-y-auto p-4">
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-4 max-w-md">
+      <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 mb-4 max-w-lg">
         {sections.map((s) => (
           <button
             key={s.id}
@@ -39,6 +41,7 @@ export function AdminTab({ onImportSuccess }: Props) {
       {section === 'joueurs' && <AdminPlayersPanel />}
       {section === 'parametres' && <AdminParametersPanel />}
       {section === 'cadeaux' && <AdminGiftingPanel />}
+      {section === 'casino' && <AdminCasinoPanel />}
     </div>
   )
 }

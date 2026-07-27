@@ -229,6 +229,15 @@ export function AdminParametersPanel() {
                 />
                 Cadeaux Pokémon
               </label>
+              <label className="flex items-center gap-2 text-sm text-ink-muted">
+                <input
+                  type="checkbox"
+                  checked={parameters.feature_casino_enabled}
+                  onChange={(e) => updateParameters({ feature_casino_enabled: e.target.checked })}
+                  className="w-4 h-4"
+                />
+                Casino
+              </label>
             </div>
           </div>
         </div>

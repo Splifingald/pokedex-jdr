@@ -76,14 +76,14 @@ export function ItemPopup({ row, item, pokedollarImageUrl, onSetQuantity, onSell
           </div>
         </div>
 
-        {item && (
+        {item && sellValue(item.cout) > 0 && (
           <div className="flex justify-center">
             <button
               disabled={row.quantity <= 0}
               onClick={(e) => onSell(e.currentTarget.getBoundingClientRect())}
               className={`px-5 py-1.5 rounded font-bold flex flex-col items-center leading-tight disabled:opacity-50 disabled:cursor-not-allowed ${BUTTON_STYLE.orange}`}
             >
-              <span className="text-sm">SELL</span>
+              <span className="text-sm">VENDRE</span>
               <span className="text-sm font-normal flex items-center gap-0.5">
                 <PokedollarIcon imageUrl={pokedollarImageUrl} /> {sellValue(item.cout)}
               </span>

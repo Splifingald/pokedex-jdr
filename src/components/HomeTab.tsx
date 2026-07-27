@@ -10,8 +10,11 @@ import { useToast } from '../context/ToastContext'
 import { RoamingPokemonSprite } from './RoamingPokemonSprite'
 import { PokemonDetailSheet } from './PokemonDetailSheet'
 import { GiftPopup, type GiftReward } from './GiftPopup'
+import { CasinoPopup } from './CasinoPopup'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
+import { PixelIcon } from './icons/PixelIcon'
+import { PHOTO_ICON, CASINO_MASCOT_ICON } from '../lib/icons'
 import { isGiftReady, resolveLootboxForSpecies, drawLootboxReward, randomNextGiftAt, maybeResetGiftTimerOnEntry } from '../lib/gifting'
 
 interface Props {
@@ -50,6 +53,7 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
   const [jumpingId, setJumpingId] = useState<number | null>(null)
   const [giftPokemonId, setGiftPokemonId] = useState<number | null>(null)
   const [giftReward, setGiftReward] = useState<GiftReward | null>(null)
+  const [showCasino, setShowCasino] = useState(false)
 
   // Recalcul périodique de "maintenant" pour détecter les cadeaux devenus prêts
   // pendant que l'app reste ouverte — pas de compte à rebours affiché, juste
@@ -186,14 +190,30 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
         </div>
       ) : null}
 
+      {/* Bouton casino épinglé à droite, au-dessus du scanner */}
+      {player && parameters.feature_casino_enabled && (
+        <div className="absolute right-3 top-1/2 -translate-y-[calc(50%+96px)] w-14 h-14 z-[35]">
+          <img
+            src={CASINO_MASCOT_ICON}
+            alt=""
+            className="pixelated absolute left-1/2 -translate-x-1/2 bottom-0 w-[72px] h-[72px] object-contain pointer-events-none"
+          />
+          <button
+            onClick={() => setShowCasino(true)}
+            title="Casino"
+            className="absolute inset-0 rounded-full border-[3px] border-ink bg-gradient-to-br from-[#e0293f] to-[#7a0f1f] shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+          />
+        </div>
+      )}
+
       {/* Bouton scanner épinglé à droite */}
       {canScan && (
         <button
           onClick={onScan}
           title="Scanner un Pokémon"
-          className="absolute right-3 top-1/2 -translate-y-1/2 w-14 h-14 rounded-full border-[3px] border-ink bg-cream text-2xl flex items-center justify-center shadow-[var(--shadow-pixel)] z-[35] active:shadow-none active:translate-x-[2px] active:translate-y-[calc(-50%+2px)] transition-all"
+          className="absolute right-3 top-1/2 -translate-y-1/2 w-14 h-14 rounded-full border-[3px] border-ink bg-gradient-to-br from-hp-orange to-hp-red text-white flex items-center justify-center shadow-[var(--shadow-pixel)] z-[35] active:shadow-none active:translate-x-[2px] active:translate-y-[calc(-50%+2px)] transition-all"
         >
-          📷
+          <PixelIcon src={PHOTO_ICON} size={34} alt="Scanner un Pokémon" colored />
         </button>
       )}
 
@@ -224,6 +244,15 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           itemsByName={itemsByName}
           pokedollarImageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
           onConfirm={handleClaimGift}
+        />
+      )}
+
+      {showCasino && player && (
+        <CasinoPopup
+          player={player}
+          playerItems={playerItems}
+          pokedollarImageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
+          onClose={() => setShowCasino(false)}
         />
       )}
     </div>

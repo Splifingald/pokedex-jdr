@@ -8,7 +8,7 @@ import { normalizeSearch } from '../lib/normalizeSearch'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PANEL, PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { PixelIcon } from './icons/PixelIcon'
-import { NAV_ICON } from '../lib/icons'
+import { NAV_ICON, PHOTO_ICON } from '../lib/icons'
 
 type SortKey = 'numero' | 'type' | 'alpha'
 type LayoutKey = 'grid' | 'list'
@@ -289,9 +289,10 @@ export function PokedexTab({
         {canScan && (
           <button
             onClick={onScan}
-            className="flex-1 py-3 rounded-lg border-2 border-ink bg-shell text-white font-bold text-sm shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+            className="flex-1 py-3 rounded-lg border-2 border-ink bg-shell text-white font-bold text-sm shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all flex items-center justify-center gap-2"
           >
-            📷 Ajouter un Pokémon
+            <PixelIcon src={PHOTO_ICON} size={22} alt="" colored />
+            Ajouter un Pokémon
           </button>
         )}
         <button

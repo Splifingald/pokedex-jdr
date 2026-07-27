@@ -198,6 +198,7 @@ export interface AdminParameters {
   feature_inventory_enabled: boolean
   feature_map_enabled: boolean
   feature_gifting_enabled: boolean
+  feature_casino_enabled: boolean
 }
 
 // Fond par défaut de l'écran d'accueil (modifiable dans Admin → Paramètres)
@@ -267,6 +268,56 @@ export interface GiftLootboxSpecies {
 
 export const DEFAULT_LOOTBOX_TIMER_MIN_HOURS = 60
 export const DEFAULT_LOOTBOX_TIMER_MAX_HOURS = 80
+
+// ── Casino ─────────────────────────────────────────────────────
+export const TICKET_CASINO_ITEM_NAME = 'Ticket Casino'
+
+export type SlotSymbol = 'pokeball' | 'superball' | 'hyperball' | 'masterball'
+
+export interface CasinoConfig {
+  id: number
+  // Économie des tickets
+  ticket_max: number
+  ticket_regen_amount: number
+  ticket_regen_unit: GiftTimerUnit
+  ticket_buy_cost: number
+  ticket_daily_buy_cap: number
+  // Chance de Miaouss (machine à sous)
+  slots_enabled: boolean
+  slots_nom: string
+  slots_icon_url: string
+  slots_banner_url: string
+  slots_pokeball_value: number
+  slots_superball_value: number
+  slots_hyperball_value: number
+  slots_masterball_value: number
+  // Poids relatifs de tirage (probabilité = poids / somme des poids)
+  slots_pokeball_weight: number
+  slots_superball_weight: number
+  slots_hyperball_weight: number
+  slots_masterball_weight: number
+  slots_match2_multiplier: number
+  slots_match3_multiplier: number
+  // Dé Chance (dés contre l'IA)
+  dice_enabled: boolean
+  dice_nom: string
+  dice_icon_url: string
+  dice_banner_url: string
+  dice_max_rounds: number
+  dice_initial_gain: number
+  dice_ai_target_min: number
+  dice_ai_target_max: number
+  dice_opponent_name: string
+  dice_opponent_image_url: string
+}
+
+export interface CasinoPlayerState {
+  player_id: number
+  next_ticket_at: string | null
+  purchase_count: number
+  purchase_date: string | null
+  created_at: string
+}
 
 // ── Fonds d'écran (accueil) ───────────────────────────────────
 export interface Background {

@@ -72,6 +72,20 @@ html, body, #root {
   25% { transform: rotate(-10deg); }
   75% { transform: rotate(10deg); }
 }
+@keyframes reel-spin {
+  0% { transform: translateY(0); filter: blur(0); }
+  50% { transform: translateY(-6px); filter: blur(2px); }
+  100% { transform: translateY(0); filter: blur(0); }
+}
+@keyframes dice-shake {
+  0%, 100% { transform: rotate(0deg) scale(1); }
+  25% { transform: rotate(-8deg) scale(1.05); }
+  75% { transform: rotate(8deg) scale(1.05); }
+}
+@keyframes slot-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232, 147, 61, 0); }
+  50% { box-shadow: 0 0 0 4px rgba(232, 147, 61, 0.9); }
+}
 
 /* Journal de campagne : mots référencés (Pokémon/joueurs/lieux/capacités/objets) */
 .ref-highlight {
