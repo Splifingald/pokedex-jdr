@@ -217,7 +217,7 @@ function GameCard({
 }) {
   return (
     <div className={`p-3 rounded ${PIXEL_BORDER_SM} bg-cream-secondary`}>
-      <GameBanner bannerUrl={bannerUrl} fallbackEmoji={fallbackEmoji} className="aspect-square rounded mb-2" />
+      <GameBanner bannerUrl={bannerUrl} fallbackEmoji={fallbackEmoji} className="h-24 rounded mb-2" />
       <div className="flex items-center gap-2">
         <div className="w-8 h-8 shrink-0 flex items-center justify-center">
           {iconUrl ? (

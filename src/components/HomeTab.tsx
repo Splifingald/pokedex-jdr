@@ -192,18 +192,13 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
 
       {/* Bouton casino épinglé à droite, au-dessus du scanner */}
       {player && parameters.feature_casino_enabled && (
-        <div className="absolute right-3 top-1/2 -translate-y-[calc(50%+96px)] w-14 h-14 z-[35]">
-          <img
-            src={CASINO_MASCOT_ICON}
-            alt=""
-            className="pixelated absolute left-1/2 -translate-x-1/2 bottom-0 w-[72px] h-[72px] object-contain pointer-events-none"
-          />
-          <button
-            onClick={() => setShowCasino(true)}
-            title="Casino"
-            className="absolute inset-0 rounded-full border-[3px] border-ink bg-gradient-to-br from-[#e0293f] to-[#7a0f1f] shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
-          />
-        </div>
+        <button
+          onClick={() => setShowCasino(true)}
+          title="Casino"
+          className="absolute right-3 top-1/2 -translate-y-[calc(50%+96px)] w-14 h-14 rounded-full border-[3px] border-ink bg-gradient-to-br from-[#e0293f] to-[#7a0f1f] flex items-center justify-center shadow-[var(--shadow-pixel)] z-[35] active:shadow-none active:translate-x-[2px] active:translate-y-[calc(-50%-94px)] transition-all"
+        >
+          <img src={CASINO_MASCOT_ICON} alt="Casino" className="pixelated w-9 h-9 object-contain" />
+        </button>
       )}
 
       {/* Bouton scanner épinglé à droite */}

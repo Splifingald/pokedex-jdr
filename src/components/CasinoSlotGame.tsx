@@ -4,6 +4,7 @@ import { rollSlotSymbols, computeSlotResult, type SlotResult } from '../lib/casi
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { CASINO_ICON } from '../lib/icons'
 import { useCountUp } from '../hooks/useCountUp'
+import { flyCoin } from '../lib/flyCoin'
 
 interface Props {
   config: CasinoConfig
@@ -123,8 +124,14 @@ export function CasinoSlotGame({ config, pokedollarImageUrl, onWin }: Props) {
           <p className="text-ink text-base font-bold animate-[celebrate-pop_0.4s_ease-out]">
             +{displayedTotal} <PokedollarIcon imageUrl={pokedollarImageUrl} />
           </p>
-          <button onClick={() => onWin(result.total)} className={`px-5 py-2 rounded font-bold text-sm ${BUTTON_STYLE.yellow}`}>
-            Continuer
+          <button
+            onClick={(e) => {
+              if (result.total > 0) flyCoin(e.currentTarget.getBoundingClientRect(), result.total, pokedollarImageUrl)
+              onWin(result.total)
+            }}
+            className={`px-5 py-2 rounded font-bold text-sm ${BUTTON_STYLE.yellow}`}
+          >
+            Continuer ({result.total} <PokedollarIcon imageUrl={pokedollarImageUrl} />)
           </button>
         </div>
       ) : (

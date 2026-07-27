@@ -146,9 +146,12 @@ export function rollDicePair(): [number, number] {
   return [1 + Math.floor(Math.random() * 6), 1 + Math.floor(Math.random() * 6)]
 }
 
-// L'IA continue de lancer tant qu'elle n'a pas atteint sa cible secrète.
-export function shouldAiHit(aiTotal: number, target: number): boolean {
-  return aiTotal < target
+// L'IA continue de lancer tant qu'elle n'a pas atteint sa cible secrète — et,
+// comme le joueur joue toujours en premier et que son total final est donc déjà
+// connu, elle continue aussi tant qu'elle reste derrière lui même après avoir
+// atteint sa cible (elle ne s'arrête que si elle a atteint sa cible ET égalé/dépassé le joueur).
+export function shouldAiHit(aiTotal: number, target: number, playerTotal: number): boolean {
+  return aiTotal < target || aiTotal < playerTotal
 }
 
 // Utilisé uniquement pour éviter une égalité : force un lancer qui fait dépasser 21
@@ -179,7 +182,7 @@ export function simulateAiTurn(startAiTotal: number, target: number, playerTotal
   let total = startAiTotal
   const steps: AiRollStep[] = []
 
-  while (total <= 21 && shouldAiHit(total, target)) {
+  while (total <= 21 && shouldAiHit(total, target, playerTotal)) {
     const dice = rollDicePair()
     total += dice[0] + dice[1]
     steps.push({ dice, totalAfter: total })
@@ -252,32 +255,35 @@ function finalTotalDistribution(target: number): { finals: Map<number, number>; 
   return { finals, bustProb }
 }
 
-function aiFinalDistribution(min: number, max: number): { finals: Map<number, number>; bustProb: number } {
-  const targets = Array.from({ length: Math.max(1, max - min + 1) }, (_, i) => min + i)
-  const w = 1 / targets.length
-  const finals = new Map<number, number>()
-  let bustProb = 0
-  for (const t of targets) {
-    const { finals: f, bustProb: b } = finalTotalDistribution(t)
-    bustProb += b * w
-    for (const [total, p] of f) finals.set(total, (finals.get(total) ?? 0) + p * w)
-  }
-  return { finals, bustProb }
-}
-
 // P(le joueur gagne une manche), en supposant qu'il reste dès que son total atteint
-// dice_ai_target_max (le seuil le plus sûr — bat l'IA à chaque fois qu'elle n'atteint pas sa propre cible).
+// dice_ai_target_max (le seuil le plus sûr).
+//
+// L'IA ne s'arrête plus seulement à sa propre cible : elle continue tant qu'elle est
+// encore derrière le total du joueur (shouldAiHit), donc son seuil d'arrêt effectif
+// pour un total joueur P donné est max(cible, P) — on ne peut pas la modéliser
+// indépendamment du joueur comme avant. On recalcule donc sa distribution avec ce
+// seuil composé, pour chaque total joueur possible et chaque cible IA possible.
+// Une égalité (l'IA s'arrête pile sur P) est une victoire du joueur (triche forcée).
 export function computeDiceRoundWinProbability(config: CasinoConfig): number {
   const { finals: playerFinals } = finalTotalDistribution(config.dice_ai_target_max)
-  const { finals: aiFinals, bustProb: aiBust } = aiFinalDistribution(config.dice_ai_target_min, config.dice_ai_target_max)
+  const { dice_ai_target_min: min, dice_ai_target_max: max } = config
+  const targets = Array.from({ length: Math.max(1, max - min + 1) }, (_, i) => min + i)
+  const targetWeight = 1 / targets.length
 
   let winProb = 0
   for (const [playerTotal, pProb] of playerFinals) {
-    let pWinGivenTotal = aiBust
-    for (const [aiTotal, aProb] of aiFinals) {
-      if (aiTotal <= playerTotal) pWinGivenTotal += aProb
+    let pWinGivenPlayerTotal = 0
+    for (const target of targets) {
+      const { finals: aiFinals, bustProb: aiBust } = finalTotalDistribution(Math.max(target, playerTotal))
+      // aiTotal >= playerTotal ici par construction du seuil : aiTotal === playerTotal
+      // est une égalité (triche forcée, joueur gagne), aiTotal > playerTotal est une victoire IA.
+      let pWinGivenTarget = aiBust
+      for (const [aiTotal, aProb] of aiFinals) {
+        if (aiTotal <= playerTotal) pWinGivenTarget += aProb
+      }
+      pWinGivenPlayerTotal += targetWeight * pWinGivenTarget
     }
-    winProb += pProb * pWinGivenTotal
+    winProb += pProb * pWinGivenPlayerTotal
   }
   return winProb
 }

@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
+import type { MouseEvent } from 'react'
 import type { CasinoConfig, Player } from '../types'
 import { rollDicePair, pickAiTarget, simulateAiTurn } from '../lib/casino'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { DICE_ICON } from '../lib/icons'
 import { useCountUp } from '../hooks/useCountUp'
+import { flyCoin } from '../lib/flyCoin'
 
 interface Props {
   config: CasinoConfig
@@ -126,21 +128,27 @@ export function CasinoDiceGame({ config, player, pokedollarImageUrl, onWin }: Pr
 
   const handleStand = () => setPhase('ai-turn')
 
-  const handleDismissResult = () => {
+  const nextGain = round === 1 ? config.dice_initial_gain : bankedGain * 2
+  const isFinalRound = round >= config.dice_max_rounds
+
+  const handleDismissResult = (e: MouseEvent<HTMLButtonElement>) => {
     if (roundOutcome === 'lose') {
       onWin(0)
       return
     }
-    const newGain = round === 1 ? config.dice_initial_gain : bankedGain * 2
-    if (round >= config.dice_max_rounds) {
-      onWin(newGain)
+    if (isFinalRound) {
+      if (nextGain > 0) flyCoin(e.currentTarget.getBoundingClientRect(), nextGain, pokedollarImageUrl)
+      onWin(nextGain)
       return
     }
-    setBankedGain(newGain)
+    setBankedGain(nextGain)
     setPhase('choice')
   }
 
-  const handleCashOut = () => onWin(bankedGain)
+  const handleCashOut = (e: MouseEvent<HTMLButtonElement>) => {
+    if (bankedGain > 0) flyCoin(e.currentTarget.getBoundingClientRect(), bankedGain, pokedollarImageUrl)
+    onWin(bankedGain)
+  }
 
   const handleContinue = () => {
     setRound((r) => r + 1)
@@ -224,7 +232,13 @@ export function CasinoDiceGame({ config, player, pokedollarImageUrl, onWin }: Pr
             {roundOutcome === 'win' ? '🎉 Manche gagnée !' : '💥 Manche perdue — tout est perdu.'}
           </p>
           <button onClick={handleDismissResult} className={`px-5 py-2 rounded font-bold text-sm ${BUTTON_STYLE.yellow}`}>
-            Continuer
+            {roundOutcome === 'lose' ? (
+              <>Continuer (0 <PokedollarIcon imageUrl={pokedollarImageUrl} />)</>
+            ) : isFinalRound ? (
+              <>Continuer ({nextGain} <PokedollarIcon imageUrl={pokedollarImageUrl} />)</>
+            ) : (
+              'Continuer'
+            )}
           </button>
         </div>
       )}
