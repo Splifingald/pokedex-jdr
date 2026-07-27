@@ -1,15 +1,18 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import type { AdminParameters, CarteLocation, Pokemon } from '../types'
+import type { AdminParameters, Attack, CarteLocation, Pokemon } from '../types'
 import { useCarteLocations } from '../hooks/useCarteLocations'
 import { useEncounters } from '../hooks/useEncounters'
 import { CarteImageViewer } from './CarteImageViewer'
 import { EncounterTableModal } from './EncounterTableModal'
+import { PixelIcon } from './icons/PixelIcon'
+import { NAV_ICON } from '../lib/icons'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 
 interface Props {
   parameters: AdminParameters
   isAdmin: boolean
   pokemonByName: Map<string, Pokemon>
+  attacksByName: Map<string, Attack>
 }
 
 const MAX_SCALE = 5
@@ -42,7 +45,7 @@ function hexToRgb(hex: string): [number, number, number] | null {
   return [r, g, b]
 }
 
-export function CarteTab({ parameters, isAdmin, pokemonByName }: Props) {
+export function CarteTab({ parameters, isAdmin, pokemonByName, attacksByName }: Props) {
   const { locations } = useCarteLocations()
   const { encounters } = useEncounters()
 
@@ -269,9 +272,9 @@ export function CarteTab({ parameters, isAdmin, pokemonByName }: Props) {
               <button
                 onClick={() => setEncounterModalOpen(true)}
                 title="Voir la table de rencontres"
-                className={`w-7 h-7 shrink-0 rounded-md text-sm ${BUTTON_STYLE.gray}`}
+                className={`w-7 h-7 shrink-0 rounded-md flex items-center justify-center ${BUTTON_STYLE.gray}`}
               >
-                🎲
+                <PixelIcon src={NAV_ICON.rencontres!} size={16} colored className="text-ink" alt="" />
               </button>
             )}
             <button
@@ -310,6 +313,8 @@ export function CarteTab({ parameters, isAdmin, pokemonByName }: Props) {
           lieu={selected.titre}
           rows={matchingEncounterRows}
           pokemonByName={pokemonByName}
+          attacksByName={attacksByName}
+          isAdmin={isAdmin}
           onClose={() => setEncounterModalOpen(false)}
         />
       )}

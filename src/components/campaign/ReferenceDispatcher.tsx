@@ -63,6 +63,7 @@ export function ReferenceDispatcher({
         location={location}
         encounters={encountersByLieu.get(location.titre) ?? []}
         pokemonByName={pokemonByName}
+        attacksByName={attacksByName}
         onClose={onClose}
       />
     )

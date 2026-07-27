@@ -3,16 +3,18 @@ import type { ReactNode } from 'react'
 interface Props {
   onClose: () => void
   children: ReactNode
+  /** Passe au-dessus des popups z-50 (ex : ouvert depuis une table de rencontres déjà en popup) */
+  elevated?: boolean
 }
 
 // Enveloppe responsive des fiches détail :
 // - mobile (< md) : bottom sheet glissant depuis le bas, poignée de drag
 // - tablette (md–lg) : modale centrée
 // - desktop (≥ lg) : panneau latéral ancré à droite, pleine hauteur
-export function SheetShell({ onClose, children }: Props) {
+export function SheetShell({ onClose, children, elevated = false }: Props) {
   return (
     <div
-      className="fixed inset-0 z-40 bg-black/55 flex items-end md:items-center md:justify-center lg:items-stretch lg:justify-end"
+      className={`fixed inset-0 ${elevated ? 'z-[70]' : 'z-40'} bg-black/55 flex items-end md:items-center md:justify-center lg:items-stretch lg:justify-end`}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div

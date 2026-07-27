@@ -38,6 +38,8 @@ interface Props {
   attacksByName: Map<string, Attack>
   isAdmin?: boolean
   onClose: () => void
+  /** Passe au-dessus des popups z-50 (ex : ouvert depuis une table de rencontres déjà en popup) */
+  elevated?: boolean
 
   // Instance possédée (contexts home / pokemon)
   teamFull?: boolean
@@ -155,6 +157,7 @@ export function PokemonDetailSheet({
   attacksByName,
   isAdmin = false,
   onClose,
+  elevated = false,
   teamFull = false,
   isNpc = false,
   maxMoves,
@@ -202,7 +205,7 @@ export function PokemonDetailSheet({
   const atMoveCap = maxMoves != null && knownMoves.length >= maxMoves
 
   return (
-    <SheetShell onClose={onClose}>
+    <SheetShell onClose={onClose} elevated={elevated}>
       <div className="p-4">
         {/* En-tête */}
         <div className="flex items-center gap-3.5 mb-3">

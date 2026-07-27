@@ -1,13 +1,19 @@
 import { useMemo, useState } from 'react'
-import type { Pokemon, Encounter } from '../types'
+import type { Attack, Pokemon, Encounter } from '../types'
 import { useEncounters } from '../hooks/useEncounters'
 import { EncounterRow } from './EncounterRow'
+import { EncounterQuickPickBar } from './EncounterQuickPickBar'
 import { EncounterSearchBar, type EncounterFilter } from './EncounterSearchBar'
+import { PokemonDetailSheet } from './PokemonDetailSheet'
+import { PixelIcon } from './icons/PixelIcon'
+import { NAV_ICON } from '../lib/icons'
 import { PANEL } from '../lib/panelStyles'
-import { BUTTON_STYLE } from '../lib/buttonStyles'
+import { rollQuickPick, getQuickPickTopDe, getQuickPickHighlight } from '../lib/encounterQuickPick'
 
 interface Props {
   pokemonByName: Map<string, Pokemon>
+  attacksByName: Map<string, Attack>
+  isAdmin: boolean
 }
 
 interface LieuGroup {
@@ -15,10 +21,11 @@ interface LieuGroup {
   rows: Encounter[]
 }
 
-export function RencontresTab({ pokemonByName }: Props) {
+export function RencontresTab({ pokemonByName, attacksByName, isAdmin }: Props) {
   const { encounters, loading } = useEncounters()
-  const [openComment, setOpenComment] = useState<Encounter | null>(null)
   const [filter, setFilter] = useState<EncounterFilter | null>(null)
+  const [quickPick, setQuickPick] = useState<number | null>(null)
+  const [selectedPokemon, setSelectedPokemon] = useState<Pokemon | null>(null)
 
   const groups = useMemo<LieuGroup[]>(() => {
     const byLieu = new Map<string, Encounter[]>()
@@ -50,14 +57,26 @@ export function RencontresTab({ pokemonByName }: Props) {
       .filter((g) => g.rows.length > 0)
   }, [groups, filter])
 
+  const allRows = useMemo(() => filteredGroups.flatMap((g) => g.rows), [filteredGroups])
+
+  const topDe = useMemo(
+    () => (quickPick != null ? getQuickPickTopDe(allRows, quickPick) : null),
+    [allRows, quickPick]
+  )
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden relative">
-      <div className="flex-1 overflow-y-auto p-4" onClick={() => setOpenComment(null)}>
+      <div className="flex-1 overflow-y-auto p-4">
         <EncounterSearchBar
           lieux={lieux}
           pokemonNames={pokemonNames}
           pokemonByName={pokemonByName}
           onFilterChange={setFilter}
+        />
+
+        <EncounterQuickPickBar
+          pick={quickPick}
+          onToggle={() => setQuickPick((p) => (p == null ? rollQuickPick() : null))}
         />
 
         {loading ? (
@@ -68,36 +87,38 @@ export function RencontresTab({ pokemonByName }: Props) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {filteredGroups.map((group) => (
               <div key={group.lieu} className={`${PANEL} p-3`}>
-                <h3 className="text-ink font-bold mb-2">{group.lieu}</h3>
-                <div className="flex flex-col gap-1.5">
-                  {group.rows.map((row) => (
-                    <EncounterRow
-                      key={row.id}
-                      row={row}
-                      pokemon={pokemonByName.get(row.pokemon_nom)}
-                      onOpenComment={setOpenComment}
-                    />
-                  ))}
+                <div className="flex items-center gap-1.5 mb-2">
+                  <PixelIcon src={NAV_ICON.rencontres!} size={16} colored className="text-ink" alt="" />
+                  <h3 className="text-ink font-bold truncate">{group.lieu}</h3>
                 </div>
+                <table className="w-full border-collapse">
+                  <tbody>
+                    {group.rows.map((row) => (
+                      <EncounterRow
+                        key={row.id}
+                        row={row}
+                        pokemon={pokemonByName.get(row.pokemon_nom)}
+                        highlight={getQuickPickHighlight(row, quickPick, topDe)}
+                        onSelect={setSelectedPokemon}
+                      />
+                    ))}
+                  </tbody>
+                </table>
               </div>
             ))}
           </div>
         )}
       </div>
 
-      {openComment && (
-        <div className="shrink-0 bg-cream border-t-4 border-ink rounded-t-2xl p-4 max-h-[45%] overflow-y-auto animate-[sheet-pop_0.25s_ease-out]">
-          <div className="flex items-center gap-2 mb-2">
-            <h3 className="text-ink font-bold flex-1 truncate">{openComment.pokemon_nom} — {openComment.lieu}</h3>
-            <button
-              onClick={() => setOpenComment(null)}
-              className={`w-7 h-7 shrink-0 rounded-md text-sm font-bold ${BUTTON_STYLE.gray}`}
-            >
-              ✕
-            </button>
-          </div>
-          <p className="text-ink-muted text-sm whitespace-pre-wrap">{openComment.commentaire}</p>
-        </div>
+      {selectedPokemon && (
+        <PokemonDetailSheet
+          context="pokedex"
+          pokemon={selectedPokemon}
+          attacksByName={attacksByName}
+          isAdmin={isAdmin}
+          isDiscovered={true}
+          onClose={() => setSelectedPokemon(null)}
+        />
       )}
     </div>
   )

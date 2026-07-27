@@ -62,3 +62,5 @@ export const DICE_ICON: Record<number, string> = {
   5: `${BASE}/Dice_5.png`,
   6: `${BASE}/Dice_6.png`,
 }
+
+export const DICE_GENERIC_ICON = `${BASE}/icon_casino_dice.png`

@@ -214,7 +214,7 @@ export default function App() {
           )}
 
           {activeTab === 'carte' && parameters.feature_map_enabled && (
-            <CarteTab parameters={parameters} isAdmin={isAdmin} pokemonByName={pokemonByName} />
+            <CarteTab parameters={parameters} isAdmin={isAdmin} pokemonByName={pokemonByName} attacksByName={attacksByName} />
           )}
 
           {activeTab === 'attaques' && isAdmin && (
@@ -224,7 +224,7 @@ export default function App() {
           )}
 
           {activeTab === 'rencontres' && isAdmin && (
-            <RencontresTab pokemonByName={pokemonByName} />
+            <RencontresTab pokemonByName={pokemonByName} attacksByName={attacksByName} isAdmin={isAdmin} />
           )}
 
           {activeTab === 'campagne' && isAdmin && (
