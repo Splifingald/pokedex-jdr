@@ -16,7 +16,10 @@ function createReferenceWidget(entry: ReferenceEntry): HTMLElement | null {
     const img = document.createElement('img')
     img.src = entry.icon
     img.alt = ''
-    img.className = entry.type === 'pokemon' ? 'ref-icon ref-icon-pokemon' : 'ref-icon'
+    img.className =
+      entry.type === 'pokemon' ? 'ref-icon ref-icon-pokemon' :
+      entry.type === 'player' ? 'ref-icon ref-icon-player' :
+      'ref-icon'
     return img
   }
   if (entry.type === 'location') {

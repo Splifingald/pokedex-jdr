@@ -107,6 +107,10 @@ html, body, #root {
   height: 2em;
   vertical-align: middle;
 }
+.ref-icon-player {
+  border-radius: 50%;
+  object-fit: cover;
+}
 
 /* Journal de campagne : styles de base du contenu Tiptap (Tailwind preflight enlève
    tout le style par défaut des titres/listes/citations) */
