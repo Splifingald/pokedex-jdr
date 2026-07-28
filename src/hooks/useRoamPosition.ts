@@ -74,6 +74,51 @@ function randomFreePos(selfId: number, container: HTMLElement | null): RoamPos {
   return best
 }
 
+// --- Coordination globale (drag & redimensionnement) -----------------------
+// Un seul sprite peut être saisi à la fois, mais pendant ce temps on veut
+// figer TOUTE la déambulation (pas seulement celle du sprite saisi) pour ne
+// pas perturber le drag avec des voisins qui continuent de dériver. Même
+// mécanisme réutilisé lors d'un redimensionnement de fenêtre : on fige tout
+// pendant que les dimensions bougent, puis on replace chaque sprite une fois
+// que ça s'est stabilisé.
+let dragActive = false
+const dragListeners = new Set<(active: boolean) => void>()
+
+export function setGlobalDragActive(active: boolean) {
+  if (dragActive === active) return
+  dragActive = active
+  dragListeners.forEach((cb) => cb(active))
+}
+
+export function subscribeGlobalDrag(cb: (active: boolean) => void): () => void {
+  dragListeners.add(cb)
+  return () => { dragListeners.delete(cb) }
+}
+
+// Publié une fois par sprite après que le redimensionnement s'est stabilisé,
+// pour qu'il retire une nouvelle position adaptée aux nouvelles dimensions.
+const resizeSettledListeners = new Set<() => void>()
+
+function subscribeResizeSettled(cb: () => void): () => void {
+  resizeSettledListeners.add(cb)
+  return () => { resizeSettledListeners.delete(cb) }
+}
+
+let resizeDebounceTimer: number | undefined
+function handleWindowResize() {
+  setGlobalDragActive(true)
+  if (resizeDebounceTimer !== undefined) window.clearTimeout(resizeDebounceTimer)
+  resizeDebounceTimer = window.setTimeout(() => {
+    resizeDebounceTimer = undefined
+    resizeSettledListeners.forEach((cb) => cb())
+    setGlobalDragActive(false)
+  }, 500)
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('resize', handleWindowResize)
+}
+
 /**
  * Fait dériver un sprite vers une nouvelle position aléatoire en boucle.
  * La durée d'un déplacement est 24 / vitesse (vitesse 1–5), le glissement
@@ -98,21 +143,43 @@ export function useRoamPosition(id: number, speedBucket: number, containerRef: R
     let cancelled = false
     let timer: number
 
-    const schedule = () => {
+    const moveNow = () => {
+      const p = randomFreePos(id, containerRef.current)
+      registry.set(id, p)
+      lastPos.set(id, p)
+      setPos(p)
+    }
+
+    const schedule = (delayMs: number) => {
       timer = window.setTimeout(() => {
         if (cancelled) return
-        const p = randomFreePos(id, containerRef.current)
-        registry.set(id, p)
-        lastPos.set(id, p)
-        setPos(p)
-        schedule()
-      }, duration * 1000)
+        if (dragActive) {
+          // Un drag (ou un redimensionnement en cours de stabilisation) est
+          // en cours quelque part : on repousse ce déplacement au lieu de
+          // l'annuler, pour reprendre dès que tout redevient libre.
+          schedule(200)
+          return
+        }
+        moveNow()
+        schedule(duration * 1000)
+      }, delayMs)
     }
-    schedule()
+    schedule(duration * 1000)
+
+    // Une fois la fenêtre stabilisée après un redimensionnement, on retire
+    // immédiatement une position adaptée aux nouvelles dimensions plutôt que
+    // d'attendre le prochain cycle de déambulation naturel.
+    const unsubscribeResize = subscribeResizeSettled(() => {
+      if (cancelled) return
+      window.clearTimeout(timer)
+      moveNow()
+      schedule(duration * 1000)
+    })
 
     return () => {
       cancelled = true
       clearTimeout(timer)
+      unsubscribeResize()
       // On ne retire que du registre actif (utilisé pour éviter les
       // chevauchements entre sprites montés) — `lastPos` reste pour permettre
       // une reprise à la même place lors d'un remontage.

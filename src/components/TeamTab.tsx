@@ -184,6 +184,7 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
           onAddMove={addMove}
           onRemoveMove={removeMove}
           onDelete={handleDeleteOwned}
+          onSetNextGiftAt={setNextGiftAt}
           onClose={() => setSelectedId(null)}
         />
       )}

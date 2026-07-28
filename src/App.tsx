@@ -7,6 +7,7 @@ import { useItems } from './hooks/useItems'
 import { usePlayerItems } from './hooks/usePlayerItems'
 import { useAdminParameters } from './hooks/useAdminParameters'
 import { useGiftLootboxes } from './hooks/useGiftLootboxes'
+import { useCasinoConfig } from './hooks/useCasinoConfig'
 import { useToast } from './context/ToastContext'
 import type { Pokemon } from './types'
 import { POKEDOLLAR_ITEM_NAME } from './types'
@@ -54,6 +55,9 @@ export default function App() {
   const playerItems = usePlayerItems(player?.id ?? null)
   const { parameters } = useAdminParameters()
   const { lootboxes, speciesAssignments } = useGiftLootboxes()
+  const { config: casinoConfig } = useCasinoConfig()
+  const notificationsAvailable = parameters.feature_gifting_enabled ||
+    (parameters.feature_casino_enabled && casinoConfig.ticket_full_notify_enabled)
   const { showToast } = useToast()
   const { enter: enterFullscreen } = useFullscreen()
 
@@ -249,6 +253,7 @@ export default function App() {
         <SettingsPopup
           player={player}
           isAdmin={isAdmin}
+          notificationsAvailable={notificationsAvailable}
           onRequestLogin={() => { setShowSettings(false); setShowLoginModal(true) }}
           onLogout={logout}
           onAdminSuccess={() => { setIsAdmin(true); setShowSettings(false); setActiveTab('admin') }}

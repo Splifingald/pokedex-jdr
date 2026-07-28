@@ -9,6 +9,7 @@ const DEFAULTS: CasinoConfig = {
   ticket_regen_unit: 'hours',
   ticket_buy_cost: 100,
   ticket_daily_buy_cap: 3,
+  ticket_full_notify_enabled: false,
   slots_enabled: true,
   slots_nom: 'Chance de Miaouss',
   slots_icon_url: '',

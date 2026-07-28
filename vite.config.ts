@@ -41,6 +41,9 @@ export default defineConfig({
         // Les sprites Pokémon (public/pokemon/) sont trop lourds pour le précache
         // → mis en cache à la volée au premier affichage (runtimeCaching ci-dessous)
         globIgnores: ['pokemon/**'],
+        // Ajoute la gestion des notifications Web Push au service worker généré,
+        // sans migrer vers injectManifest (voir public/push-sw.js).
+        importScripts: ['/push-sw.js'],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,

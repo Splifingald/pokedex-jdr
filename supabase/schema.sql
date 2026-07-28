@@ -63,6 +63,9 @@
 -- ALTER TABLE casino_config ADD COLUMN IF NOT EXISTS slots_masterball_weight integer NOT NULL DEFAULT 1;
 -- ALTER TABLE casino_config ADD COLUMN IF NOT EXISTS dice_opponent_name text NOT NULL DEFAULT 'Le Croupier';
 -- ALTER TABLE casino_config ADD COLUMN IF NOT EXISTS dice_opponent_image_url text NOT NULL DEFAULT '';
+-- ALTER TABLE casino_config ADD COLUMN IF NOT EXISTS ticket_full_notify_enabled boolean NOT NULL DEFAULT false;
+-- ALTER TABLE casino_player_state ADD COLUMN IF NOT EXISTS ticket_full_notified boolean NOT NULL DEFAULT false;
+-- ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS gift_notified boolean NOT NULL DEFAULT false;
 -- ============================================================
 
 -- Table principale des pokémon
@@ -220,6 +223,7 @@ CREATE TABLE IF NOT EXISTS player_pokemon (
   moves           text[] NOT NULL DEFAULT '{}',
   in_team         boolean NOT NULL DEFAULT false,
   next_gift_at    timestamptz,       -- prochain cadeau du pokémon (cadeaux Pokémon), NULL = aucun cadeau prévu
+  gift_notified   boolean NOT NULL DEFAULT false, -- push déjà envoyé pour ce cadeau, évite les doublons entre passages du cron
   created_at      timestamptz NOT NULL DEFAULT now()
 );
 
@@ -577,6 +581,7 @@ CREATE TABLE IF NOT EXISTS casino_config (
   ticket_regen_unit           text NOT NULL DEFAULT 'hours' CHECK (ticket_regen_unit IN ('hours', 'minutes')),
   ticket_buy_cost             integer NOT NULL DEFAULT 100,
   ticket_daily_buy_cap        integer NOT NULL DEFAULT 3,
+  ticket_full_notify_enabled  boolean NOT NULL DEFAULT false,
   -- Jeu 1 : Chance de Miaouss (machine à sous)
   slots_enabled               boolean NOT NULL DEFAULT true,
   slots_nom                   text NOT NULL DEFAULT 'Chance de Miaouss',
@@ -611,11 +616,12 @@ INSERT INTO casino_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
 -- État casino par joueur : minuteur du prochain ticket gratuit + suivi des
 -- achats du jour (plafond quotidien, réinitialisé à minuit local côté client).
 CREATE TABLE IF NOT EXISTS casino_player_state (
-  player_id      bigint PRIMARY KEY,
-  next_ticket_at timestamptz,
-  purchase_count integer NOT NULL DEFAULT 0,
-  purchase_date  date,
-  created_at     timestamptz NOT NULL DEFAULT now()
+  player_id             bigint PRIMARY KEY,
+  next_ticket_at        timestamptz,
+  purchase_count        integer NOT NULL DEFAULT 0,
+  purchase_date         date,
+  ticket_full_notified  boolean NOT NULL DEFAULT false, -- push "tickets pleins" déjà envoyé, réarmé quand un ticket est dépensé
+  created_at            timestamptz NOT NULL DEFAULT now()
 );
 
 ALTER TABLE casino_config ENABLE ROW LEVEL SECURITY;
@@ -634,3 +640,33 @@ CREATE POLICY "Public insert casino_player_state"
   ON casino_player_state FOR INSERT TO anon WITH CHECK (true);
 CREATE POLICY "Public update casino_player_state"
   ON casino_player_state FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+-- ============================================================
+-- Notifications Push (Web Push : tickets casino pleins, cadeau pokémon prêt)
+-- ============================================================
+
+-- Un abonnement push par (joueur, navigateur/appareil). Un joueur peut avoir
+-- plusieurs abonnements (plusieurs appareils installés).
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id          bigserial PRIMARY KEY,
+  player_id   bigint NOT NULL,
+  endpoint    text NOT NULL UNIQUE,
+  p256dh      text NOT NULL,
+  auth        text NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_player_id ON push_subscriptions(player_id);
+
+ALTER TABLE push_subscriptions ENABLE ROW LEVEL SECURITY;
+
+-- Lecture + écriture publiques, comme le reste de l'app (pas d'authentification
+-- réelle). La fonction planifiée qui envoie les push utilise la clé service_role
+-- côté serveur et n'est donc pas concernée par ces policies anon.
+CREATE POLICY "Public read push_subscriptions"
+  ON push_subscriptions FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert push_subscriptions"
+  ON push_subscriptions FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update push_subscriptions"
+  ON push_subscriptions FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete push_subscriptions"
+  ON push_subscriptions FOR DELETE TO anon USING (true);

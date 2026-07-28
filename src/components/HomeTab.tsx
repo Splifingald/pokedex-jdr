@@ -228,6 +228,7 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           onAddMove={addMove}
           onRemoveMove={removeMove}
           onDelete={handleDelete}
+          onSetNextGiftAt={setNextGiftAt}
           onClose={() => setSelectedId(null)}
         />
       )}

@@ -177,6 +177,7 @@ export interface PlayerPokemon {
   moves: string[]
   in_team: boolean
   next_gift_at: string | null
+  gift_notified: boolean
   created_at: string
 }
 
@@ -282,6 +283,7 @@ export interface CasinoConfig {
   ticket_regen_unit: GiftTimerUnit
   ticket_buy_cost: number
   ticket_daily_buy_cap: number
+  ticket_full_notify_enabled: boolean
   // Chance de Miaouss (machine à sous)
   slots_enabled: boolean
   slots_nom: string
@@ -316,6 +318,17 @@ export interface CasinoPlayerState {
   next_ticket_at: string | null
   purchase_count: number
   purchase_date: string | null
+  ticket_full_notified: boolean
+  created_at: string
+}
+
+// ── Notifications Push ───────────────────────────────────────
+export interface PushSubscriptionRow {
+  id: number
+  player_id: number
+  endpoint: string
+  p256dh: string
+  auth: string
   created_at: string
 }
 

@@ -4,3 +4,8 @@
 
 [functions]
   directory = "netlify/functions"
+
+# Vérifie toutes les heures les tickets casino pleins / cadeaux pokémon prêts
+# et envoie les notifications Web Push correspondantes.
+[functions."send-notifications"]
+  schedule = "@hourly"

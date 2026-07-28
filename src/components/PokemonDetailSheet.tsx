@@ -26,6 +26,7 @@ import { getHpBreakdown, getDamageBreakdown, getMilestones, getMaxXp } from '../
 import { getStatusInfo } from '../lib/status'
 import { StatusSelect } from './StatusSelect'
 import { getSuperEfficace, getLocalisations, getAttaques } from '../lib/pokemonFacts'
+import { toDatetimeLocalInput, fromDatetimeLocalInput } from '../lib/gifting'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 
@@ -51,6 +52,7 @@ interface Props {
   onAddMove?: (id: number, moveName: string) => void
   onRemoveMove?: (id: number, moveName: string) => void
   onDelete?: (id: number) => void
+  onSetNextGiftAt?: (id: number, nextGiftAt: string | null) => void
 
   // Context pokédex
   isDiscovered?: boolean
@@ -167,6 +169,7 @@ export function PokemonDetailSheet({
   onAddMove,
   onRemoveMove,
   onDelete,
+  onSetNextGiftAt,
   isDiscovered = true,
   ownedCount = 0,
   onAddToRoster,
@@ -176,6 +179,7 @@ export function PokemonDetailSheet({
   const [lightboxOpen, setLightboxOpen] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [abilitiesOpen, setAbilitiesOpen] = useState(context === 'home')
+  const nextGiftInputRef = useRef<HTMLInputElement>(null)
 
   const isOwnedContext = context !== 'pokedex' && playerPokemon != null
 
@@ -433,6 +437,36 @@ export function PokemonDetailSheet({
                   🗑
                 </button>
               )}
+            </div>
+          )}
+
+          {isAdmin && isOwnedContext && playerPokemon && playerPokemon.in_team && !isNpc && onSetNextGiftAt && (
+            <div className={`mt-3 p-3 rounded-lg ${PIXEL_BORDER_SM} bg-cream-secondary`}>
+              <p className="text-ink-muted-2 text-xs font-bold mb-2">🎁 Prochain cadeau (admin)</p>
+              <div className="flex gap-2">
+                <input
+                  key={`${playerPokemon.id}-${playerPokemon.next_gift_at}`}
+                  ref={nextGiftInputRef}
+                  type="datetime-local"
+                  defaultValue={toDatetimeLocalInput(playerPokemon.next_gift_at)}
+                  className="flex-1 min-w-0 bg-white border-2 border-ink rounded px-2 py-1.5 text-ink text-sm outline-none"
+                />
+                <button
+                  onClick={() => {
+                    const v = nextGiftInputRef.current?.value ?? ''
+                    onSetNextGiftAt(playerPokemon.id, v ? fromDatetimeLocalInput(v) : null)
+                  }}
+                  className={`px-3 py-1.5 rounded text-sm font-bold ${BUTTON_STYLE.yellow}`}
+                >
+                  Enregistrer
+                </button>
+              </div>
+              <button
+                onClick={() => onSetNextGiftAt(playerPokemon.id, new Date().toISOString())}
+                className={`mt-2 w-full py-1.5 rounded text-xs font-bold ${BUTTON_STYLE.green}`}
+              >
+                ⚡ Disponible maintenant
+              </button>
             </div>
           )}
 

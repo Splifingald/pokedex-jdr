@@ -32,6 +32,18 @@ export function randomNextGiftAt(
   return new Date(from.getTime() + amount * TIMER_UNIT_MS[unit]).toISOString()
 }
 
+// Conversion pour <input type="datetime-local"> (heure locale, sans fuseau).
+export function toDatetimeLocalInput(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+export function fromDatetimeLocalInput(value: string): string {
+  return new Date(value).toISOString()
+}
+
 // Un pokémon a un cadeau prêt si : il est dans l'équipe, son dresseur n'est
 // pas un PNJ (le gifting ne s'applique jamais aux PNJ), et son minuteur est
 // écoulé. Aucune notion de compte à rebours visible n'existe côté joueur —

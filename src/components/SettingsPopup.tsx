@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import type { Player } from '../types'
 import { useFullscreen } from '../hooks/useFullscreen'
+import { usePushNotifications } from '../hooks/usePushNotifications'
 import { ConfirmPopup } from './ConfirmPopup'
+import { AddToHomeScreenModal } from './AddToHomeScreenModal'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PANEL_LG } from '../lib/panelStyles'
 
@@ -10,6 +12,7 @@ const ADMIN_PASSWORD = 'Rioluxray171216'
 interface Props {
   player: Player | null
   isAdmin: boolean
+  notificationsAvailable: boolean
   onRequestLogin: () => void
   onLogout: () => void
   onAdminSuccess: () => void
@@ -17,11 +20,25 @@ interface Props {
   onClose: () => void
 }
 
-export function SettingsPopup({ player, isAdmin, onRequestLogin, onLogout, onAdminSuccess, onAdminLogout, onClose }: Props) {
+export function SettingsPopup({ player, isAdmin, notificationsAvailable, onRequestLogin, onLogout, onAdminSuccess, onAdminLogout, onClose }: Props) {
   const { isFullscreen, toggle } = useFullscreen()
+  const { supported, needsInstall, permission, subscribed, loading, enable, disable } = usePushNotifications(player?.id ?? null)
+  const [showInstallPrompt, setShowInstallPrompt] = useState(false)
   const [adminPassword, setAdminPassword] = useState('')
   const [adminMsg, setAdminMsg] = useState<{ text: string; error: boolean } | null>(null)
   const [showAdminLogoutConfirm, setShowAdminLogoutConfirm] = useState(false)
+
+  const handleToggleNotifications = async () => {
+    if (subscribed) {
+      await disable()
+      return
+    }
+    if (needsInstall) {
+      setShowInstallPrompt(true)
+      return
+    }
+    await enable()
+  }
 
   const handleAdminSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -67,6 +84,24 @@ export function SettingsPopup({ player, isAdmin, onRequestLogin, onLogout, onAdm
             {isFullscreen ? 'Activé' : 'Désactivé'}
           </button>
         </div>
+
+        {/* Notifications */}
+        {player && supported && (notificationsAvailable || subscribed) && (
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm">🔔 Notifications</span>
+            {permission === 'denied' ? (
+              <span className="text-xs text-ink-muted-2">Bloquées (réglages du navigateur)</span>
+            ) : (
+              <button
+                onClick={handleToggleNotifications}
+                disabled={loading}
+                className={`text-xs px-2.5 py-1.5 rounded-md font-bold ${subscribed ? BUTTON_STYLE.green : BUTTON_STYLE.gray}`}
+              >
+                {subscribed ? 'Activées' : 'Désactivées'}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Connexion / déconnexion */}
         {player ? (
@@ -131,6 +166,10 @@ export function SettingsPopup({ player, isAdmin, onRequestLogin, onLogout, onAdm
           onConfirm={() => { onAdminLogout(); setShowAdminLogoutConfirm(false) }}
           onCancel={() => setShowAdminLogoutConfirm(false)}
         />
+      )}
+
+      {showInstallPrompt && (
+        <AddToHomeScreenModal onClose={() => setShowInstallPrompt(false)} />
       )}
     </div>
   )

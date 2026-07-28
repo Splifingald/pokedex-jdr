@@ -120,6 +120,15 @@ export function AdminCasinoPanel() {
                 />
               </div>
             </div>
+            <label className="flex items-center gap-2 text-sm text-ink-muted">
+              <input
+                type="checkbox"
+                checked={config.ticket_full_notify_enabled}
+                onChange={(e) => updateConfig({ ticket_full_notify_enabled: e.target.checked })}
+                className="w-4 h-4"
+              />
+              <span>Notifier les joueurs quand leurs tickets sont pleins</span>
+            </label>
           </div>
         </div>
 

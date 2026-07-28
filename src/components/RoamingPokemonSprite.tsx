@@ -1,6 +1,6 @@
-import { useMemo, useRef, useLayoutEffect, type RefObject } from 'react'
+import { useMemo, useRef, useLayoutEffect, useEffect, type RefObject } from 'react'
 import type { Pokemon, PlayerPokemon } from '../types'
-import { useRoamPosition } from '../hooks/useRoamPosition'
+import { useRoamPosition, setGlobalDragActive, subscribeGlobalDrag } from '../hooks/useRoamPosition'
 import { useLocalHp } from '../hooks/useLocalHp'
 import { getMaxHp } from '../lib/maxHp'
 import { PixelIcon } from './icons/PixelIcon'
@@ -97,6 +97,28 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
     el.style.transform = CENTER
   }, [pos.left, pos.bottom, duration])
 
+  // Dès qu'un drag (ou un redimensionnement en cours de stabilisation)
+  // démarre n'importe où sur la scène, on fige ce sprite à sa position
+  // visuelle RÉELLE (comme la saisie manuelle ci-dessous) — et surtout pas en
+  // sautant à `CENTER` (qui correspond à la position CIBLE `pos`, pas à
+  // l'endroit où il est actuellement affiché en plein milieu d'un
+  // glissement) : ça téléporterait instantanément le sprite jusqu'à sa
+  // prochaine destination au lieu de simplement l'arrêter sur place.
+  useEffect(() => {
+    return subscribeGlobalDrag((active) => {
+      if (!active || draggingRef.current) return
+      const el = buttonRef.current
+      const container = containerRef.current
+      if (!el || !container) return
+      const containerRect = container.getBoundingClientRect()
+      const elRect = el.getBoundingClientRect()
+      const visualLeft = ((elRect.left + elRect.width / 2 - containerRect.left) / containerRect.width) * 100
+      const visualBottom = ((containerRect.bottom - elRect.bottom) / containerRect.height) * 100
+      dragMoveRef.current = true
+      setPos({ left: visualLeft, bottom: visualBottom })
+    })
+  }, [containerRef, setPos])
+
   const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     const container = containerRef.current
     const el = buttonRef.current
@@ -115,6 +137,7 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
     // avec ce qui est réellement affiché.
     draggingRef.current = true
     movedRef.current = false
+    setGlobalDragActive(true)
     dragStartRef.current = {
       x: e.clientX,
       y: e.clientY,
@@ -153,6 +176,7 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
   const handlePointerUp = () => {
     draggingRef.current = false
     dragStartRef.current = null
+    setGlobalDragActive(false)
   }
 
   const handleClick = () => {
@@ -178,8 +202,12 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
         left: `${pos.left}%`,
         bottom: `${pos.bottom}%`,
         // Perspective : plus le Pokémon est bas dans la scène, plus il passe devant
-        // (plage 10–32, sous le bouton scanner (35) et les overlays (40+)).
-        zIndex: Math.round(40 - pos.bottom),
+        // (plage normale 10–32, sous le bouton scanner (35) et les overlays (40+)).
+        // Borné à 1 : la scène ne crée pas son propre contexte d'empilement, donc
+        // un z-index ≤ 0 ferait passer le sprite derrière le fond de son propre
+        // conteneur (invisible) — ça n'arrivait jamais en déambulation naturelle
+        // (bottom ≤ 30) mais un drag manuel peut monter bien plus haut.
+        zIndex: Math.max(1, Math.round(40 - pos.bottom)),
       }}
     >
       {/* Couche saut : boucle continue (toutes les ~2s) tant qu'un cadeau est
@@ -213,6 +241,7 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
             <img
               src={pokemon.image_miniature}
               alt={playerPokemon.pokemon_nom}
+              draggable={false}
               className={`pixelated w-full h-full object-contain [filter:drop-shadow(2px_4px_2px_rgba(0,0,0,0.3))] ${isKo ? 'grayscale opacity-50' : ''}`}
             />
           ) : (
