@@ -8,7 +8,7 @@ export interface ReferenceEntry {
   type: ReferenceType
   id: number
   name: string
-  /** URL de sprite (pokemon) ou d'icône (item) à afficher devant le texte référencé */
+  /** URL de sprite (pokemon), d'icône (item) ou d'avatar (joueur/PNJ) à afficher devant le texte référencé */
   icon?: string
   /** Couleur du type (capacités), remplace la couleur bleue par défaut du surlignage */
   color?: string
@@ -44,7 +44,7 @@ export function useReferenceIndex(
   return useMemo(() => {
     const raw: ReferenceEntry[] = [
       ...pokemon.map((p): ReferenceEntry => ({ type: 'pokemon', id: p.id, name: p.nom, icon: p.image_miniature || undefined })),
-      ...players.map((p): ReferenceEntry => ({ type: 'player', id: p.id, name: p.name })),
+      ...players.map((p): ReferenceEntry => ({ type: 'player', id: p.id, name: p.name, icon: p.image_url || undefined })),
       ...locations.map((l): ReferenceEntry => ({ type: 'location', id: l.id, name: l.titre })),
       ...attacks.map((a): ReferenceEntry => ({ type: 'ability', id: a.id, name: a.nom, color: TYPE_COLORS[a.type] })),
       ...items.map((i): ReferenceEntry => ({ type: 'item', id: i.id, name: i.nom, icon: i.image_url ?? undefined })),

@@ -3,6 +3,7 @@ import type { Pokemon, PlayerPokemon } from '../types'
 import { useRoamPosition, setGlobalDragActive, subscribeGlobalDrag } from '../hooks/useRoamPosition'
 import { useLocalHp } from '../hooks/useLocalHp'
 import { getMaxHp } from '../lib/maxHp'
+import { warmSpriteAlpha, isOpaqueAt } from '../lib/spriteAlpha'
 import { PixelIcon } from './icons/PixelIcon'
 import { GIFT_ICON } from '../lib/icons'
 import { HpGauge } from './HpGauge'
@@ -33,6 +34,10 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), Math.max(min, max))
 }
 
+function pointInRect(clientX: number, clientY: number, rect: DOMRect): boolean {
+  return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
+}
+
 export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping, hasGift = false, containerRef, onClick }: Props) {
   const speed = useMemo(() => speedBucket(playerPokemon.pokemon_nom), [playerPokemon.pokemon_nom])
   const { pos, duration, setPos } = useRoamPosition(playerPokemon.id, speed, containerRef)
@@ -44,7 +49,19 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
   const bobDelay = index * 0.5
 
   const buttonRef = useRef<HTMLButtonElement>(null)
+  const imgRef = useRef<HTMLImageElement>(null)
+  const giftRef = useRef<HTMLSpanElement>(null)
+  const hpGaugeRef = useRef<HTMLDivElement>(null)
   const prevRectRef = useRef<DOMRect | null>(null)
+  // Un pointerdown sur un pixel transparent a soit été transmis au sprite
+  // derrière, soit n'a rien trouvé — dans les deux cas le clic qui suit (sur
+  // CE bouton, une fois `pointer-events` restauré) ne doit rien déclencher.
+  const suppressClickRef = useRef(false)
+
+  const imageSrc = pokemon?.image_miniature
+  useEffect(() => {
+    if (imageSrc) warmSpriteAlpha(imageSrc)
+  }, [imageSrc])
 
   // État de drag — en refs pour ne pas re-render à chaque pointermove et
   // rester lisible immédiatement par les handlers/effets suivants.
@@ -119,10 +136,51 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
     })
   }, [containerRef, setPos])
 
+  // Le PNG a un fond transparent, mais le bouton occupe tout son rectangle :
+  // sans ce test, cliquer/glisser sur une zone transparente « attraperait »
+  // ce sprite même si un autre Pokémon est visible juste derrière. On exclut
+  // d'abord les superpositions toujours cliquables (cadeau, jauge PV) qui
+  // peuvent se trouver au-dessus d'une zone transparente de l'image.
+  const hitsPokemonPixel = (clientX: number, clientY: number): boolean => {
+    if (giftRef.current && pointInRect(clientX, clientY, giftRef.current.getBoundingClientRect())) return true
+    if (hpGaugeRef.current && pointInRect(clientX, clientY, hpGaugeRef.current.getBoundingClientRect())) return true
+    const img = imgRef.current
+    if (!img || !imageSrc) return true
+    return isOpaqueAt(imageSrc, img.getBoundingClientRect(), img.naturalWidth, img.naturalHeight, clientX, clientY)
+  }
+
   const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     const container = containerRef.current
     const el = buttonRef.current
     if (!container || !el) return
+
+    if (!hitsPokemonPixel(e.clientX, e.clientY)) {
+      // Pixel transparent : on s'efface temporairement pour voir ce qu'il y a
+      // dessous, et on lui transmet le pointerdown — s'il capture le
+      // pointeur (cas normal), tous les événements suivants (move/up/click)
+      // lui sont automatiquement redirigés par le navigateur, sans rien de
+      // plus à faire ici. S'il est lui-même transparent à cet endroit, son
+      // propre handler refera la même transmission plus bas, en chaîne.
+      el.style.pointerEvents = 'none'
+      const below = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-roam-id]')
+      el.style.pointerEvents = ''
+      if (below && below !== el) {
+        below.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true,
+          cancelable: true,
+          clientX: e.clientX,
+          clientY: e.clientY,
+          pointerId: e.pointerId,
+          pointerType: e.pointerType,
+          isPrimary: e.isPrimary,
+          button: e.button,
+          buttons: e.buttons,
+        }))
+      }
+      suppressClickRef.current = true
+      return
+    }
+
     const containerRect = container.getBoundingClientRect()
     const elRect = el.getBoundingClientRect()
     // Position visuelle RÉELLE au moment du contact — pas `pos` (l'état),
@@ -180,6 +238,12 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
   }
 
   const handleClick = () => {
+    // Le pointerdown correspondant est tombé sur un pixel transparent (déjà
+    // transmis au sprite derrière, ou sur rien) : ce clic-ci ne doit rien faire.
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false
+      return
+    }
     // Un drag vient de se terminer sur ce même pointerup/click : on absorbe
     // le clic pour ne pas ouvrir la fiche du Pokémon par erreur.
     if (movedRef.current) {
@@ -192,6 +256,7 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
   return (
     <button
       ref={buttonRef}
+      data-roam-id={playerPokemon.id}
       onClick={handleClick}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -229,6 +294,7 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
         >
           {hasGift && (
             <span
+              ref={giftRef}
               className="absolute top-[33%] left-[67%] -translate-x-1/2 -translate-y-1/2 z-10 [filter:drop-shadow(1px_2px_1px_rgba(0,0,0,0.4))]"
               style={{ animation: 'gift-wiggle 0.6s ease-in-out infinite' }}
             >
@@ -239,9 +305,11 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
             // w-full h-full (et pas max-w/max-h) : l'image est agrandie pour remplir
             // la boîte même si son fichier source est plus petit
             <img
+              ref={imgRef}
               src={pokemon.image_miniature}
               alt={playerPokemon.pokemon_nom}
               draggable={false}
+              onLoad={() => warmSpriteAlpha(pokemon.image_miniature)}
               className={`pixelated w-full h-full object-contain [filter:drop-shadow(2px_4px_2px_rgba(0,0,0,0.3))] ${isKo ? 'grayscale opacity-50' : ''}`}
             />
           ) : (
@@ -251,7 +319,7 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
           {/* Jauge PV affichée seulement si le Pokémon n'est pas au max — à
               mi-chemin entre le centre et le bas de l'image */}
           {hp < maxHp && (
-            <div className="absolute top-[75%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 z-10">
+            <div ref={hpGaugeRef} className="absolute top-[75%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 z-10">
               <HpGauge current={hp} max={maxHp} showValue={false} barBorderClassName="border-2 border-black" />
             </div>
           )}

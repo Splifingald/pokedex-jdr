@@ -12,7 +12,7 @@ export interface ReferenceHighlightOptions {
 const referencePluginKey = new PluginKey<DecorationSet>('reference-highlight')
 
 function createReferenceWidget(entry: ReferenceEntry): HTMLElement | null {
-  if ((entry.type === 'pokemon' || entry.type === 'item') && entry.icon) {
+  if ((entry.type === 'pokemon' || entry.type === 'item' || entry.type === 'player') && entry.icon) {
     const img = document.createElement('img')
     img.src = entry.icon
     img.alt = ''
