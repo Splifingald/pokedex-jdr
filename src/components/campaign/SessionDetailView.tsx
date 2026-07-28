@@ -8,6 +8,7 @@ import { ChapterEditor } from './ChapterEditor'
 import { ChapterViewPopup } from './ChapterViewPopup'
 import { SessionViewPopup } from './SessionViewPopup'
 import { ReferenceDispatcher } from './ReferenceDispatcher'
+import { EditableHeaderImage } from './EditableHeaderImage'
 import { EmojiPickerButton } from './EmojiPickerButton'
 import { DoneToggle } from './DoneToggle'
 import { NotesFab } from './NotesFab'
@@ -21,7 +22,7 @@ import { SAVE_ICON } from '../../lib/icons'
 
 interface Props {
   session: CampaignSession
-  onUpdateSession: (id: number, data: { title?: string; icon?: string; session_date?: string | null; image_url?: string | null; done?: boolean; notes?: CampaignSession['notes'] }) => void
+  onUpdateSession: (id: number, data: { title?: string; icon?: string; session_date?: string | null; image_url?: string | null; image_position?: number; done?: boolean; notes?: CampaignSession['notes'] }) => void
   onDeleteSession: (id: number) => void
   onBack: () => void
   referenceIndex: ReferenceIndex
@@ -63,6 +64,7 @@ export function SessionDetailView({
     icon: session.icon,
     session_date: session.session_date ?? '',
     image_url: session.image_url ?? '',
+    image_position: session.image_position ?? 50,
   })
 
   const [showChapterForm, setShowChapterForm] = useState(false)
@@ -106,6 +108,7 @@ export function SessionDetailView({
       icon: sessionForm.icon,
       session_date: sessionForm.session_date || null,
       image_url: sessionForm.image_url.trim() || null,
+      image_position: sessionForm.image_position,
     })
     setEditingSession(false)
   }
@@ -144,13 +147,30 @@ export function SessionDetailView({
         ← Retour aux sessions
       </button>
 
-      {session.image_url && (
-        <button
-          onClick={() => setViewerOpen(true)}
-          className="block w-full h-32 rounded-lg overflow-hidden mb-3 border-2 border-ink"
-        >
-          <img src={session.image_url} alt={session.title} className="w-full h-full object-cover" />
-        </button>
+      {editingSession ? (
+        sessionForm.image_url && (
+          <EditableHeaderImage
+            src={sessionForm.image_url}
+            alt={sessionForm.title}
+            position={sessionForm.image_position}
+            onPositionChange={(p) => setSessionForm((f) => ({ ...f, image_position: p }))}
+            className="w-full h-32 rounded-lg mb-3 border-2 border-ink"
+          />
+        )
+      ) : (
+        session.image_url && (
+          <button
+            onClick={() => setViewerOpen(true)}
+            className="block w-full h-32 rounded-lg overflow-hidden mb-3 border-2 border-ink"
+          >
+            <img
+              src={session.image_url}
+              alt={session.title}
+              className="w-full h-full object-cover"
+              style={{ objectPosition: `50% ${session.image_position ?? 50}%` }}
+            />
+          </button>
+        )
       )}
 
       {editingSession ? (

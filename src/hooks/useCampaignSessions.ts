@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import type { CampaignSession } from '../types'
 
-type SessionInput = { title: string; icon: string; session_date: string | null; image_url: string | null; done?: boolean; notes?: CampaignSession['notes'] }
+type SessionInput = { title: string; icon: string; session_date: string | null; image_url: string | null; image_position?: number; done?: boolean; notes?: CampaignSession['notes'] }
 
 export function useCampaignSessions() {
   const channelId = useRef(Math.random().toString(36).slice(2))

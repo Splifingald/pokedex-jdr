@@ -14,7 +14,12 @@ export function SessionCard({ session, onClick }: Props) {
       {session.done && <DoneBadge />}
       {session.image_url && (
         <div className="h-20 w-full overflow-hidden border-b-2 border-ink">
-          <img src={session.image_url} alt={session.title} className="w-full h-full object-cover" />
+          <img
+            src={session.image_url}
+            alt={session.title}
+            className="w-full h-full object-cover"
+            style={{ objectPosition: `50% ${session.image_position ?? 50}%` }}
+          />
         </div>
       )}
       <div className="p-3 flex items-center gap-2">

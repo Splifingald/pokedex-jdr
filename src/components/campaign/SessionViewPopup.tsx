@@ -53,6 +53,7 @@ function SessionViewChapterBlock({ chapter, referenceIndex, onReferenceClick }: 
           src={chapter.image_url}
           alt={chapter.title}
           className="w-full h-28 object-cover rounded-lg mb-3 border-2 border-ink"
+          style={{ objectPosition: `50% ${chapter.image_position ?? 50}%` }}
         />
       )}
       <EditorContent editor={editor} />

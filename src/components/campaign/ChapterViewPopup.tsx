@@ -95,6 +95,7 @@ export function ChapterViewPopup({
               src={chapter.image_url}
               alt={chapter.title}
               className="w-full h-32 object-cover rounded-lg mb-4 border-2 border-ink"
+              style={{ objectPosition: `50% ${chapter.image_position ?? 50}%` }}
             />
           )}
           <EditorContent editor={editor} />

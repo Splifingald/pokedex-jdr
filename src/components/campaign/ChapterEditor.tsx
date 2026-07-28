@@ -11,6 +11,7 @@ import { ReferenceHighlight, forceReferenceRecompute } from '../../lib/reference
 import { EditorToolbar } from './EditorToolbar'
 import { EmojiPickerButton } from './EmojiPickerButton'
 import { ReferenceDispatcher } from './ReferenceDispatcher'
+import { EditableHeaderImage } from './EditableHeaderImage'
 import { ImageLightbox } from '../ImageLightbox'
 import { ConfirmPopup } from '../ConfirmPopup'
 import { DoneToggle } from './DoneToggle'
@@ -28,7 +29,7 @@ interface Props {
   playersByName: Map<string, Player>
   locationsByName: Map<string, CarteLocation>
   encountersByLieu: Map<string, Encounter[]>
-  onUpdate: (id: number, data: { title?: string; icon?: string; image_url?: string | null; content?: CampaignChapter['content']; done?: boolean }) => void
+  onUpdate: (id: number, data: { title?: string; icon?: string; image_url?: string | null; image_position?: number; content?: CampaignChapter['content']; done?: boolean }) => void
   onDelete: (id: number) => void
   onBack: () => void
 }
@@ -49,6 +50,7 @@ export function ChapterEditor({
   const [title, setTitle] = useState(chapter.title)
   const [icon, setIcon] = useState(chapter.icon)
   const [imageUrl, setImageUrl] = useState(chapter.image_url ?? '')
+  const [imagePosition, setImagePosition] = useState(chapter.image_position ?? 50)
   const [dirty, setDirty] = useState(false)
   const [viewerOpen, setViewerOpen] = useState(false)
   const [confirmBack, setConfirmBack] = useState(false)
@@ -87,7 +89,7 @@ export function ChapterEditor({
   }, [dirty])
 
   const handleSave = () => {
-    onUpdate(chapter.id, { title, icon, image_url: imageUrl.trim() || null, content: editor?.getJSON() })
+    onUpdate(chapter.id, { title, icon, image_url: imageUrl.trim() || null, image_position: imagePosition, content: editor?.getJSON() })
     setDirty(false)
   }
 
@@ -139,12 +141,23 @@ export function ChapterEditor({
         </div>
 
         {imageUrl && (
-          <button
-            onClick={() => setViewerOpen(true)}
-            className="block w-full h-24 rounded-lg overflow-hidden mb-3 border-2 border-ink"
-          >
-            <img src={imageUrl} alt={title} className="w-full h-full object-cover" />
-          </button>
+          <div className="relative w-full h-24 rounded-lg mb-3 border-2 border-ink overflow-hidden">
+            <EditableHeaderImage
+              src={imageUrl}
+              alt={title}
+              position={imagePosition}
+              onPositionChange={(p) => { setImagePosition(p); setDirty(true) }}
+              className="w-full h-full"
+            />
+            <button
+              type="button"
+              onClick={() => setViewerOpen(true)}
+              title="Agrandir"
+              className="absolute top-1 left-1 w-7 h-7 rounded-md flex items-center justify-center text-sm bg-black/50 text-white"
+            >
+              🔍
+            </button>
+          </div>
         )}
 
         <div className="flex items-center gap-2">

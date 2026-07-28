@@ -20,7 +20,12 @@ export function ChapterCard({ chapter, onClick, onView }: Props) {
       {chapter.done && chapter.image_url && <DoneBadge />}
       {chapter.image_url && (
         <div className="h-20 w-full overflow-hidden border-b-2 border-ink">
-          <img src={chapter.image_url} alt={chapter.title} className="w-full h-full object-cover" />
+          <img
+            src={chapter.image_url}
+            alt={chapter.title}
+            className="w-full h-full object-cover"
+            style={{ objectPosition: `50% ${chapter.image_position ?? 50}%` }}
+          />
         </div>
       )}
       <div className="p-3 flex items-center gap-2">
