@@ -32,7 +32,7 @@ exports.handler = async () => {
 
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
 
-  // notifications à envoyer : { playerId, title, body, icon, image }
+  // notifications à envoyer : { playerId, title, body, icon }
   const notifications = []
 
   // ── Casino : tickets pleins ──────────────────────────────────────────────
@@ -55,10 +55,9 @@ exports.handler = async () => {
       if (isFull && !state.ticket_full_notified) {
         notifications.push({
           playerId: state.player_id,
-          title: 'Pokédex',
+          title: 'Pokémon JDR : Casino',
           body: 'Tes tickets de casinos sont pleins, viens vite gagner un max de Pokédollars!',
           icon: absoluteUrl(siteUrl, POKEDOLLAR_ICON_PATH),
-          image: absoluteUrl(siteUrl, POKEDOLLAR_ICON_PATH),
         })
         await supabase.from('casino_player_state').update({ ticket_full_notified: true }).eq('player_id', state.player_id)
       } else if (!isFull && state.ticket_full_notified) {
@@ -92,10 +91,9 @@ exports.handler = async () => {
       const icon = absoluteUrl(siteUrl, imageByNom.get(pp.pokemon_nom))
       notifications.push({
         playerId: pp.player_id,
-        title: 'Pokédex',
+        title: 'Pokémon JDR : Cadeau',
         body: `${pp.pokemon_nom} à une surprise pour toi, viens la découvrir`,
         icon,
-        image: icon,
       })
       await supabase.from('player_pokemon').update({ gift_notified: true }).eq('id', pp.id)
     }
@@ -125,7 +123,6 @@ exports.handler = async () => {
             title: notif.title,
             body: notif.body,
             icon: notif.icon,
-            image: notif.image,
             url: siteUrl || '/',
           })
         )

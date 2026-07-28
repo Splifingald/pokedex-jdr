@@ -10,13 +10,15 @@ self.addEventListener('push', (event) => {
   } catch {
     payload = {}
   }
-  const { title, body, icon, image, url } = payload
+  const { title, body, icon, url } = payload
 
+  // Pas de champ "image" : sur Android, sa présence bascule Chrome en style
+  // BigPicture et remplace l'icône de gauche par l'icône générique du navigateur.
+  // Avec seulement "icon", l'image custom s'affiche bien en petite icône à gauche.
   event.waitUntil(
-    self.registration.showNotification(title || 'Pokédex', {
+    self.registration.showNotification(title || 'Pokémon JDR', {
       body,
       icon: icon || '/pwa-icons/pwa-192x192.png',
-      image,
       data: { url: url || '/' },
     })
   )
