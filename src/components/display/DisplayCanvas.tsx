@@ -15,9 +15,15 @@ interface Props {
 // Rendu en couches du mode Affichage : fond → PNJ → Pokémon → objet.
 // L'ordre gauche→droite des tableaux npcs/pokemons est aussi l'ordre du DOM,
 // donc l'élément le plus à droite se dessine naturellement au-dessus des autres.
+// container-type:size rend les unités cq*() relatives à CE conteneur plutôt
+// qu'à la fenêtre du navigateur — indispensable pour que la taille des
+// PNJ/Pokémon/objet soit identique dans l'aperçu admin (petite boîte) et sur
+// l'écran d'affichage réel (plein écran) : des unités vw/vh se seraient
+// calculées sur la fenêtre entière, donnant un rendu bien plus petit en
+// aperçu qu'en plein écran pour la même classe CSS.
 export function DisplayCanvas({ backgroundUrl, npcs, pokemons, item, className = '' }: Props) {
   return (
-    <div className={`relative overflow-hidden bg-black ${className}`}>
+    <div className={`relative overflow-hidden bg-black [container-type:size] ${className}`}>
       {backgroundUrl && (
         <img
           src={backgroundUrl}
@@ -44,7 +50,7 @@ export function DisplayCanvas({ backgroundUrl, npcs, pokemons, item, className =
           {pokemons.map((p) => (
             <div
               key={p.id}
-              className="relative min-w-0 shrink w-[304px] h-[304px] max-w-[80vw] max-h-[45vh] flex items-center justify-center"
+              className="relative min-w-0 shrink h-[35cqh] w-[35cqh] max-w-[22cqw] flex items-center justify-center"
             >
               <img
                 src={p.image_url}
@@ -61,7 +67,7 @@ export function DisplayCanvas({ backgroundUrl, npcs, pokemons, item, className =
           <img
             src={item.image_url}
             alt={item.nom}
-            className="max-w-[40vw] max-h-[40vh] object-contain [filter:drop-shadow(2px_4px_2px_rgba(0,0,0,0.4))]"
+            className="max-w-[40cqw] max-h-[40cqh] object-contain [filter:drop-shadow(2px_4px_2px_rgba(0,0,0,0.4))]"
           />
         </div>
       )}
