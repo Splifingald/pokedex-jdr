@@ -66,6 +66,8 @@
 -- ALTER TABLE casino_config ADD COLUMN IF NOT EXISTS ticket_full_notify_enabled boolean NOT NULL DEFAULT false;
 -- ALTER TABLE casino_player_state ADD COLUMN IF NOT EXISTS ticket_full_notified boolean NOT NULL DEFAULT false;
 -- ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS gift_notified boolean NOT NULL DEFAULT false;
+-- ALTER TABLE campaign_sessions ADD COLUMN IF NOT EXISTS image_position integer NOT NULL DEFAULT 50;
+-- ALTER TABLE campaign_chapters ADD COLUMN IF NOT EXISTS image_position integer NOT NULL DEFAULT 50;
 -- ============================================================
 
 -- Table principale des pokémon
@@ -493,6 +495,7 @@ CREATE TABLE IF NOT EXISTS campaign_sessions (
   icon         text NOT NULL DEFAULT '📓',
   session_date date,
   image_url    text,
+  image_position integer NOT NULL DEFAULT 50,
   done         boolean NOT NULL DEFAULT false,
   notes        jsonb NOT NULL DEFAULT '{"type":"doc","content":[{"type":"paragraph"}]}'::jsonb,
   created_at   timestamptz NOT NULL DEFAULT now()
@@ -504,6 +507,7 @@ CREATE TABLE IF NOT EXISTS campaign_chapters (
   title        text NOT NULL,
   icon         text NOT NULL DEFAULT '📄',
   image_url    text,
+  image_position integer NOT NULL DEFAULT 50,
   content      jsonb NOT NULL DEFAULT '{"type":"doc","content":[{"type":"paragraph"}]}'::jsonb,
   notes        jsonb NOT NULL DEFAULT '{"type":"doc","content":[{"type":"paragraph"}]}'::jsonb,
   done         boolean NOT NULL DEFAULT false,
@@ -670,3 +674,47 @@ CREATE POLICY "Public update push_subscriptions"
   ON push_subscriptions FOR UPDATE TO anon USING (true) WITH CHECK (true);
 CREATE POLICY "Public delete push_subscriptions"
   ON push_subscriptions FOR DELETE TO anon USING (true);
+
+-- ============================================================
+-- Mode Affichage (écran joueurs : fond, PNJ, Pokémon, objet)
+-- ============================================================
+
+-- Images d'affichage importées par CSV via Netlify Function (Nom/Type/Image).
+-- Les fonds d'écran réutilisent la table backgrounds existante ; cette table
+-- couvre les PNJ (type = 'NPC') et les futurs types à venir.
+CREATE TABLE IF NOT EXISTS display_assets (
+  id          bigserial PRIMARY KEY,
+  nom         text NOT NULL UNIQUE,
+  type        text NOT NULL,
+  image_url   text NOT NULL DEFAULT ''
+);
+
+ALTER TABLE display_assets ENABLE ROW LEVEL SECURITY;
+
+-- display_assets : lecture publique, écriture bloquée pour anon (via Netlify Function seulement)
+CREATE POLICY "Public read display_assets"
+  ON display_assets FOR SELECT
+  TO anon
+  USING (true);
+
+-- État courant de l'écran d'affichage (ligne unique, éditée en direct depuis
+-- Admin → Affichage, poussée en temps réel via Supabase Realtime).
+CREATE TABLE IF NOT EXISTS display_state (
+  id            bigserial PRIMARY KEY,
+  background_id bigint REFERENCES backgrounds(id) ON DELETE SET NULL,
+  npc_ids       jsonb NOT NULL DEFAULT '[]'::jsonb,
+  pokemon_ids   jsonb NOT NULL DEFAULT '[]'::jsonb,
+  item_id       bigint REFERENCES items(id) ON DELETE SET NULL,
+  updated_at    timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT single_row CHECK (id = 1)
+);
+INSERT INTO display_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+ALTER TABLE display_state ENABLE ROW LEVEL SECURITY;
+
+-- Lecture + écriture publiques (édité en direct depuis l'onglet Admin, comme
+-- admin_parameters/casino_config — app sans vraie sécurité)
+CREATE POLICY "Public read display_state"
+  ON display_state FOR SELECT TO anon USING (true);
+CREATE POLICY "Public update display_state"
+  ON display_state FOR UPDATE TO anon USING (true) WITH CHECK (true);

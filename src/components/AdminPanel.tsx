@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import Papa from 'papaparse'
-import type { CsvRow, AttackCsvRow, CarteCsvRow, ItemCsvRow, EncounterCsvRow, BackgroundCsvRow } from '../types'
-import { CSV_REQUIRED_HEADERS, ATTACK_CSV_REQUIRED_HEADERS, CARTE_CSV_REQUIRED_HEADERS, ITEM_CSV_REQUIRED_HEADERS, ENCOUNTER_CSV_REQUIRED_HEADERS, BACKGROUND_CSV_REQUIRED_HEADERS } from '../types'
+import type { CsvRow, AttackCsvRow, CarteCsvRow, ItemCsvRow, EncounterCsvRow, BackgroundCsvRow, DisplayAssetCsvRow } from '../types'
+import { CSV_REQUIRED_HEADERS, ATTACK_CSV_REQUIRED_HEADERS, CARTE_CSV_REQUIRED_HEADERS, ITEM_CSV_REQUIRED_HEADERS, ENCOUNTER_CSV_REQUIRED_HEADERS, BACKGROUND_CSV_REQUIRED_HEADERS, DISPLAY_ASSET_CSV_REQUIRED_HEADERS } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 
 // L'import CSV passe par une Netlify Function côté serveur
@@ -12,6 +12,7 @@ const IMPORT_CARTE_URL = '/.netlify/functions/import-carte'
 const IMPORT_ITEMS_URL = '/.netlify/functions/import-items'
 const IMPORT_ENCOUNTERS_URL = '/.netlify/functions/import-encounters'
 const IMPORT_BACKGROUNDS_URL = '/.netlify/functions/import-backgrounds'
+const IMPORT_DISPLAY_ASSETS_URL = '/.netlify/functions/import-display-assets'
 const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET as string
 
 interface Props {
@@ -118,6 +119,14 @@ function mapBackgroundCsvRow(row: BackgroundCsvRow) {
   }
 }
 
+function mapDisplayAssetCsvRow(row: DisplayAssetCsvRow) {
+  return {
+    nom:       row['Nom']?.trim() ?? '',
+    type:      row['Type']?.trim() ?? '',
+    image_url: row['Image']?.trim() ?? '',
+  }
+}
+
 export function AdminPanel({ onImportSuccess }: Props) {
   const [status, setStatus] = useState<'idle' | 'parsing' | 'importing' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState('')
@@ -148,6 +157,55 @@ export function AdminPanel({ onImportSuccess }: Props) {
         const isEncountersCsv = fields.includes('Lieu')
         // Le CSV de fonds d'écran ne contient que ces 2 colonnes (Nom + Image)
         const isBackgroundsCsv = fields.length === 2 && fields.includes('Nom') && fields.includes('Image')
+        // Le CSV du mode Affichage contient ces 3 colonnes (Nom + Type + Image)
+        const isDisplayAssetsCsv = fields.length === 3 && fields.includes('Nom') && fields.includes('Type') && fields.includes('Image')
+
+        if (isDisplayAssetsCsv) {
+          const missing = DISPLAY_ASSET_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
+          if (missing.length > 0) {
+            setStatus('error')
+            setMessage(`Colonnes manquantes : ${missing.join(', ')}`)
+            return
+          }
+
+          const rows = (results.data as unknown as DisplayAssetCsvRow[])
+            .map(mapDisplayAssetCsvRow)
+            .filter((r) => r.nom)
+
+          if (rows.length === 0) {
+            setStatus('error')
+            setMessage('Aucune ligne valide trouvée dans le CSV.')
+            return
+          }
+
+          setStatus('importing')
+          setMessage(`Import de ${rows.length} images d'affichage…`)
+
+          try {
+            const res = await fetch(IMPORT_DISPLAY_ASSETS_URL, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${ADMIN_SECRET}`,
+              },
+              body: JSON.stringify({ rows }),
+            })
+
+            const data = await res.json()
+
+            if (!res.ok) {
+              throw new Error(data.error ?? `Erreur serveur ${res.status}`)
+            }
+
+            setStatus('success')
+            setMessage(`✅ ${data.imported} images d'affichage importées avec succès !`)
+            onImportSuccess()
+          } catch (err) {
+            setStatus('error')
+            setMessage(err instanceof Error ? err.message : 'Erreur inconnue')
+          }
+          return
+        }
 
         if (isBackgroundsCsv) {
           const missing = BACKGROUND_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))

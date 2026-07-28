@@ -54,6 +54,8 @@ export const CASINO_ICON = {
 
 export const CASINO_MASCOT_ICON = `${BASE}/icon_casino.png`
 
+export const DISPLAY_ICON = `${BASE}/icon_navbar_display.png`
+
 export const DICE_ICON: Record<number, string> = {
   1: `${BASE}/Dice_1.png`,
   2: `${BASE}/Dice_2.png`,

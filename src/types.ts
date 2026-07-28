@@ -346,6 +346,31 @@ export interface BackgroundCsvRow {
 
 export const BACKGROUND_CSV_REQUIRED_HEADERS: (keyof BackgroundCsvRow)[] = ['Nom', 'Image']
 
+// ── Mode Affichage ───────────────────────────────────────────
+export interface DisplayAsset {
+  id: number
+  nom: string
+  type: string
+  image_url: string
+}
+
+export interface DisplayAssetCsvRow {
+  'Nom': string
+  'Type': string
+  'Image': string
+}
+
+export const DISPLAY_ASSET_CSV_REQUIRED_HEADERS: (keyof DisplayAssetCsvRow)[] = ['Nom', 'Type', 'Image']
+
+export interface DisplayState {
+  id: number
+  background_id: number | null
+  npc_ids: number[]
+  pokemon_ids: number[]
+  item_id: number | null
+  updated_at: string
+}
+
 // ── Rencontres ────────────────────────────────────────────────
 export interface Encounter {
   id: number
@@ -371,6 +396,7 @@ export interface CampaignSession {
   icon: string
   session_date: string | null
   image_url: string | null
+  image_position: number
   done: boolean
   notes: import('@tiptap/core').JSONContent
   created_at: string
@@ -382,6 +408,7 @@ export interface CampaignChapter {
   title: string
   icon: string
   image_url: string | null
+  image_position: number
   content: import('@tiptap/core').JSONContent
   notes: import('@tiptap/core').JSONContent
   done: boolean

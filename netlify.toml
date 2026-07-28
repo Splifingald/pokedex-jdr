@@ -5,6 +5,12 @@
 [functions]
   directory = "netlify/functions"
 
+# L'app n'a pas de routeur ; /display est géré côté client dans main.tsx.
+[[redirects]]
+  from = "/display"
+  to = "/index.html"
+  status = 200
+
 # Vérifie toutes les heures les tickets casino pleins / cadeaux pokémon prêts
 # et envoie les notifications Web Push correspondantes.
 [functions."send-notifications"]

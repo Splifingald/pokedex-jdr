@@ -2,15 +2,22 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { DisplayPage } from './pages/DisplayPage.tsx'
 import { PlayerProvider } from './context/PlayerContext.tsx'
 import { ToastProvider } from './context/ToastContext.tsx'
 
+const isDisplayRoute = window.location.pathname.replace(/\/$/, '') === '/display'
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <PlayerProvider>
-      <ToastProvider>
-        <App />
-      </ToastProvider>
-    </PlayerProvider>
+    {isDisplayRoute ? (
+      <DisplayPage />
+    ) : (
+      <PlayerProvider>
+        <ToastProvider>
+          <App />
+        </ToastProvider>
+      </PlayerProvider>
+    )}
   </StrictMode>,
 )
