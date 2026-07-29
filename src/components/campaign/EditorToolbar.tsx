@@ -7,7 +7,7 @@ interface Props {
   editor: Editor | null
 }
 
-const TEXT_COLORS = ['#dc0a2d', '#e8933d', '#a3841a', '#4caf6b', '#4a7fd6', '#a040a0']
+const TEXT_COLORS = ['#201c14', '#dc0a2d', '#e8933d', '#a3841a', '#4caf6b', '#4a7fd6', '#a040a0']
 
 function ToolbarButton({ active, onClick, children, title }: { active?: boolean; onClick: () => void; children: ReactNode; title?: string }) {
   return (
