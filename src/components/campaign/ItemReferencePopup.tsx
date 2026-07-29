@@ -1,13 +1,15 @@
 import type { Item } from '../../types'
 import { ReferencePopupShell } from './ReferencePopupShell'
 import { rarityBadgeStyle } from '../../lib/rarityColors'
+import { PokedollarIcon } from '../PokedollarIcon'
 
 interface Props {
   item: Item
+  pokedollarImageUrl?: string | null
   onClose: () => void
 }
 
-export function ItemReferencePopup({ item, onClose }: Props) {
+export function ItemReferencePopup({ item, pokedollarImageUrl, onClose }: Props) {
   return (
     <ReferencePopupShell icon="🎒" title={item.nom} onClose={onClose}>
       <div className="flex flex-col items-center text-center">
@@ -24,7 +26,9 @@ export function ItemReferencePopup({ item, onClose }: Props) {
               {item.rarete}
             </span>
           )}
-          <span className="text-[#a3841a] text-sm font-bold">💰 {item.cout}</span>
+          <span className="text-[#a3841a] text-sm font-bold flex items-center gap-1">
+            <PokedollarIcon imageUrl={pokedollarImageUrl} size={16} /> {item.cout}
+          </span>
         </div>
         {item.description && (
           <p className="text-ink-muted text-sm">{item.description}</p>

@@ -3,6 +3,7 @@ import type { Item } from '../types'
 import { POKEDOLLAR_ITEM_NAME } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { GIFT_ICON } from '../lib/icons'
+import { PokedollarIcon } from './PokedollarIcon'
 
 export interface GiftReward {
   itemNom: string
@@ -15,14 +16,6 @@ interface Props {
   itemsByName: Map<string, Item>
   pokedollarImageUrl?: string | null
   onConfirm: () => void
-}
-
-function PokedollarIcon({ imageUrl }: { imageUrl?: string | null }) {
-  return imageUrl ? (
-    <img src={imageUrl} alt="" className="inline w-[21px] h-[21px] object-contain align-[-5px]" />
-  ) : (
-    <span className="text-lg">💰</span>
-  )
 }
 
 export function GiftPopup({ pokemonDisplayName, reward, itemsByName, pokedollarImageUrl, onConfirm }: Props) {
@@ -57,7 +50,7 @@ export function GiftPopup({ pokemonDisplayName, reward, itemsByName, pokedollarI
               <>
                 <div className="w-20 h-20 flex items-center justify-center mb-3 animate-[celebrate-pop_0.4s_ease-out]">
                   {isPokedollar ? (
-                    <span className="text-5xl">💰</span>
+                    <PokedollarIcon imageUrl={pokedollarImageUrl} className="w-full h-full" fallbackClassName="text-5xl" />
                   ) : item?.image_url ? (
                     <img src={item.image_url} alt={reward.itemNom} className="w-full h-full object-contain" />
                   ) : (
@@ -66,7 +59,7 @@ export function GiftPopup({ pokemonDisplayName, reward, itemsByName, pokedollarI
                 </div>
                 <h3 className="text-ink text-lg mb-1">
                   {isPokedollar ? (
-                    <>+{reward.quantity} <PokedollarIcon imageUrl={pokedollarImageUrl} /></>
+                    <>+{reward.quantity} <PokedollarIcon imageUrl={pokedollarImageUrl} size={21} className="align-[-5px]" /></>
                   ) : (
                     <>{reward.itemNom} ×{reward.quantity}</>
                   )}

@@ -11,6 +11,7 @@ import { useGiftLootboxes } from '../../hooks/useGiftLootboxes'
 import { maybeResetGiftTimerOnEntry } from '../../lib/gifting'
 import { PixelIcon } from '../icons/PixelIcon'
 import { NAV_ICON } from '../../lib/icons'
+import { PokedollarIcon } from '../PokedollarIcon'
 
 interface Props {
   player: Player
@@ -67,11 +68,7 @@ export function PlayerReferencePopup({ player, pokemonByName, attacksByName, ite
             )}
           </div>
           <div className="flex items-center gap-1 text-[#ffd75e] bg-black/70 border-2 border-ink rounded-full px-2.5 py-0.5 text-sm font-bold w-fit mt-1">
-            {itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url ? (
-              <img src={itemsByName.get(POKEDOLLAR_ITEM_NAME)!.image_url!} alt="" className="w-4 h-4 object-contain" />
-            ) : (
-              <span>💰</span>
-            )}
+            <PokedollarIcon imageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url} className="w-4 h-4" fallbackClassName="" />
             <span>{pokedollars}</span>
           </div>
         </div>

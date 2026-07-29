@@ -11,6 +11,7 @@ import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { CASINO_ICON, CASINO_MASCOT_ICON } from '../lib/icons'
 import { PixelIcon } from './icons/PixelIcon'
+import { PokedollarIcon } from './PokedollarIcon'
 
 type View = 'list' | 'slots' | 'dice'
 
@@ -157,7 +158,7 @@ export function CasinoPopup({ player, playerItems, pokedollarImageUrl, onClose }
                   title={`${purchasesLeft} achat(s) restant(s) aujourd'hui`}
                   className={`px-3 py-2 rounded text-xs font-bold shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${BUTTON_STYLE.green}`}
                 >
-                  Acheter 💰{config.ticket_buy_cost}
+                  Acheter <PokedollarIcon imageUrl={pokedollarImageUrl} size={16} className="align-[-3px]" />{config.ticket_buy_cost}
                 </button>
               </div>
 

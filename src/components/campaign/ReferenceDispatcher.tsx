@@ -1,4 +1,5 @@
 import type { Player, CarteLocation, Attack, Item, Pokemon, Encounter } from '../../types'
+import { POKEDOLLAR_ITEM_NAME } from '../../types'
 import type { ReferenceEntry } from '../../hooks/useReferenceIndex'
 import { PlayerReferencePopup } from './PlayerReferencePopup'
 import { LocationReferencePopup } from './LocationReferencePopup'
@@ -76,7 +77,13 @@ export function ReferenceDispatcher({
   if (activeReference.type === 'item') {
     const item = itemsByName.get(activeReference.name)
     if (!item) return null
-    return <ItemReferencePopup item={item} onClose={onClose} />
+    return (
+      <ItemReferencePopup
+        item={item}
+        pokedollarImageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
+        onClose={onClose}
+      />
+    )
   }
   return null
 }

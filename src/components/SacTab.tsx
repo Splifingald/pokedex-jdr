@@ -7,6 +7,7 @@ import { ItemPopup } from './ItemPopup'
 import { NumberInput } from './NumberInput'
 import { Chip } from './Chip'
 import { flyCoin } from '../lib/flyCoin'
+import { PokedollarIcon } from './PokedollarIcon'
 import { useToast } from '../context/ToastContext'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PANEL } from '../lib/panelStyles'
@@ -25,11 +26,7 @@ function PokedollarRow({ itemsByName, playerItems }: Pick<Props, 'itemsByName' |
   return (
     <div className={`${PANEL} flex items-center gap-3 p-3 mb-3.5`}>
       <div className="w-10 h-10 shrink-0 flex items-center justify-center">
-        {pokedollarItem?.image_url ? (
-          <img src={pokedollarItem.image_url} alt="" className="w-full h-full object-contain" />
-        ) : (
-          <span className="text-2xl">💰</span>
-        )}
+        <PokedollarIcon imageUrl={pokedollarItem?.image_url} className="w-full h-full" fallbackClassName="text-2xl" />
       </div>
       <span className="text-ink font-bold flex-1 min-w-0 truncate">Pokédollars</span>
       <div className="flex items-center gap-2">

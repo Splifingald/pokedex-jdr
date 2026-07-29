@@ -3,6 +3,7 @@ import { sellValue } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { rarityBadgeStyle } from '../lib/rarityColors'
 import { NumberInput } from './NumberInput'
+import { PokedollarIcon } from './PokedollarIcon'
 
 interface Props {
   row: PlayerItem
@@ -11,14 +12,6 @@ interface Props {
   onSetQuantity: (quantity: number) => void
   onSell: (rect: DOMRect) => void
   onClose: () => void
-}
-
-function PokedollarIcon({ imageUrl }: { imageUrl?: string | null }) {
-  return imageUrl ? (
-    <img src={imageUrl} alt="" className="inline w-[21px] h-[21px] object-contain align-[-5px]" />
-  ) : (
-    <span className="text-lg">💰</span>
-  )
 }
 
 export function ItemPopup({ row, item, pokedollarImageUrl, onSetQuantity, onSell, onClose }: Props) {
@@ -35,7 +28,7 @@ export function ItemPopup({ row, item, pokedollarImageUrl, onSetQuantity, onSell
         )}
         {item && (
           <div className="absolute top-3 right-3 text-[#a3841a] text-sm font-bold flex items-center gap-1">
-            <PokedollarIcon imageUrl={pokedollarImageUrl} /> {item.cout}
+            <PokedollarIcon imageUrl={pokedollarImageUrl} size={21} className="align-[-5px]" /> {item.cout}
           </div>
         )}
 
@@ -85,7 +78,7 @@ export function ItemPopup({ row, item, pokedollarImageUrl, onSetQuantity, onSell
             >
               <span className="text-sm">VENDRE</span>
               <span className="text-sm font-normal flex items-center gap-0.5">
-                <PokedollarIcon imageUrl={pokedollarImageUrl} /> {sellValue(item.cout)}
+                <PokedollarIcon imageUrl={pokedollarImageUrl} size={21} className="align-[-5px]" /> {sellValue(item.cout)}
               </span>
             </button>
           </div>

@@ -7,6 +7,7 @@ import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { DICE_ICON } from '../lib/icons'
 import { useCountUp } from '../hooks/useCountUp'
 import { flyCoin } from '../lib/flyCoin'
+import { PokedollarIcon } from './PokedollarIcon'
 
 interface Props {
   config: CasinoConfig
@@ -45,14 +46,6 @@ function Avatar({ imageUrl, color, fallback, size = 28 }: { imageUrl?: string | 
         <span style={{ fontSize: size * 0.55 }}>{fallback}</span>
       )}
     </div>
-  )
-}
-
-function PokedollarIcon({ imageUrl }: { imageUrl?: string | null }) {
-  return imageUrl ? (
-    <img src={imageUrl} alt="" className="inline w-[18px] h-[18px] object-contain align-[-4px]" />
-  ) : (
-    <span className="text-lg">💰</span>
   )
 }
 
@@ -233,9 +226,9 @@ export function CasinoDiceGame({ config, player, pokedollarImageUrl, onWin }: Pr
           </p>
           <button onClick={handleDismissResult} className={`px-5 py-2 rounded font-bold text-sm ${BUTTON_STYLE.yellow}`}>
             {roundOutcome === 'lose' ? (
-              <>Continuer (0 <PokedollarIcon imageUrl={pokedollarImageUrl} />)</>
+              <>Continuer (0 <PokedollarIcon imageUrl={pokedollarImageUrl} size={18} className="align-[-4px]" />)</>
             ) : isFinalRound ? (
-              <>Continuer ({nextGain} <PokedollarIcon imageUrl={pokedollarImageUrl} />)</>
+              <>Continuer ({nextGain} <PokedollarIcon imageUrl={pokedollarImageUrl} size={18} className="align-[-4px]" />)</>
             ) : (
               'Continuer'
             )}
@@ -246,14 +239,14 @@ export function CasinoDiceGame({ config, player, pokedollarImageUrl, onWin }: Pr
       {phase === 'choice' && (
         <div className="flex flex-col items-center gap-3">
           <p className="text-ink text-sm flex items-center gap-2">
-            Gains actuels : <span className="font-bold">{displayedGain} <PokedollarIcon imageUrl={pokedollarImageUrl} /></span>
+            Gains actuels : <span className="font-bold">{displayedGain} <PokedollarIcon imageUrl={pokedollarImageUrl} size={18} className="align-[-4px]" /></span>
             {round > 1 && (
               <span className="text-hp-orange font-bold text-xs animate-[celebrate-pop_0.4s_ease-out]">×2 !</span>
             )}
           </p>
           <div className="flex gap-3">
             <button onClick={handleCashOut} className={`px-4 py-2 rounded font-bold text-sm ${BUTTON_STYLE.green}`}>
-              Encaisser ({bankedGain} <PokedollarIcon imageUrl={pokedollarImageUrl} />)
+              Encaisser ({bankedGain} <PokedollarIcon imageUrl={pokedollarImageUrl} size={18} className="align-[-4px]" />)
             </button>
             <button onClick={handleContinue} className={`px-4 py-2 rounded font-bold text-sm ${BUTTON_STYLE.red}`}>
               Continuer (doubler ou tout perdre)

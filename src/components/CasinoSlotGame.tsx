@@ -5,6 +5,7 @@ import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { CASINO_ICON } from '../lib/icons'
 import { useCountUp } from '../hooks/useCountUp'
 import { flyCoin } from '../lib/flyCoin'
+import { PokedollarIcon } from './PokedollarIcon'
 
 interface Props {
   config: CasinoConfig
@@ -22,14 +23,6 @@ const CYCLE_MS = 90
 
 function randomSymbol(): SlotSymbol {
   return ALL_SYMBOLS[Math.floor(Math.random() * ALL_SYMBOLS.length)]
-}
-
-function PokedollarIcon({ imageUrl }: { imageUrl?: string | null }) {
-  return imageUrl ? (
-    <img src={imageUrl} alt="" className="inline w-[18px] h-[18px] object-contain align-[-4px]" />
-  ) : (
-    <span className="text-lg">💰</span>
-  )
 }
 
 export function CasinoSlotGame({ config, pokedollarImageUrl, onWin }: Props) {
@@ -122,7 +115,7 @@ export function CasinoSlotGame({ config, pokedollarImageUrl, onWin }: Props) {
             </p>
           )}
           <p className="text-ink text-base font-bold animate-[celebrate-pop_0.4s_ease-out]">
-            +{displayedTotal} <PokedollarIcon imageUrl={pokedollarImageUrl} />
+            +{displayedTotal} <PokedollarIcon imageUrl={pokedollarImageUrl} size={18} className="align-[-4px]" />
           </p>
           <button
             onClick={(e) => {
@@ -131,7 +124,7 @@ export function CasinoSlotGame({ config, pokedollarImageUrl, onWin }: Props) {
             }}
             className={`px-5 py-2 rounded font-bold text-sm ${BUTTON_STYLE.yellow}`}
           >
-            Continuer ({result.total} <PokedollarIcon imageUrl={pokedollarImageUrl} />)
+            Continuer ({result.total} <PokedollarIcon imageUrl={pokedollarImageUrl} size={18} className="align-[-4px]" />)
           </button>
         </div>
       ) : (
