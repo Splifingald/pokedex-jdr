@@ -5,6 +5,7 @@ import App from './App.tsx'
 import { DisplayPage } from './pages/DisplayPage.tsx'
 import { PlayerProvider } from './context/PlayerContext.tsx'
 import { ToastProvider } from './context/ToastContext.tsx'
+import { UnsavedChangesProvider } from './context/UnsavedChangesContext.tsx'
 
 const isDisplayRoute = window.location.pathname.replace(/\/$/, '') === '/display'
 
@@ -15,7 +16,9 @@ createRoot(document.getElementById('root')!).render(
     ) : (
       <PlayerProvider>
         <ToastProvider>
-          <App />
+          <UnsavedChangesProvider>
+            <App />
+          </UnsavedChangesProvider>
         </ToastProvider>
       </PlayerProvider>
     )}

@@ -29,6 +29,7 @@ import { SettingsPopup } from './components/SettingsPopup'
 import { FullscreenPromptModal } from './components/FullscreenPromptModal'
 import { PixelIcon } from './components/icons/PixelIcon'
 import { useFullscreen } from './hooks/useFullscreen'
+import { useUnsavedChangesGuard } from './context/UnsavedChangesContext'
 import { PANEL_LG, PIXEL_BORDER_SM } from './lib/panelStyles'
 import { SETTINGS_ICON } from './lib/icons'
 
@@ -60,6 +61,7 @@ export default function App() {
     (parameters.feature_casino_enabled && casinoConfig.ticket_full_notify_enabled)
   const { showToast } = useToast()
   const { enter: enterFullscreen } = useFullscreen()
+  const { guardedNavigate } = useUnsavedChangesGuard()
 
   const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(true)
   const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem('adminMode') === 'true')
@@ -129,7 +131,7 @@ export default function App() {
 
   const tabBarProps = {
     activeTab,
-    onTabChange: setActiveTab,
+    onTabChange: (tab: TabId) => guardedNavigate(() => setActiveTab(tab)),
     showPokedexTab: parameters.feature_pokedex_enabled,
     showTeamTab: !!player && parameters.feature_pokemon_enabled,
     showSacTab: !!player && parameters.feature_inventory_enabled,

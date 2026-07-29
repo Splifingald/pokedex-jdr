@@ -17,8 +17,11 @@ import { ConfirmPopup } from '../ConfirmPopup'
 import { DoneToggle } from './DoneToggle'
 import { PixelIcon } from '../icons/PixelIcon'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
-import { PANEL_LG, PIXEL_BORDER_SM } from '../../lib/panelStyles'
+import { PIXEL_BORDER_SM } from '../../lib/panelStyles'
 import { SAVE_ICON } from '../../lib/icons'
+import { useUnsavedChangesGuard } from '../../context/UnsavedChangesContext'
+
+const AUTOSAVE_INTERVAL_MS = 60_000
 
 interface Props {
   chapter: CampaignChapter
@@ -53,9 +56,9 @@ export function ChapterEditor({
   const [imagePosition, setImagePosition] = useState(chapter.image_position ?? 50)
   const [dirty, setDirty] = useState(false)
   const [viewerOpen, setViewerOpen] = useState(false)
-  const [confirmBack, setConfirmBack] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [activeReference, setActiveReference] = useState<ReferenceEntry | null>(null)
+  const { setGuard, guardedNavigate } = useUnsavedChangesGuard()
 
   const indexRef = useRef(referenceIndex)
   useEffect(() => { indexRef.current = referenceIndex }, [referenceIndex])
@@ -93,9 +96,13 @@ export function ChapterEditor({
     setDirty(false)
   }
 
-  // Raccourci Ctrl+S / Cmd+S pour enregistrer
+  // Refs pour lire l'état courant depuis des callbacks enregistrés une seule fois (raccourci clavier, autosave, garde de navigation)
   const handleSaveRef = useRef(handleSave)
   useEffect(() => { handleSaveRef.current = handleSave })
+  const dirtyRef = useRef(dirty)
+  useEffect(() => { dirtyRef.current = dirty }, [dirty])
+
+  // Raccourci Ctrl+S / Cmd+S pour enregistrer
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
@@ -107,19 +114,21 @@ export function ChapterEditor({
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  const handleBack = () => {
-    if (dirty) {
-      setConfirmBack(true)
-      return
-    }
-    onBack()
-  }
+  // Enregistrement automatique tant que le chapitre est ouvert et modifié
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (dirtyRef.current) handleSaveRef.current()
+    }, AUTOSAVE_INTERVAL_MS)
+    return () => clearInterval(interval)
+  }, [])
 
-  const handleSaveAndQuit = () => {
-    handleSave()
-    setConfirmBack(false)
-    onBack()
-  }
+  // Signale au garde de navigation global qu'il faut demander confirmation avant de changer d'onglet
+  useEffect(() => {
+    setGuard({ isDirty: () => dirtyRef.current, onSave: () => handleSaveRef.current() })
+    return () => setGuard(null)
+  }, [setGuard])
+
+  const handleBack = () => guardedNavigate(onBack)
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -191,38 +200,6 @@ export function ChapterEditor({
 
       {viewerOpen && imageUrl && (
         <ImageLightbox src={imageUrl} alt={title} onClose={() => setViewerOpen(false)} />
-      )}
-
-      {confirmBack && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className={`${PANEL_LG} max-w-xs w-full p-6`}>
-            <div className="text-center mb-5">
-              <h3 className="text-ink text-lg">Modifications non enregistrées</h3>
-              <p className="text-ink-muted text-sm mt-2">Que voulez-vous faire avant de quitter ?</p>
-            </div>
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={handleSaveAndQuit}
-                className={`py-2.5 rounded text-sm font-bold inline-flex items-center justify-center gap-1.5 ${BUTTON_STYLE.green}`}
-              >
-                <PixelIcon src={SAVE_ICON} size={16} />
-                Enregistrer et quitter
-              </button>
-              <button
-                onClick={() => { setConfirmBack(false); onBack() }}
-                className={`py-2.5 rounded text-sm font-bold ${BUTTON_STYLE.red}`}
-              >
-                Quitter sans enregistrer
-              </button>
-              <button
-                onClick={() => setConfirmBack(false)}
-                className={`py-2.5 rounded text-sm font-bold ${BUTTON_STYLE.gray}`}
-              >
-                Annuler
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {confirmDelete && (
