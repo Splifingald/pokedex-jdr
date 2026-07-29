@@ -10,6 +10,7 @@ import { SessionViewPopup } from './SessionViewPopup'
 import { ReferenceDispatcher } from './ReferenceDispatcher'
 import { EditableHeaderImage } from './EditableHeaderImage'
 import { EmojiPickerButton } from './EmojiPickerButton'
+import { CampaignIcon } from './CampaignIcon'
 import { DoneToggle } from './DoneToggle'
 import { NotesFab } from './NotesFab'
 import { ImageLightbox } from '../ImageLightbox'
@@ -177,9 +178,12 @@ export function SessionDetailView({
         <div className="mb-4 p-3 rounded-lg bg-cream-secondary border-2 border-ink">
           <div className="flex items-center gap-2 mb-2">
             <EmojiPickerButton
-              trigger={sessionForm.icon}
+              trigger={<CampaignIcon icon={sessionForm.icon} size={24} emojiClassName="text-xl" />}
               triggerClassName={`w-10 h-10 rounded-lg text-xl flex items-center justify-center shrink-0 ${PIXEL_BORDER_SM} bg-cream`}
               onSelect={(icon) => setSessionForm((f) => ({ ...f, icon }))}
+              itemsByName={itemsByName}
+              pokemonByName={pokemonByName}
+              playersByName={playersByName}
             />
             <input
               type="text"
@@ -218,7 +222,7 @@ export function SessionDetailView({
         </div>
       ) : (
         <div className="flex items-center gap-2 mb-4">
-          <span className="text-3xl shrink-0">{session.icon}</span>
+          <CampaignIcon icon={session.icon} size={34} emojiClassName="text-3xl" />
           <div className="flex-1 min-w-0">
             <h2 className="text-cream text-lg font-bold truncate">{session.title}</h2>
             {session.session_date && (
@@ -253,9 +257,12 @@ export function SessionDetailView({
         <form onSubmit={handleCreateChapter} className="mb-4 p-3 rounded-lg bg-cream-secondary border-2 border-ink">
           <div className="flex items-center gap-2 mb-2">
             <EmojiPickerButton
-              trigger={chapterForm.icon}
+              trigger={<CampaignIcon icon={chapterForm.icon} size={24} emojiClassName="text-xl" />}
               triggerClassName={`w-10 h-10 rounded-lg text-xl flex items-center justify-center shrink-0 ${PIXEL_BORDER_SM} bg-cream`}
               onSelect={(icon) => setChapterForm((f) => ({ ...f, icon }))}
+              itemsByName={itemsByName}
+              pokemonByName={pokemonByName}
+              playersByName={playersByName}
             />
             <input
               type="text"

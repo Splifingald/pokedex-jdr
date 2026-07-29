@@ -1,6 +1,7 @@
 import type { CampaignChapter } from '../../types'
 import { PANEL, PANEL_DONE } from '../../lib/panelStyles'
 import { DoneBadge } from './DoneBadge'
+import { CampaignIcon } from './CampaignIcon'
 
 interface Props {
   chapter: CampaignChapter
@@ -29,7 +30,7 @@ export function ChapterCard({ chapter, onClick, onView }: Props) {
         </div>
       )}
       <div className="p-3 flex items-center gap-2">
-        <span className="text-2xl shrink-0">{chapter.icon}</span>
+        <CampaignIcon icon={chapter.icon} size={28} emojiClassName="text-2xl" />
         <p className="flex-1 min-w-0 text-ink font-bold truncate">{chapter.title}</p>
         {chapter.done && !chapter.image_url && (
           <span className="shrink-0 text-lg" title="Terminé">✅</span>

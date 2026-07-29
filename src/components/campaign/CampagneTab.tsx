@@ -9,6 +9,7 @@ import { useReferenceIndex } from '../../hooks/useReferenceIndex'
 import { SessionCard } from './SessionCard'
 import { SessionDetailView } from './SessionDetailView'
 import { EmojiPickerButton } from './EmojiPickerButton'
+import { CampaignIcon } from './CampaignIcon'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../../lib/panelStyles'
 
@@ -96,9 +97,12 @@ export function CampagneTab({ pokemonByName, attacksByName }: Props) {
         <form onSubmit={handleCreate} className="mb-4 p-3 rounded-lg bg-cream-secondary border-2 border-ink max-w-sm">
           <div className="flex items-center gap-2 mb-2">
             <EmojiPickerButton
-              trigger={form.icon}
+              trigger={<CampaignIcon icon={form.icon} size={24} emojiClassName="text-xl" />}
               triggerClassName={`w-10 h-10 rounded-lg text-xl flex items-center justify-center shrink-0 ${PIXEL_BORDER_SM} bg-cream`}
               onSelect={(icon) => setForm((f) => ({ ...f, icon }))}
+              itemsByName={itemsByName}
+              pokemonByName={pokemonByName}
+              playersByName={playersByName}
             />
             <input
               type="text"

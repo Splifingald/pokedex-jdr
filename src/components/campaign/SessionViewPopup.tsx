@@ -11,6 +11,7 @@ import { ReferenceHighlight, forceReferenceRecompute } from '../../lib/reference
 import { ReferenceDispatcher } from './ReferenceDispatcher'
 import { PANEL_LG } from '../../lib/panelStyles'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
+import { CampaignIcon } from './CampaignIcon'
 
 interface BlockProps {
   chapter: CampaignChapter
@@ -44,7 +45,7 @@ function SessionViewChapterBlock({ chapter, referenceIndex, onReferenceClick }: 
   return (
     <div className="mb-6 last:mb-0">
       <div className="flex items-center gap-2 mb-3 pb-2 border-b-2 border-[#cfc7a8]">
-        <span className="text-xl shrink-0">{chapter.icon}</span>
+        <CampaignIcon icon={chapter.icon} size={24} emojiClassName="text-xl" />
         <h4 className="font-bold text-ink flex-1 truncate">{chapter.title}</h4>
         {chapter.done && <span title="Terminé">✅</span>}
       </div>
@@ -102,7 +103,7 @@ export function SessionViewPopup({
     >
       <div className={`${PANEL_LG} max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden`}>
         <div className="shrink-0 flex items-center gap-2 p-4 border-b-2 border-[#cfc7a8]">
-          <span className="text-2xl shrink-0">{session.icon}</span>
+          <CampaignIcon icon={session.icon} size={28} emojiClassName="text-2xl" />
           <h3 className="text-ink font-bold flex-1 truncate">{session.title}</h3>
           {session.done && <span title="Terminé">✅</span>}
           <button

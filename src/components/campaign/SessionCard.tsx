@@ -2,6 +2,7 @@ import type { CampaignSession } from '../../types'
 import { PANEL, PANEL_DONE } from '../../lib/panelStyles'
 import { formatDateFr } from '../../lib/formatDate'
 import { DoneBadge } from './DoneBadge'
+import { CampaignIcon } from './CampaignIcon'
 
 interface Props {
   session: CampaignSession
@@ -23,7 +24,7 @@ export function SessionCard({ session, onClick }: Props) {
         </div>
       )}
       <div className="p-3 flex items-center gap-2">
-        <span className="text-2xl shrink-0">{session.icon}</span>
+        <CampaignIcon icon={session.icon} size={28} emojiClassName="text-2xl" />
         <div className="min-w-0">
           <p className="text-ink font-bold truncate">{session.title}</p>
           {session.session_date && (

@@ -13,6 +13,7 @@ import { DoneToggle } from './DoneToggle'
 import { NotesFab } from './NotesFab'
 import { PANEL_LG } from '../../lib/panelStyles'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
+import { CampaignIcon } from './CampaignIcon'
 
 interface Props {
   chapter: CampaignChapter
@@ -78,7 +79,7 @@ export function ChapterViewPopup({
     >
       <div className={`${PANEL_LG} max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden`}>
         <div className="shrink-0 flex items-center gap-2 p-4 border-b-2 border-[#cfc7a8]">
-          <span className="text-2xl shrink-0">{chapter.icon}</span>
+          <CampaignIcon icon={chapter.icon} size={28} emojiClassName="text-2xl" />
           <h3 className="text-ink font-bold flex-1 truncate">{chapter.title}</h3>
           <DoneToggle done={chapter.done} onToggle={onToggleDone} />
           <button
