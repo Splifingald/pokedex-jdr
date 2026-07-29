@@ -50,7 +50,7 @@ export function DisplayCanvas({ backgroundUrl, npcs, pokemons, item, className =
           {pokemons.map((p) => (
             <div
               key={p.id}
-              className="relative min-w-0 shrink h-[35cqh] w-[35cqh] max-w-[22cqw] flex items-center justify-center"
+              className="relative min-w-0 shrink h-[60cqh] w-[60cqh] max-w-[38cqw] flex items-center justify-center"
             >
               <img
                 src={p.image_url}
