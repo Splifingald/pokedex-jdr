@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { Player, Pokemon, Attack, Item, PlayerPokemon } from '../../types'
 import { POKEDOLLAR_ITEM_NAME } from '../../types'
 import { ReferencePopupShell } from './ReferencePopupShell'
@@ -18,10 +18,11 @@ interface Props {
   pokemonByName: Map<string, Pokemon>
   attacksByName: Map<string, Attack>
   itemsByName: Map<string, Item>
+  displayBar?: ReactNode
   onClose: () => void
 }
 
-export function PlayerReferencePopup({ player, pokemonByName, attacksByName, itemsByName, onClose }: Props) {
+export function PlayerReferencePopup({ player, pokemonByName, attacksByName, itemsByName, displayBar, onClose }: Props) {
   const { roster, updateXp, updateNickname, toggleInTeam, setNextGiftAt, deleteOwnedPokemon } = usePlayerPokemon(player.id)
   const { pokedollars } = usePlayerItems(player.id)
   const { parameters } = useAdminParameters()
@@ -52,6 +53,7 @@ export function PlayerReferencePopup({ player, pokemonByName, attacksByName, ite
 
   return (
     <ReferencePopupShell onClose={onClose}>
+      {displayBar}
       <div className="flex items-center gap-3 mb-4">
         <div className="w-14 h-14 rounded-full overflow-hidden shrink-0 border-2" style={{ borderColor: player.color }}>
           {player.image_url ? (

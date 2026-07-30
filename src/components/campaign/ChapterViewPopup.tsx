@@ -4,11 +4,16 @@ import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import { TextStyle } from '@tiptap/extension-text-style'
 import Color from '@tiptap/extension-color'
-import type { CampaignChapter, Player, CarteLocation, Attack, Item, Pokemon, Encounter } from '../../types'
+import type { CampaignChapter, Player, CarteLocation, Attack, Item, Pokemon, Encounter, DisplayAsset, DisplayState } from '../../types'
 import { EMPTY_CHAPTER_CONTENT } from '../../types'
 import type { ReferenceEntry, ReferenceIndex } from '../../hooks/useReferenceIndex'
 import { ReferenceHighlight, forceReferenceRecompute } from '../../lib/referenceExtension'
+import { DisplayCommandHighlight, forceDisplayCommandRecompute } from '../../lib/displayCommandExtension'
+import { executeDisplayCommand, type DisplayCommand } from '../../lib/displayCommand'
+import type { UpdateDisplayState } from '../../lib/displayActions'
+import { useToast } from '../../context/ToastContext'
 import { ReferenceDispatcher } from './ReferenceDispatcher'
+import { SetBannerBackgroundButton } from './SetBannerBackgroundButton'
 import { DoneToggle } from './DoneToggle'
 import { NotesFab } from './NotesFab'
 import { PANEL_LG } from '../../lib/panelStyles'
@@ -24,6 +29,9 @@ interface Props {
   playersByName: Map<string, Player>
   locationsByName: Map<string, CarteLocation>
   encountersByLieu: Map<string, Encounter[]>
+  displayState: DisplayState
+  displayAssets: DisplayAsset[]
+  updateDisplayState: UpdateDisplayState
   onToggleDone: () => void
   onSaveNotes: (notes: CampaignChapter['notes']) => void
   onClose: () => void
@@ -38,14 +46,33 @@ export function ChapterViewPopup({
   playersByName,
   locationsByName,
   encountersByLieu,
+  displayState,
+  displayAssets,
+  updateDisplayState,
   onToggleDone,
   onSaveNotes,
   onClose,
 }: Props) {
   const [activeReference, setActiveReference] = useState<ReferenceEntry | null>(null)
+  const { showToast } = useToast()
 
   const indexRef = useRef(referenceIndex)
   useEffect(() => { indexRef.current = referenceIndex }, [referenceIndex])
+
+  const displayStateRef = useRef(displayState)
+  useEffect(() => { displayStateRef.current = displayState }, [displayState])
+  const displayAssetsRef = useRef(displayAssets)
+  useEffect(() => { displayAssetsRef.current = displayAssets }, [displayAssets])
+
+  const handleDisplayCommand = (cmd: DisplayCommand) => {
+    executeDisplayCommand(cmd, {
+      referenceIndex: indexRef.current,
+      displayState: displayStateRef.current,
+      displayAssets: displayAssetsRef.current,
+      updateDisplayState,
+      showToast,
+    })
+  }
 
   const editor = useEditor({
     content: chapter.content ?? EMPTY_CHAPTER_CONTENT,
@@ -55,15 +82,26 @@ export function ChapterViewPopup({
       Underline,
       TextStyle,
       Color,
+      // getIndex/getDisplayAssets are only invoked lazily by the plugin (on doc change/click),
+      // never read synchronously during this render
+      // eslint-disable-next-line react-hooks/refs
       ReferenceHighlight.configure({
         getIndex: () => indexRef.current,
+        getDisplayAssets: () => displayAssetsRef.current,
         onReferenceClick: (entry) => setActiveReference(entry),
+      }),
+      // eslint-disable-next-line react-hooks/refs -- same lazy-getter pattern as above
+      DisplayCommandHighlight.configure({
+        getIndex: () => indexRef.current,
+        getDisplayAssets: () => displayAssetsRef.current,
+        onCommand: handleDisplayCommand,
       }),
     ],
   })
 
   useEffect(() => {
     if (editor) forceReferenceRecompute(editor)
+    if (editor) forceDisplayCommandRecompute(editor)
   }, [editor, referenceIndex])
 
   useEffect(() => {
@@ -92,12 +130,15 @@ export function ChapterViewPopup({
 
         <div className="flex-1 overflow-y-auto p-4 bg-cream text-ink">
           {chapter.image_url && (
-            <img
-              src={chapter.image_url}
-              alt={chapter.title}
-              className="w-full h-32 object-cover rounded-lg mb-4 border-2 border-ink"
-              style={{ objectPosition: `50% ${chapter.image_position ?? 50}%` }}
-            />
+            <div className="relative w-full h-32 rounded-lg mb-4 border-2 border-ink overflow-hidden">
+              <img
+                src={chapter.image_url}
+                alt={chapter.title}
+                className="w-full h-full object-cover"
+                style={{ objectPosition: `50% ${chapter.image_position ?? 50}%` }}
+              />
+              <SetBannerBackgroundButton imageUrl={chapter.image_url} updateDisplayState={updateDisplayState} />
+            </div>
           )}
           <EditorContent editor={editor} />
         </div>
@@ -108,6 +149,9 @@ export function ChapterViewPopup({
         onSave={onSaveNotes}
         referenceIndex={referenceIndex}
         onReferenceClick={(entry) => setActiveReference(entry)}
+        displayState={displayState}
+        displayAssets={displayAssets}
+        updateDisplayState={updateDisplayState}
       />
 
       <ReferenceDispatcher
@@ -118,6 +162,9 @@ export function ChapterViewPopup({
         playersByName={playersByName}
         locationsByName={locationsByName}
         encountersByLieu={encountersByLieu}
+        displayState={displayState}
+        displayAssets={displayAssets}
+        updateDisplayState={updateDisplayState}
         onClose={() => setActiveReference(null)}
       />
     </div>

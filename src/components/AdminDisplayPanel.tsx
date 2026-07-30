@@ -1,63 +1,44 @@
 import { useMemo } from 'react'
-import type { Pokemon } from '../types'
+import type { Item, Pokemon } from '../types'
 import { useDisplayState } from '../hooks/useDisplayState'
-import { useBackgrounds } from '../hooks/useBackgrounds'
 import { useDisplayAssets } from '../hooks/useDisplayAssets'
 import { usePokemon } from '../hooks/usePokemon'
 import { useItems } from '../hooks/useItems'
 import { resolveDisplayState } from '../lib/resolveDisplayState'
 import { DisplayCanvas } from './display/DisplayCanvas'
 import { PokemonSearchInput } from './PokemonSearchInput'
+import { MAX_FIGURES, moveInArray, addToLayer, removeFromLayer } from '../lib/displayLayers'
+import { setBackgroundAsset } from '../lib/displayActions'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PANEL, PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { PixelIcon } from './icons/PixelIcon'
 import { DISPLAY_ICON } from '../lib/icons'
 
-const MAX_FIGURES = 4
-
 export function AdminDisplayPanel() {
   const { state, loading, updateDisplayState } = useDisplayState()
-  const { backgrounds } = useBackgrounds()
-  const { assets: displayAssets, npcs } = useDisplayAssets()
+  const { assets: displayAssets, npcs, backgrounds } = useDisplayAssets()
   const { pokemon } = usePokemon()
   const { items } = useItems()
 
   const preview = useMemo(
-    () => resolveDisplayState(state, backgrounds, displayAssets, pokemon, items),
-    [state, backgrounds, displayAssets, pokemon, items]
+    () => resolveDisplayState(state, displayAssets, pokemon, items),
+    [state, displayAssets, pokemon, items]
   )
 
   const availableNpcs = npcs.filter((n) => !state.npc_ids.includes(n.id))
+  const availableItems = items.filter((i) => !state.item_ids.includes(i.id))
 
-  const moveInArray = (ids: number[], index: number, direction: -1 | 1) => {
-    const target = index + direction
-    if (target < 0 || target >= ids.length) return ids
-    const next = [...ids]
-    ;[next[index], next[target]] = [next[target], next[index]]
-    return next
-  }
+  const addNpc = (id: number) => updateDisplayState({ npc_ids: addToLayer(state.npc_ids, id) })
+  const removeNpc = (id: number) => updateDisplayState({ npc_ids: removeFromLayer(state.npc_ids, id) })
+  const moveNpc = (index: number, direction: -1 | 1) => updateDisplayState({ npc_ids: moveInArray(state.npc_ids, index, direction) })
 
-  const addNpc = (id: number) => {
-    if (state.npc_ids.includes(id) || state.npc_ids.length >= MAX_FIGURES) return
-    updateDisplayState({ npc_ids: [...state.npc_ids, id] })
-  }
-  const removeNpc = (id: number) => {
-    updateDisplayState({ npc_ids: state.npc_ids.filter((x) => x !== id) })
-  }
-  const moveNpc = (index: number, direction: -1 | 1) => {
-    updateDisplayState({ npc_ids: moveInArray(state.npc_ids, index, direction) })
-  }
+  const addPokemon = (p: Pokemon) => updateDisplayState({ pokemon_ids: addToLayer(state.pokemon_ids, p.id) })
+  const removePokemon = (id: number) => updateDisplayState({ pokemon_ids: removeFromLayer(state.pokemon_ids, id) })
+  const movePokemon = (index: number, direction: -1 | 1) => updateDisplayState({ pokemon_ids: moveInArray(state.pokemon_ids, index, direction) })
 
-  const addPokemon = (p: Pokemon) => {
-    if (state.pokemon_ids.includes(p.id) || state.pokemon_ids.length >= MAX_FIGURES) return
-    updateDisplayState({ pokemon_ids: [...state.pokemon_ids, p.id] })
-  }
-  const removePokemon = (id: number) => {
-    updateDisplayState({ pokemon_ids: state.pokemon_ids.filter((x) => x !== id) })
-  }
-  const movePokemon = (index: number, direction: -1 | 1) => {
-    updateDisplayState({ pokemon_ids: moveInArray(state.pokemon_ids, index, direction) })
-  }
+  const addItem = (item: Item) => updateDisplayState({ item_ids: addToLayer(state.item_ids, item.id) })
+  const removeItem = (id: number) => updateDisplayState({ item_ids: removeFromLayer(state.item_ids, id) })
+  const moveItem = (index: number, direction: -1 | 1) => updateDisplayState({ item_ids: moveInArray(state.item_ids, index, direction) })
 
   if (loading) {
     return <p className="text-ink-muted-2 text-sm">Chargement…</p>
@@ -83,7 +64,7 @@ export function AdminDisplayPanel() {
           backgroundUrl={preview.backgroundUrl}
           npcs={preview.npcs}
           pokemons={preview.pokemons}
-          item={preview.item}
+          items={preview.items}
           className="w-full h-full"
         />
       </div>
@@ -92,8 +73,12 @@ export function AdminDisplayPanel() {
         <div>
           <label className="text-ink-muted-2 text-sm block mb-1">Fond d'écran</label>
           <select
-            value={state.background_id ?? ''}
-            onChange={(e) => updateDisplayState({ background_id: e.target.value ? Number(e.target.value) : null })}
+            value={state.background_url ? '' : state.background_id ?? ''}
+            onChange={(e) => {
+              const value = e.target.value
+              if (value) setBackgroundAsset(Number(value), updateDisplayState)
+              else updateDisplayState({ background_id: null, background_url: null })
+            }}
             className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
           >
             <option value="">— Aucun —</option>
@@ -101,6 +86,11 @@ export function AdminDisplayPanel() {
               <option key={b.id} value={b.id}>{b.nom}</option>
             ))}
           </select>
+          {state.background_url && (
+            <p className="text-ink-muted-2 text-xs mt-1">
+              Fond personnalisé actif (bannière) — sélectionner un fond ci-dessus pour le remplacer.
+            </p>
+          )}
         </div>
 
         <div>
@@ -179,17 +169,48 @@ export function AdminDisplayPanel() {
         </div>
 
         <div>
-          <label className="text-ink-muted-2 text-sm block mb-1">Objet affiché</label>
-          <select
-            value={state.item_id ?? ''}
-            onChange={(e) => updateDisplayState({ item_id: e.target.value ? Number(e.target.value) : null })}
-            className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
-          >
-            <option value="">— Aucun —</option>
-            {items.map((i) => (
-              <option key={i.id} value={i.id}>{i.nom}</option>
-            ))}
-          </select>
+          <p className="text-ink-muted-2 text-sm mb-2">
+            Objets affichés ({state.item_ids.length}/{MAX_FIGURES})
+          </p>
+          <div className="flex flex-col gap-1.5 mb-2">
+            {state.item_ids.length === 0 ? (
+              <p className="text-ink-muted-2 text-xs italic">Aucun objet affiché.</p>
+            ) : (
+              state.item_ids.map((id, index) => {
+                const item = items.find((x) => x.id === id)
+                if (!item) return null
+                return (
+                  <div key={id} className={`flex items-center gap-2 px-3 py-2 rounded ${PIXEL_BORDER_SM} bg-cream-secondary`}>
+                    <div className="w-6 h-6 shrink-0 flex items-center justify-center">
+                      {item.image_url && <img src={item.image_url} alt="" className="w-full h-full object-contain" />}
+                    </div>
+                    <span className="flex-1 text-ink text-sm truncate">{item.nom}</span>
+                    <button onClick={() => moveItem(index, -1)} disabled={index === 0} className={`text-xs px-2 py-1 rounded shrink-0 disabled:opacity-30 ${BUTTON_STYLE.gray}`}>◀</button>
+                    <button onClick={() => moveItem(index, 1)} disabled={index === state.item_ids.length - 1} className={`text-xs px-2 py-1 rounded shrink-0 disabled:opacity-30 ${BUTTON_STYLE.gray}`}>▶</button>
+                    <button onClick={() => removeItem(id)} className={`text-xs px-2 py-1 rounded shrink-0 ${BUTTON_STYLE.gray}`}>✕</button>
+                  </div>
+                )
+              })
+            )}
+          </div>
+          {state.item_ids.length < MAX_FIGURES && (
+            availableItems.length === 0 ? (
+              <p className="text-ink-muted-2 text-xs italic">Aucun objet disponible.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {availableItems.map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => addItem(item)}
+                    className={`flex items-center gap-1.5 pl-1.5 pr-2 py-1 rounded-full text-xs ${PIXEL_BORDER_SM} bg-cream hover:bg-cream-secondary transition-colors`}
+                  >
+                    {item.image_url && <img src={item.image_url} alt="" className="w-5 h-5 object-contain rounded-full" />}
+                    {item.nom}
+                  </button>
+                ))}
+              </div>
+            )
+          )}
         </div>
       </div>
     </div>

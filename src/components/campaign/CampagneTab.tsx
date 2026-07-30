@@ -6,6 +6,8 @@ import { useItems } from '../../hooks/useItems'
 import { useEncounters } from '../../hooks/useEncounters'
 import { useCampaignSessions } from '../../hooks/useCampaignSessions'
 import { useReferenceIndex } from '../../hooks/useReferenceIndex'
+import { useDisplayState } from '../../hooks/useDisplayState'
+import { useDisplayAssets } from '../../hooks/useDisplayAssets'
 import { SessionCard } from './SessionCard'
 import { SessionDetailView } from './SessionDetailView'
 import { EmojiPickerButton } from './EmojiPickerButton'
@@ -26,6 +28,8 @@ export function CampagneTab({ pokemonByName, attacksByName }: Props) {
   const { items, byName: itemsByName } = useItems()
   const { encounters } = useEncounters()
   const { sessions, loading, createSession, updateSession, deleteSession } = useCampaignSessions()
+  const { state: displayState, updateDisplayState } = useDisplayState()
+  const { assets: displayAssets } = useDisplayAssets()
 
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null)
   const [showForm, setShowForm] = useState(false)
@@ -64,6 +68,9 @@ export function CampagneTab({ pokemonByName, attacksByName }: Props) {
         playersByName={playersByName}
         locationsByName={locationsByName}
         encountersByLieu={encountersByLieu}
+        displayState={displayState}
+        displayAssets={displayAssets}
+        updateDisplayState={updateDisplayState}
       />
     )
   }

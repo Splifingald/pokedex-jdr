@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import Papa from 'papaparse'
-import type { CsvRow, AttackCsvRow, CarteCsvRow, ItemCsvRow, EncounterCsvRow, BackgroundCsvRow, DisplayAssetCsvRow } from '../types'
-import { CSV_REQUIRED_HEADERS, ATTACK_CSV_REQUIRED_HEADERS, CARTE_CSV_REQUIRED_HEADERS, ITEM_CSV_REQUIRED_HEADERS, ENCOUNTER_CSV_REQUIRED_HEADERS, BACKGROUND_CSV_REQUIRED_HEADERS, DISPLAY_ASSET_CSV_REQUIRED_HEADERS } from '../types'
+import type { CsvRow, AttackCsvRow, CarteCsvRow, ItemCsvRow, EncounterCsvRow, DisplayAssetCsvRow } from '../types'
+import { CSV_REQUIRED_HEADERS, ATTACK_CSV_REQUIRED_HEADERS, CARTE_CSV_REQUIRED_HEADERS, ITEM_CSV_REQUIRED_HEADERS, ENCOUNTER_CSV_REQUIRED_HEADERS, DISPLAY_ASSET_CSV_REQUIRED_HEADERS } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 
 // L'import CSV passe par une Netlify Function côté serveur
@@ -11,7 +11,6 @@ const IMPORT_ATTACKS_URL = '/.netlify/functions/import-attacks'
 const IMPORT_CARTE_URL = '/.netlify/functions/import-carte'
 const IMPORT_ITEMS_URL = '/.netlify/functions/import-items'
 const IMPORT_ENCOUNTERS_URL = '/.netlify/functions/import-encounters'
-const IMPORT_BACKGROUNDS_URL = '/.netlify/functions/import-backgrounds'
 const IMPORT_DISPLAY_ASSETS_URL = '/.netlify/functions/import-display-assets'
 const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET as string
 
@@ -112,13 +111,6 @@ function mapEncounterCsvRow(row: EncounterCsvRow) {
   }
 }
 
-function mapBackgroundCsvRow(row: BackgroundCsvRow) {
-  return {
-    nom:       row['Nom']?.trim() ?? '',
-    image_url: row['Image']?.trim() ?? '',
-  }
-}
-
 function mapDisplayAssetCsvRow(row: DisplayAssetCsvRow) {
   return {
     nom:       row['Nom']?.trim() ?? '',
@@ -155,9 +147,8 @@ export function AdminPanel({ onImportSuccess }: Props) {
         const isItemsCsv = fields.includes('Coût')
         // Une colonne "Lieu" n'existe que dans le CSV de rencontres
         const isEncountersCsv = fields.includes('Lieu')
-        // Le CSV de fonds d'écran ne contient que ces 2 colonnes (Nom + Image)
-        const isBackgroundsCsv = fields.length === 2 && fields.includes('Nom') && fields.includes('Image')
-        // Le CSV du mode Affichage contient ces 3 colonnes (Nom + Type + Image)
+        // Le CSV du mode Affichage contient ces 3 colonnes (Nom + Type + Image) — couvre
+        // aussi les fonds d'écran désormais (Type = "Background")
         const isDisplayAssetsCsv = fields.length === 3 && fields.includes('Nom') && fields.includes('Type') && fields.includes('Image')
 
         if (isDisplayAssetsCsv) {
@@ -199,53 +190,6 @@ export function AdminPanel({ onImportSuccess }: Props) {
 
             setStatus('success')
             setMessage(`✅ ${data.imported} images d'affichage importées avec succès !`)
-            onImportSuccess()
-          } catch (err) {
-            setStatus('error')
-            setMessage(err instanceof Error ? err.message : 'Erreur inconnue')
-          }
-          return
-        }
-
-        if (isBackgroundsCsv) {
-          const missing = BACKGROUND_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
-          if (missing.length > 0) {
-            setStatus('error')
-            setMessage(`Colonnes manquantes : ${missing.join(', ')}`)
-            return
-          }
-
-          const rows = (results.data as unknown as BackgroundCsvRow[])
-            .map(mapBackgroundCsvRow)
-            .filter((r) => r.nom)
-
-          if (rows.length === 0) {
-            setStatus('error')
-            setMessage('Aucune ligne valide trouvée dans le CSV.')
-            return
-          }
-
-          setStatus('importing')
-          setMessage(`Import de ${rows.length} fonds d'écran…`)
-
-          try {
-            const res = await fetch(IMPORT_BACKGROUNDS_URL, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${ADMIN_SECRET}`,
-              },
-              body: JSON.stringify({ rows }),
-            })
-
-            const data = await res.json()
-
-            if (!res.ok) {
-              throw new Error(data.error ?? `Erreur serveur ${res.status}`)
-            }
-
-            setStatus('success')
-            setMessage(`✅ ${data.imported} fonds d'écran importés avec succès !`)
             onImportSuccess()
           } catch (err) {
             setStatus('error')

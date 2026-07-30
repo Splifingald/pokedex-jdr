@@ -8,7 +8,7 @@ interface Props {
   backgroundUrl?: string | null
   npcs: DisplayFigure[]
   pokemons: DisplayFigure[]
-  item: DisplayFigure | null
+  items: DisplayFigure[]
   className?: string
 }
 
@@ -21,7 +21,7 @@ interface Props {
 // l'écran d'affichage réel (plein écran) : des unités vw/vh se seraient
 // calculées sur la fenêtre entière, donnant un rendu bien plus petit en
 // aperçu qu'en plein écran pour la même classe CSS.
-export function DisplayCanvas({ backgroundUrl, npcs, pokemons, item, className = '' }: Props) {
+export function DisplayCanvas({ backgroundUrl, npcs, pokemons, items, className = '' }: Props) {
   return (
     <div className={`relative overflow-hidden bg-black [container-type:size] ${className}`}>
       {backgroundUrl && (
@@ -62,13 +62,16 @@ export function DisplayCanvas({ backgroundUrl, npcs, pokemons, item, className =
         </div>
       )}
 
-      {item && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <img
-            src={item.image_url}
-            alt={item.nom}
-            className="max-w-[40cqw] max-h-[40cqh] object-contain [filter:drop-shadow(2px_4px_2px_rgba(0,0,0,0.4))]"
-          />
+      {items.length > 0 && (
+        <div className="absolute inset-0 flex items-center justify-center gap-2 px-4">
+          {items.map((item) => (
+            <img
+              key={item.id}
+              src={item.image_url}
+              alt={item.nom}
+              className="max-w-[25cqw] max-h-[25cqh] object-contain [filter:drop-shadow(2px_4px_2px_rgba(0,0,0,0.4))]"
+            />
+          ))}
         </div>
       )}
     </div>

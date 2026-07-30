@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import type { JSONContent } from '@tiptap/core'
+import type { DisplayAsset, DisplayState } from '../../types'
 import type { ReferenceEntry, ReferenceIndex } from '../../hooks/useReferenceIndex'
+import type { UpdateDisplayState } from '../../lib/displayActions'
 import { NotesEditor } from './NotesEditor'
 import { PANEL_LG } from '../../lib/panelStyles'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
@@ -10,11 +12,14 @@ interface Props {
   onSave: (notes: JSONContent) => void
   referenceIndex: ReferenceIndex
   onReferenceClick: (entry: ReferenceEntry) => void
+  displayState: DisplayState
+  displayAssets: DisplayAsset[]
+  updateDisplayState: UpdateDisplayState
 }
 
 // Bouton flottant bas-droite pour les notes de MJ : reste au-dessus des popups
 // (chapitre/session) au lieu d'être imbriqué dans leur contenu défilant.
-export function NotesFab({ notes, onSave, referenceIndex, onReferenceClick }: Props) {
+export function NotesFab({ notes, onSave, referenceIndex, onReferenceClick, displayState, displayAssets, updateDisplayState }: Props) {
   const [open, setOpen] = useState(false)
 
   const handleReferenceClick = (entry: ReferenceEntry) => {
@@ -52,6 +57,9 @@ export function NotesFab({ notes, onSave, referenceIndex, onReferenceClick }: Pr
               onSave={onSave}
               referenceIndex={referenceIndex}
               onReferenceClick={handleReferenceClick}
+              displayState={displayState}
+              displayAssets={displayAssets}
+              updateDisplayState={updateDisplayState}
             />
           </div>
         </div>

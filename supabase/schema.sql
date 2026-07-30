@@ -68,6 +68,24 @@
 -- ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS gift_notified boolean NOT NULL DEFAULT false;
 -- ALTER TABLE campaign_sessions ADD COLUMN IF NOT EXISTS image_position integer NOT NULL DEFAULT 50;
 -- ALTER TABLE campaign_chapters ADD COLUMN IF NOT EXISTS image_position integer NOT NULL DEFAULT 50;
+-- Fusion de la table backgrounds dans display_assets (type = 'Background'), et passage du
+-- calque objet du mode Affichage d'un slot unique (item_id) à un calque multi comme PNJ/Pokémon.
+-- Exécuter dans cet ordre exact, une seule fois :
+-- INSERT INTO display_assets (id, nom, type, image_url)
+--   SELECT id, nom, 'Background', image_url FROM backgrounds
+--   ON CONFLICT (id) DO NOTHING;
+-- SELECT setval('display_assets_id_seq', (SELECT COALESCE(MAX(id), 1) FROM display_assets));
+-- ALTER TABLE display_state DROP CONSTRAINT display_state_background_id_fkey;
+-- ALTER TABLE display_state
+--   ADD CONSTRAINT display_state_background_id_fkey
+--   FOREIGN KEY (background_id) REFERENCES display_assets(id) ON DELETE SET NULL;
+-- ALTER TABLE display_state ADD COLUMN IF NOT EXISTS item_ids jsonb NOT NULL DEFAULT '[]'::jsonb;
+-- UPDATE display_state
+--   SET item_ids = CASE WHEN item_id IS NOT NULL THEN jsonb_build_array(item_id) ELSE '[]'::jsonb END
+--   WHERE id = 1;
+-- ALTER TABLE display_state DROP COLUMN item_id;
+-- DROP TABLE backgrounds; -- seulement après avoir vérifié que /display et Admin → Affichage sont corrects
+-- ALTER TABLE display_state ADD COLUMN IF NOT EXISTS background_url text;
 -- ============================================================
 
 -- Table principale des pokémon
@@ -468,22 +486,10 @@ CREATE POLICY "Public read encounters"
   USING (true);
 
 -- ============================================================
--- Fonds d'écran de l'accueil (importés par CSV via Netlify Function)
+-- Table backgrounds retirée : fusionnée dans display_assets (type = 'Background'),
+-- voir la migration commentée plus haut. Les fonds d'écran de l'accueil et du mode
+-- Affichage sont désormais tous des lignes display_assets.
 -- ============================================================
-
-CREATE TABLE IF NOT EXISTS backgrounds (
-  id          bigserial PRIMARY KEY,
-  nom         text NOT NULL UNIQUE,
-  image_url   text NOT NULL DEFAULT ''
-);
-
-ALTER TABLE backgrounds ENABLE ROW LEVEL SECURITY;
-
--- backgrounds : lecture publique, écriture bloquée pour anon (via Netlify Function seulement)
-CREATE POLICY "Public read backgrounds"
-  ON backgrounds FOR SELECT
-  TO anon
-  USING (true);
 
 -- ============================================================
 -- Journal de campagne (Sessions / Chapitres)
@@ -680,8 +686,8 @@ CREATE POLICY "Public delete push_subscriptions"
 -- ============================================================
 
 -- Images d'affichage importées par CSV via Netlify Function (Nom/Type/Image).
--- Les fonds d'écran réutilisent la table backgrounds existante ; cette table
--- couvre les PNJ (type = 'NPC') et les futurs types à venir.
+-- Couvre les PNJ (type = 'NPC') et les fonds d'écran (type = 'Background', ex-table
+-- backgrounds fusionnée ici) et les futurs types à venir.
 CREATE TABLE IF NOT EXISTS display_assets (
   id          bigserial PRIMARY KEY,
   nom         text NOT NULL UNIQUE,
@@ -700,12 +706,13 @@ CREATE POLICY "Public read display_assets"
 -- État courant de l'écran d'affichage (ligne unique, éditée en direct depuis
 -- Admin → Affichage, poussée en temps réel via Supabase Realtime).
 CREATE TABLE IF NOT EXISTS display_state (
-  id            bigserial PRIMARY KEY,
-  background_id bigint REFERENCES backgrounds(id) ON DELETE SET NULL,
-  npc_ids       jsonb NOT NULL DEFAULT '[]'::jsonb,
-  pokemon_ids   jsonb NOT NULL DEFAULT '[]'::jsonb,
-  item_id       bigint REFERENCES items(id) ON DELETE SET NULL,
-  updated_at    timestamptz NOT NULL DEFAULT now(),
+  id             bigserial PRIMARY KEY,
+  background_id  bigint REFERENCES display_assets(id) ON DELETE SET NULL,
+  background_url text,
+  npc_ids        jsonb NOT NULL DEFAULT '[]'::jsonb,
+  pokemon_ids    jsonb NOT NULL DEFAULT '[]'::jsonb,
+  item_ids       jsonb NOT NULL DEFAULT '[]'::jsonb,
+  updated_at     timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT single_row CHECK (id = 1)
 );
 INSERT INTO display_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING;

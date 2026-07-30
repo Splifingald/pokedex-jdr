@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { Item } from '../../types'
 import { ReferencePopupShell } from './ReferencePopupShell'
 import { rarityBadgeStyle } from '../../lib/rarityColors'
@@ -6,12 +7,14 @@ import { PokedollarIcon } from '../PokedollarIcon'
 interface Props {
   item: Item
   pokedollarImageUrl?: string | null
+  displayBar?: ReactNode
   onClose: () => void
 }
 
-export function ItemReferencePopup({ item, pokedollarImageUrl, onClose }: Props) {
+export function ItemReferencePopup({ item, pokedollarImageUrl, displayBar, onClose }: Props) {
   return (
     <ReferencePopupShell icon="🎒" title={item.nom} onClose={onClose}>
+      {displayBar}
       <div className="flex flex-col items-center text-center">
         <div className="w-20 h-20 flex items-center justify-center mb-3">
           {item.image_url ? (

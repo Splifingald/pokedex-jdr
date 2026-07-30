@@ -5,9 +5,10 @@ import type { DisplayState } from '../types'
 const DEFAULTS: DisplayState = {
   id: 1,
   background_id: null,
+  background_url: null,
   npc_ids: [],
   pokemon_ids: [],
-  item_id: null,
+  item_ids: [],
   updated_at: '',
 }
 

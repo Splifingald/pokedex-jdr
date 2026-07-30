@@ -2,14 +2,22 @@ import { useEffect, useRef, useState } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import type { JSONContent } from '@tiptap/core'
+import type { DisplayAsset, DisplayState } from '../../types'
 import type { ReferenceEntry, ReferenceIndex } from '../../hooks/useReferenceIndex'
 import { ReferenceHighlight, forceReferenceRecompute } from '../../lib/referenceExtension'
+import { DisplayCommandHighlight, forceDisplayCommandRecompute } from '../../lib/displayCommandExtension'
+import { executeDisplayCommand, type DisplayCommand } from '../../lib/displayCommand'
+import type { UpdateDisplayState } from '../../lib/displayActions'
+import { useToast } from '../../context/ToastContext'
 
 interface Props {
   notes: JSONContent
   onSave: (notes: JSONContent) => void
   referenceIndex: ReferenceIndex
   onReferenceClick: (entry: ReferenceEntry) => void
+  displayState: DisplayState
+  displayAssets: DisplayAsset[]
+  updateDisplayState: UpdateDisplayState
 }
 
 const AUTOSAVE_DELAY_MS = 10000
@@ -17,12 +25,28 @@ const AUTOSAVE_DELAY_MS = 10000
 // Éditeur de notes de MJ : texte brut uniquement (pas de titres/couleurs/emoji),
 // mais garde le référencement (@Pokémon/attaque/objet/lieu/joueur). Sauvegarde
 // automatique 10s après la dernière frappe, ou immédiatement via Ctrl+S.
-export function NotesEditor({ notes, onSave, referenceIndex, onReferenceClick }: Props) {
+export function NotesEditor({ notes, onSave, referenceIndex, onReferenceClick, displayState, displayAssets, updateDisplayState }: Props) {
   const [status, setStatus] = useState<'idle' | 'pending' | 'saved'>('idle')
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const savedBadgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const indexRef = useRef(referenceIndex)
   useEffect(() => { indexRef.current = referenceIndex }, [referenceIndex])
+  const { showToast } = useToast()
+
+  const displayStateRef = useRef(displayState)
+  useEffect(() => { displayStateRef.current = displayState }, [displayState])
+  const displayAssetsRef = useRef(displayAssets)
+  useEffect(() => { displayAssetsRef.current = displayAssets }, [displayAssets])
+
+  const handleDisplayCommand = (cmd: DisplayCommand) => {
+    executeDisplayCommand(cmd, {
+      referenceIndex: indexRef.current,
+      displayState: displayStateRef.current,
+      displayAssets: displayAssetsRef.current,
+      updateDisplayState,
+      showToast,
+    })
+  }
 
   const editor = useEditor({
     content: notes,
@@ -39,9 +63,19 @@ export function NotesEditor({ notes, onSave, referenceIndex, onReferenceClick }:
         orderedList: false,
         horizontalRule: false,
       }),
+      // getIndex/getDisplayAssets are only invoked lazily by the plugin (on doc change/click),
+      // never read synchronously during this render
+      // eslint-disable-next-line react-hooks/refs
       ReferenceHighlight.configure({
         getIndex: () => indexRef.current,
+        getDisplayAssets: () => displayAssetsRef.current,
         onReferenceClick,
+      }),
+      // eslint-disable-next-line react-hooks/refs -- same lazy-getter pattern as above
+      DisplayCommandHighlight.configure({
+        getIndex: () => indexRef.current,
+        getDisplayAssets: () => displayAssetsRef.current,
+        onCommand: handleDisplayCommand,
       }),
     ],
     onUpdate: () => {
@@ -53,6 +87,7 @@ export function NotesEditor({ notes, onSave, referenceIndex, onReferenceClick }:
 
   useEffect(() => {
     if (editor) forceReferenceRecompute(editor)
+    if (editor) forceDisplayCommandRecompute(editor)
   }, [editor, referenceIndex])
 
   const save = () => {

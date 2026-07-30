@@ -332,21 +332,9 @@ export interface PushSubscriptionRow {
   created_at: string
 }
 
-// ── Fonds d'écran (accueil) ───────────────────────────────────
-export interface Background {
-  id: number
-  nom: string
-  image_url: string
-}
-
-export interface BackgroundCsvRow {
-  'Nom': string
-  'Image': string
-}
-
-export const BACKGROUND_CSV_REQUIRED_HEADERS: (keyof BackgroundCsvRow)[] = ['Nom', 'Image']
-
 // ── Mode Affichage ───────────────────────────────────────────
+// Types en usage dans display_assets.type : 'NPC' (figures PNJ) et 'Background'
+// (fonds d'écran, table `backgrounds` fusionnée ici — voir schema.sql).
 export interface DisplayAsset {
   id: number
   nom: string
@@ -365,9 +353,11 @@ export const DISPLAY_ASSET_CSV_REQUIRED_HEADERS: (keyof DisplayAssetCsvRow)[] = 
 export interface DisplayState {
   id: number
   background_id: number | null
+  /** Fond personnalisé (ex : bannière de chapitre/session) — prioritaire sur background_id quand renseigné. */
+  background_url: string | null
   npc_ids: number[]
   pokemon_ids: number[]
-  item_id: number | null
+  item_ids: number[]
   updated_at: string
 }
 

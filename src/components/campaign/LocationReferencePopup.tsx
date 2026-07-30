@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Attack, CarteLocation, Encounter, Pokemon } from '../../types'
 import { ReferencePopupShell } from './ReferencePopupShell'
 import { ImageLightbox } from '../ImageLightbox'
@@ -15,10 +15,11 @@ interface Props {
   encounters: Encounter[]
   pokemonByName: Map<string, Pokemon>
   attacksByName: Map<string, Attack>
+  displayBar?: ReactNode
   onClose: () => void
 }
 
-export function LocationReferencePopup({ location, encounters, pokemonByName, attacksByName, onClose }: Props) {
+export function LocationReferencePopup({ location, encounters, pokemonByName, attacksByName, displayBar, onClose }: Props) {
   const [viewerOpen, setViewerOpen] = useState(false)
   const [quickPick, setQuickPick] = useState<number | null>(null)
   const [selectedPokemon, setSelectedPokemon] = useState<Pokemon | null>(null)
@@ -41,6 +42,7 @@ export function LocationReferencePopup({ location, encounters, pokemonByName, at
   return (
     <>
       <ReferencePopupShell icon="📍" title={location.titre} onClose={onClose}>
+        {displayBar}
         {location.type && (
           <span className="inline-block mb-2 text-xs bg-cream-secondary border-2 border-ink rounded px-1.5 py-0.5 text-ink-muted uppercase">
             {location.type}

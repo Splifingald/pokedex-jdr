@@ -4,7 +4,7 @@ import { DEFAULT_ACCUEIL_IMAGE_URL, ownedPokemonName, POKEDOLLAR_ITEM_NAME } fro
 import { usePlayerPokemon } from '../hooks/usePlayerPokemon'
 import { usePlayerItems } from '../hooks/usePlayerItems'
 import { useAdminParameters } from '../hooks/useAdminParameters'
-import { useBackgrounds } from '../hooks/useBackgrounds'
+import { useDisplayAssets } from '../hooks/useDisplayAssets'
 import { useGiftLootboxes } from '../hooks/useGiftLootboxes'
 import { useToast } from '../context/ToastContext'
 import { RoamingPokemonSprite } from './RoamingPokemonSprite'
@@ -44,7 +44,7 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
   const { roster, updateXp, updateNickname, toggleInTeam, setNextGiftAt, addMove, removeMove, deleteOwnedPokemon } = usePlayerPokemon(player?.id ?? null)
   const { pokedollars, addItems, setPokedollars } = playerItems
   const { parameters } = useAdminParameters()
-  const { backgrounds } = useBackgrounds()
+  const { backgrounds } = useDisplayAssets()
   const { lootboxes, lootboxItems, speciesAssignments } = useGiftLootboxes()
   const { showToast } = useToast()
 

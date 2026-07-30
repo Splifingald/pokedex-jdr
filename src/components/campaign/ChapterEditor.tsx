@@ -4,10 +4,14 @@ import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import { TextStyle } from '@tiptap/extension-text-style'
 import Color from '@tiptap/extension-color'
-import type { CampaignChapter, Player, CarteLocation, Attack, Item, Pokemon, Encounter } from '../../types'
+import type { CampaignChapter, Player, CarteLocation, Attack, Item, Pokemon, Encounter, DisplayAsset, DisplayState } from '../../types'
 import { EMPTY_CHAPTER_CONTENT } from '../../types'
 import type { ReferenceEntry, ReferenceIndex } from '../../hooks/useReferenceIndex'
 import { ReferenceHighlight, forceReferenceRecompute } from '../../lib/referenceExtension'
+import { DisplayCommandHighlight, forceDisplayCommandRecompute } from '../../lib/displayCommandExtension'
+import { executeDisplayCommand, type DisplayCommand } from '../../lib/displayCommand'
+import type { UpdateDisplayState } from '../../lib/displayActions'
+import { useToast } from '../../context/ToastContext'
 import { EditorToolbar } from './EditorToolbar'
 import { EmojiPickerButton } from './EmojiPickerButton'
 import { CampaignIcon } from './CampaignIcon'
@@ -33,6 +37,9 @@ interface Props {
   playersByName: Map<string, Player>
   locationsByName: Map<string, CarteLocation>
   encountersByLieu: Map<string, Encounter[]>
+  displayState: DisplayState
+  displayAssets: DisplayAsset[]
+  updateDisplayState: UpdateDisplayState
   onUpdate: (id: number, data: { title?: string; icon?: string; image_url?: string | null; image_position?: number; content?: CampaignChapter['content']; done?: boolean }) => void
   onDelete: (id: number) => void
   onBack: () => void
@@ -47,6 +54,9 @@ export function ChapterEditor({
   playersByName,
   locationsByName,
   encountersByLieu,
+  displayState,
+  displayAssets,
+  updateDisplayState,
   onUpdate,
   onDelete,
   onBack,
@@ -60,9 +70,27 @@ export function ChapterEditor({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [activeReference, setActiveReference] = useState<ReferenceEntry | null>(null)
   const { setGuard, guardedNavigate } = useUnsavedChangesGuard()
+  const { showToast } = useToast()
 
   const indexRef = useRef(referenceIndex)
   useEffect(() => { indexRef.current = referenceIndex }, [referenceIndex])
+
+  // Refs pour lire l'état d'affichage courant depuis le callback de commande texte
+  // (enregistré une seule fois dans useEditor, comme referenceIndex ci-dessus)
+  const displayStateRef = useRef(displayState)
+  useEffect(() => { displayStateRef.current = displayState }, [displayState])
+  const displayAssetsRef = useRef(displayAssets)
+  useEffect(() => { displayAssetsRef.current = displayAssets }, [displayAssets])
+
+  const handleDisplayCommand = (cmd: DisplayCommand) => {
+    executeDisplayCommand(cmd, {
+      referenceIndex: indexRef.current,
+      displayState: displayStateRef.current,
+      displayAssets: displayAssetsRef.current,
+      updateDisplayState,
+      showToast,
+    })
+  }
 
   const editor = useEditor({
     content: chapter.content ?? EMPTY_CHAPTER_CONTENT,
@@ -71,9 +99,19 @@ export function ChapterEditor({
       Underline,
       TextStyle,
       Color,
+      // getIndex/getDisplayAssets are only invoked lazily by the plugin (on doc change/click),
+      // never read synchronously during this render
+      // eslint-disable-next-line react-hooks/refs
       ReferenceHighlight.configure({
         getIndex: () => indexRef.current,
+        getDisplayAssets: () => displayAssetsRef.current,
         onReferenceClick: (entry) => setActiveReference(entry),
+      }),
+      // eslint-disable-next-line react-hooks/refs -- same lazy-getter pattern as above
+      DisplayCommandHighlight.configure({
+        getIndex: () => indexRef.current,
+        getDisplayAssets: () => displayAssetsRef.current,
+        onCommand: handleDisplayCommand,
       }),
     ],
     onUpdate: () => setDirty(true),
@@ -83,6 +121,7 @@ export function ChapterEditor({
   // (ex : un PNJ ajouté ailleurs dans l'app pendant que ce chapitre est ouvert)
   useEffect(() => {
     if (editor) forceReferenceRecompute(editor)
+    if (editor) forceDisplayCommandRecompute(editor)
   }, [editor, referenceIndex])
 
   useEffect(() => {
@@ -199,7 +238,7 @@ export function ChapterEditor({
         </div>
 
         <div className="sticky top-0 z-10">
-          <EditorToolbar editor={editor} />
+          <EditorToolbar editor={editor} referenceIndex={referenceIndex} displayAssets={displayAssets} />
         </div>
 
         <div className="p-4">
@@ -230,6 +269,9 @@ export function ChapterEditor({
         playersByName={playersByName}
         locationsByName={locationsByName}
         encountersByLieu={encountersByLieu}
+        displayState={displayState}
+        displayAssets={displayAssets}
+        updateDisplayState={updateDisplayState}
         onClose={() => setActiveReference(null)}
       />
     </div>

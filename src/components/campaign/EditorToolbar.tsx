@@ -1,10 +1,15 @@
 import type { ReactNode } from 'react'
 import type { Editor } from '@tiptap/core'
+import type { DisplayAsset } from '../../types'
+import type { ReferenceIndex } from '../../hooks/useReferenceIndex'
 import { EmojiPickerButton } from './EmojiPickerButton'
+import { DisplayCommandPickerButton } from './DisplayCommandPickerButton'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 
 interface Props {
   editor: Editor | null
+  referenceIndex: ReferenceIndex
+  displayAssets: DisplayAsset[]
 }
 
 const TEXT_COLORS = ['#201c14', '#dc0a2d', '#e8933d', '#a3841a', '#4caf6b', '#4a7fd6', '#a040a0']
@@ -22,7 +27,7 @@ function ToolbarButton({ active, onClick, children, title }: { active?: boolean;
   )
 }
 
-export function EditorToolbar({ editor }: Props) {
+export function EditorToolbar({ editor, referenceIndex, displayAssets }: Props) {
   if (!editor) return null
 
   return (
@@ -98,6 +103,8 @@ export function EditorToolbar({ editor }: Props) {
         triggerClassName={`w-8 h-8 rounded text-sm flex items-center justify-center shrink-0 ${BUTTON_STYLE.gray}`}
         onSelect={(emoji) => editor.chain().focus().insertContent(emoji).run()}
       />
+
+      <DisplayCommandPickerButton editor={editor} referenceIndex={referenceIndex} displayAssets={displayAssets} />
     </div>
   )
 }

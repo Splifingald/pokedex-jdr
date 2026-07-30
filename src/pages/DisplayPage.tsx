@@ -1,6 +1,5 @@
 import { useEffect, useMemo } from 'react'
 import { useDisplayState } from '../hooks/useDisplayState'
-import { useBackgrounds } from '../hooks/useBackgrounds'
 import { useDisplayAssets } from '../hooks/useDisplayAssets'
 import { usePokemon } from '../hooks/usePokemon'
 import { useItems } from '../hooks/useItems'
@@ -15,7 +14,6 @@ import { resolveDisplayState } from '../lib/resolveDisplayState'
 // activé côté Supabase pour la table display_state.
 export function DisplayPage() {
   const { state } = useDisplayState()
-  const { backgrounds } = useBackgrounds()
   const { assets } = useDisplayAssets()
   const { pokemon } = usePokemon()
   const { items } = useItems()
@@ -32,14 +30,14 @@ export function DisplayPage() {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  const { backgroundUrl, npcs, pokemons, item } = useMemo(
-    () => resolveDisplayState(state, backgrounds, assets, pokemon, items),
-    [state, backgrounds, assets, pokemon, items]
+  const { backgroundUrl, npcs, pokemons, items: displayItems } = useMemo(
+    () => resolveDisplayState(state, assets, pokemon, items),
+    [state, assets, pokemon, items]
   )
 
   return (
     <div className="fixed inset-0 w-screen h-screen">
-      <DisplayCanvas backgroundUrl={backgroundUrl} npcs={npcs} pokemons={pokemons} item={item} className="w-full h-full" />
+      <DisplayCanvas backgroundUrl={backgroundUrl} npcs={npcs} pokemons={pokemons} items={displayItems} className="w-full h-full" />
       <button
         onClick={toggle}
         aria-label="Basculer le plein écran"

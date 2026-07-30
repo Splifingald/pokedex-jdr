@@ -1,4 +1,4 @@
-import type { Background, DisplayAsset, DisplayState, Item, Pokemon } from '../types'
+import type { DisplayAsset, DisplayState, Item, Pokemon } from '../types'
 
 interface DisplayFigure {
   id: number
@@ -8,12 +8,11 @@ interface DisplayFigure {
 
 export function resolveDisplayState(
   state: DisplayState,
-  backgrounds: Background[],
   assets: DisplayAsset[],
   pokemonList: Pokemon[],
-  items: Item[]
+  itemsList: Item[]
 ) {
-  const backgroundUrl = backgrounds.find((b) => b.id === state.background_id)?.image_url ?? null
+  const backgroundUrl = state.background_url?.trim() || assets.find((a) => a.id === state.background_id)?.image_url || null
 
   const npcs: DisplayFigure[] = state.npc_ids
     .map((id) => assets.find((a) => a.id === id))
@@ -25,8 +24,10 @@ export function resolveDisplayState(
     .filter((p): p is Pokemon => !!p)
     .map((p) => ({ id: p.id, nom: p.nom, image_url: p.image_miniature }))
 
-  const found = items.find((i) => i.id === state.item_id)
-  const item: DisplayFigure | null = found ? { id: found.id, nom: found.nom, image_url: found.image_url ?? '' } : null
+  const items: DisplayFigure[] = state.item_ids
+    .map((id) => itemsList.find((i) => i.id === id))
+    .filter((i): i is Item => !!i)
+    .map((i) => ({ id: i.id, nom: i.nom, image_url: i.image_url ?? '' }))
 
-  return { backgroundUrl, npcs, pokemons, item }
+  return { backgroundUrl, npcs, pokemons, items }
 }

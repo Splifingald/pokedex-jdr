@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, type ReactNode } from 'react'
 import type { Pokemon, PlayerPokemon, Attack } from '../types'
 import { ownedPokemonName } from '../types'
 import { SheetShell } from './SheetShell'
@@ -41,6 +41,8 @@ interface Props {
   onClose: () => void
   /** Passe au-dessus des popups z-50 (ex : ouvert depuis une table de rencontres déjà en popup) */
   elevated?: boolean
+  /** Boutons "affichage" (DisplayControlBar), fournis uniquement depuis ReferenceDispatcher */
+  displayBar?: ReactNode
 
   // Instance possédée (contexts home / pokemon)
   teamFull?: boolean
@@ -160,6 +162,7 @@ export function PokemonDetailSheet({
   isAdmin = false,
   onClose,
   elevated = false,
+  displayBar,
   teamFull = false,
   isNpc = false,
   maxMoves,
@@ -250,6 +253,8 @@ export function PokemonDetailSheet({
             ✕
           </button>
         </div>
+
+        {displayBar}
 
         {pokemon?.audio_url && <AudioDescriptionPlayer key={pokemon.id} audioUrl={pokemon.audio_url} />}
 

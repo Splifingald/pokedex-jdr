@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
-import type { CampaignSession, Player, CarteLocation, Attack, Item, Pokemon, Encounter } from '../../types'
+import type { CampaignSession, Player, CarteLocation, Attack, Item, Pokemon, Encounter, DisplayAsset, DisplayState } from '../../types'
 import { EMPTY_CHAPTER_CONTENT } from '../../types'
 import type { ReferenceEntry, ReferenceIndex } from '../../hooks/useReferenceIndex'
+import type { UpdateDisplayState } from '../../lib/displayActions'
 import { useCampaignChapters } from '../../hooks/useCampaignChapters'
 import { ChapterCard } from './ChapterCard'
 import { ChapterEditor } from './ChapterEditor'
 import { ChapterViewPopup } from './ChapterViewPopup'
 import { SessionViewPopup } from './SessionViewPopup'
 import { ReferenceDispatcher } from './ReferenceDispatcher'
+import { SetBannerBackgroundButton } from './SetBannerBackgroundButton'
 import { EditableHeaderImage } from './EditableHeaderImage'
 import { EmojiPickerButton } from './EmojiPickerButton'
 import { CampaignIcon } from './CampaignIcon'
@@ -33,6 +35,9 @@ interface Props {
   playersByName: Map<string, Player>
   locationsByName: Map<string, CarteLocation>
   encountersByLieu: Map<string, Encounter[]>
+  displayState: DisplayState
+  displayAssets: DisplayAsset[]
+  updateDisplayState: UpdateDisplayState
 }
 
 const emptyChapterForm = { title: '', icon: '📄', image_url: '' }
@@ -49,6 +54,9 @@ export function SessionDetailView({
   playersByName,
   locationsByName,
   encountersByLieu,
+  displayState,
+  displayAssets,
+  updateDisplayState,
 }: Props) {
   const { chapters, loading, createChapter, updateChapter, deleteChapter, reorderChapters } = useCampaignChapters(session.id)
   const [selectedChapterId, setSelectedChapterId] = useState<number | null>(null)
@@ -96,6 +104,9 @@ export function SessionDetailView({
         playersByName={playersByName}
         locationsByName={locationsByName}
         encountersByLieu={encountersByLieu}
+        displayState={displayState}
+        displayAssets={displayAssets}
+        updateDisplayState={updateDisplayState}
         onUpdate={(id, data) => updateChapter(id, data)}
         onDelete={(id) => { deleteChapter(id); setSelectedChapterId(null) }}
         onBack={() => setSelectedChapterId(null)}
@@ -160,17 +171,20 @@ export function SessionDetailView({
         )
       ) : (
         session.image_url && (
-          <button
-            onClick={() => setViewerOpen(true)}
-            className="block w-full h-32 rounded-lg overflow-hidden mb-3 border-2 border-ink"
-          >
-            <img
-              src={session.image_url}
-              alt={session.title}
-              className="w-full h-full object-cover"
-              style={{ objectPosition: `50% ${session.image_position ?? 50}%` }}
-            />
-          </button>
+          <div className="relative w-full h-32 rounded-lg overflow-hidden mb-3 border-2 border-ink">
+            <button
+              onClick={() => setViewerOpen(true)}
+              className="block w-full h-full"
+            >
+              <img
+                src={session.image_url}
+                alt={session.title}
+                className="w-full h-full object-cover"
+                style={{ objectPosition: `50% ${session.image_position ?? 50}%` }}
+              />
+            </button>
+            <SetBannerBackgroundButton imageUrl={session.image_url} updateDisplayState={updateDisplayState} />
+          </div>
         )
       )}
 
@@ -329,6 +343,9 @@ export function SessionDetailView({
           playersByName={playersByName}
           locationsByName={locationsByName}
           encountersByLieu={encountersByLieu}
+          displayState={displayState}
+          displayAssets={displayAssets}
+          updateDisplayState={updateDisplayState}
           onToggleDone={() => updateChapter(viewingChapter.id, { done: !viewingChapter.done })}
           onSaveNotes={(notes) => updateChapter(viewingChapter.id, { notes })}
           onClose={() => setViewingChapterId(null)}
@@ -346,6 +363,9 @@ export function SessionDetailView({
           playersByName={playersByName}
           locationsByName={locationsByName}
           encountersByLieu={encountersByLieu}
+          displayState={displayState}
+          displayAssets={displayAssets}
+          updateDisplayState={updateDisplayState}
           onClose={() => setViewingSession(false)}
         />
       )}
@@ -356,6 +376,9 @@ export function SessionDetailView({
           onSave={(notes) => onUpdateSession(session.id, { notes })}
           referenceIndex={referenceIndex}
           onReferenceClick={(entry) => setSessionNotesReference(entry)}
+          displayState={displayState}
+          displayAssets={displayAssets}
+          updateDisplayState={updateDisplayState}
         />
       )}
 
@@ -367,6 +390,9 @@ export function SessionDetailView({
         playersByName={playersByName}
         locationsByName={locationsByName}
         encountersByLieu={encountersByLieu}
+        displayState={displayState}
+        displayAssets={displayAssets}
+        updateDisplayState={updateDisplayState}
         onClose={() => setSessionNotesReference(null)}
       />
 

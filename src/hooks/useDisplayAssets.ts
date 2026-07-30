@@ -26,6 +26,7 @@ export function useDisplayAssets() {
   }, [fetchAll])
 
   const npcs = useMemo(() => assets.filter((a) => a.type === 'NPC'), [assets])
+  const backgrounds = useMemo(() => assets.filter((a) => a.type === 'Background'), [assets])
 
-  return { assets, npcs, loading, error, refetch: fetchAll }
+  return { assets, npcs, backgrounds, loading, error, refetch: fetchAll }
 }

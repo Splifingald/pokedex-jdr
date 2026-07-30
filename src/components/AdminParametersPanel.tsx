@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useAdminParameters } from '../hooks/useAdminParameters'
-import { useBackgrounds } from '../hooks/useBackgrounds'
+import { useDisplayAssets } from '../hooks/useDisplayAssets'
 import { NumberInput } from './NumberInput'
 
 const CUSTOM_BACKGROUND = '__custom__'
 
 export function AdminParametersPanel() {
   const { parameters, loading, updateParameters } = useAdminParameters()
-  const { backgrounds, loading: backgroundsLoading } = useBackgrounds()
+  const { backgrounds, loading: backgroundsLoading } = useDisplayAssets()
   const [maxMoves, setMaxMoves] = useState(parameters.max_moves)
   const [maxTeamSize, setMaxTeamSize] = useState(parameters.max_team_size)
   const [carteImageUrl, setCarteImageUrl] = useState(parameters.carte_image_url)
@@ -166,7 +166,7 @@ export function AdminParametersPanel() {
                 )}
 
                 <p className="text-ink-muted-2 text-xs mt-1">
-                  Gérés via Import CSV (colonnes « Nom » / « Image »). Le premier de la liste est le fond par défaut.
+                  Gérés via Import CSV (colonnes « Nom » / « Type » = Fond / « Image »). Le premier de la liste est le fond par défaut.
                 </p>
               </>
             )}
