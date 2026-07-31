@@ -1,5 +1,7 @@
 import { setBackgroundUrl, type UpdateDisplayState } from '../../lib/displayActions'
 import { useToast } from '../../context/ToastContext'
+import { PixelIcon } from '../icons/PixelIcon'
+import { DISPLAY_ICON } from '../../lib/icons'
 
 interface Props {
   imageUrl: string
@@ -22,7 +24,7 @@ export function SetBannerBackgroundButton({ imageUrl, updateDisplayState }: Prop
       }}
       className="absolute bottom-1.5 right-1.5 w-7 h-7 rounded-md flex items-center justify-center text-sm bg-black/50 text-white hover:bg-black/70 transition-colors"
     >
-      🖼️
+      <PixelIcon src={DISPLAY_ICON} size={16} colored />
     </button>
   )
 }

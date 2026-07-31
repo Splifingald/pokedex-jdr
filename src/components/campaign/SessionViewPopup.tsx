@@ -9,6 +9,7 @@ import { EMPTY_CHAPTER_CONTENT } from '../../types'
 import type { ReferenceEntry, ReferenceIndex } from '../../hooks/useReferenceIndex'
 import { ReferenceHighlight, forceReferenceRecompute } from '../../lib/referenceExtension'
 import { DisplayCommandHighlight, forceDisplayCommandRecompute } from '../../lib/displayCommandExtension'
+import { Banner } from '../../lib/bannerExtension'
 import { executeDisplayCommand, type DisplayCommand } from '../../lib/displayCommand'
 import type { UpdateDisplayState } from '../../lib/displayActions'
 import { useToast } from '../../context/ToastContext'
@@ -16,6 +17,7 @@ import { ReferenceDispatcher } from './ReferenceDispatcher'
 import { PANEL_LG } from '../../lib/panelStyles'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 import { CampaignIcon } from './CampaignIcon'
+import { CloseIcon } from '../icons/CloseIcon'
 
 interface BlockProps {
   chapter: CampaignChapter
@@ -35,6 +37,8 @@ function SessionViewChapterBlock({ chapter, referenceIndex, onReferenceClick, di
   useEffect(() => { displayStateRef.current = displayState }, [displayState])
   const displayAssetsRef = useRef(displayAssets)
   useEffect(() => { displayAssetsRef.current = displayAssets }, [displayAssets])
+  const updateDisplayStateRef = useRef(updateDisplayState)
+  useEffect(() => { updateDisplayStateRef.current = updateDisplayState }, [updateDisplayState])
 
   const handleDisplayCommand = (cmd: DisplayCommand) => {
     executeDisplayCommand(cmd, {
@@ -68,6 +72,10 @@ function SessionViewChapterBlock({ chapter, referenceIndex, onReferenceClick, di
         getDisplayAssets: () => displayAssetsRef.current,
         onCommand: handleDisplayCommand,
       }),
+      // eslint-disable-next-line react-hooks/refs -- same lazy-getter pattern as above
+      Banner.configure({
+        getUpdateDisplayState: () => updateDisplayStateRef.current,
+      }),
     ],
   })
 
@@ -86,14 +94,6 @@ function SessionViewChapterBlock({ chapter, referenceIndex, onReferenceClick, di
         <h4 className="font-bold text-ink flex-1 truncate">{chapter.title}</h4>
         {chapter.done && <span title="Terminé">✅</span>}
       </div>
-      {chapter.image_url && (
-        <img
-          src={chapter.image_url}
-          alt={chapter.title}
-          className="w-full h-28 object-cover rounded-lg mb-3 border-2 border-ink"
-          style={{ objectPosition: `50% ${chapter.image_position ?? 50}%` }}
-        />
-      )}
       <EditorContent editor={editor} />
     </div>
   )
@@ -153,7 +153,7 @@ export function SessionViewPopup({
             onClick={onClose}
             className={`w-8 h-8 shrink-0 rounded-md text-sm font-bold ${BUTTON_STYLE.gray}`}
           >
-            ✕
+            <CloseIcon className="w-4 h-4 mx-auto" />
           </button>
         </div>
 

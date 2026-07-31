@@ -10,6 +10,10 @@ export function AdminParametersPanel() {
   const { backgrounds, loading: backgroundsLoading } = useDisplayAssets()
   const [maxMoves, setMaxMoves] = useState(parameters.max_moves)
   const [maxTeamSize, setMaxTeamSize] = useState(parameters.max_team_size)
+  const [statPointsBase, setStatPointsBase] = useState(parameters.stat_points_base)
+  const [statMin, setStatMin] = useState(parameters.stat_min)
+  const [statMax, setStatMax] = useState(parameters.stat_max)
+  const [statPointsPerLevel, setStatPointsPerLevel] = useState(parameters.stat_points_per_level)
   const [carteImageUrl, setCarteImageUrl] = useState(parameters.carte_image_url)
   const [carteCouleursImageUrl, setCarteCouleursImageUrl] = useState(parameters.carte_couleurs_image_url)
   const [accueilMode, setAccueilMode] = useState<'preset' | 'custom'>('preset')
@@ -19,6 +23,10 @@ export function AdminParametersPanel() {
   useEffect(() => {
     setMaxMoves(parameters.max_moves)
     setMaxTeamSize(parameters.max_team_size)
+    setStatPointsBase(parameters.stat_points_base)
+    setStatMin(parameters.stat_min)
+    setStatMax(parameters.stat_max)
+    setStatPointsPerLevel(parameters.stat_points_per_level)
     setCarteImageUrl(parameters.carte_image_url)
     setCarteCouleursImageUrl(parameters.carte_couleurs_image_url)
   }, [parameters])
@@ -66,6 +74,30 @@ export function AdminParametersPanel() {
     updateParameters({ max_moves: maxMoves, max_team_size: clamped })
   }
 
+  const commitStatPointsBase = (v: number) => {
+    const clamped = Math.max(0, v)
+    setStatPointsBase(clamped)
+    updateParameters({ stat_points_base: clamped })
+  }
+
+  const commitStatMin = (v: number) => {
+    const clamped = Math.max(0, v)
+    setStatMin(clamped)
+    updateParameters({ stat_min: clamped })
+  }
+
+  const commitStatMax = (v: number) => {
+    const clamped = Math.max(0, v)
+    setStatMax(clamped)
+    updateParameters({ stat_max: clamped })
+  }
+
+  const commitStatPointsPerLevel = (v: number) => {
+    const clamped = Math.max(0, v)
+    setStatPointsPerLevel(clamped)
+    updateParameters({ stat_points_per_level: clamped })
+  }
+
   const saveCarte = () => {
     updateParameters({ carte_image_url: carteImageUrl, carte_couleurs_image_url: carteCouleursImageUrl })
   }
@@ -101,6 +133,52 @@ export function AdminParametersPanel() {
               onCommit={commitMaxTeamSize}
               className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
             />
+          </div>
+
+          <div className="border-t-2 border-[#cfc7a8] pt-4">
+            <p className="text-ink-muted-2 text-sm mb-2">Règles de stats des joueurs</p>
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="text-ink-muted-2 text-sm block mb-1">Points de stats de base (niveau 1)</label>
+                <NumberInput
+                  min={0}
+                  fallback={0}
+                  value={statPointsBase}
+                  onCommit={commitStatPointsBase}
+                  className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-ink-muted-2 text-sm block mb-1">Stat minimum</label>
+                <NumberInput
+                  min={0}
+                  fallback={0}
+                  value={statMin}
+                  onCommit={commitStatMin}
+                  className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-ink-muted-2 text-sm block mb-1">Stat maximum</label>
+                <NumberInput
+                  min={0}
+                  fallback={0}
+                  value={statMax}
+                  onCommit={commitStatMax}
+                  className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-ink-muted-2 text-sm block mb-1">Points de stats gagnés par niveau</label>
+                <NumberInput
+                  min={0}
+                  fallback={0}
+                  value={statPointsPerLevel}
+                  onCommit={commitStatPointsPerLevel}
+                  className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+                />
+              </div>
+            </div>
           </div>
 
           <div className="border-t-2 border-[#cfc7a8] pt-4">

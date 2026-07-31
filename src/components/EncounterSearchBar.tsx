@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react'
 import type { Pokemon } from '../types'
 import { normalizeSearch } from '../lib/normalizeSearch'
+import { CloseIcon } from './icons/CloseIcon'
+import { PixelIcon } from './icons/PixelIcon'
+import { STAT_ICON } from '../lib/icons'
 
 export interface EncounterFilter {
   type: 'lieu' | 'pokemon'
@@ -70,7 +73,7 @@ export function EncounterSearchBar({ lieux, pokemonNames, pokemonByName, onFilte
             onClick={handleClear}
             className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-muted-2 text-sm w-6 h-6 flex items-center justify-center"
           >
-            ✕
+            <CloseIcon className="w-3.5 h-3.5" />
           </button>
         )}
       </div>
@@ -87,8 +90,10 @@ export function EncounterSearchBar({ lieux, pokemonNames, pokemonByName, onFilte
               >
                 {pokemon?.image_miniature ? (
                   <img src={pokemon.image_miniature} alt={s.value} className="pixelated w-6 h-6 object-contain shrink-0" />
+                ) : s.type === 'lieu' ? (
+                  <span className="text-ink shrink-0"><PixelIcon src={STAT_ICON.location} size={14} colored /></span>
                 ) : (
-                  <span className="text-xs shrink-0">{s.type === 'lieu' ? '📍' : '🐾'}</span>
+                  <span className="text-xs shrink-0">🐾</span>
                 )}
                 <span className="text-ink text-sm truncate">{s.value}</span>
               </button>

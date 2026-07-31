@@ -27,7 +27,7 @@ export function AdminTab({ onImportSuccess }: Props) {
 
   return (
     <div className="flex-1 overflow-y-auto p-4">
-      <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 mb-4 max-w-lg">
+      <div className="grid grid-cols-1 sm:grid-cols-6 gap-2 mb-4 max-w-xl">
         {sections.map((s) => (
           <button
             key={s.id}

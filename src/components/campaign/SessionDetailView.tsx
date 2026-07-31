@@ -10,6 +10,7 @@ import { ChapterViewPopup } from './ChapterViewPopup'
 import { SessionViewPopup } from './SessionViewPopup'
 import { ReferenceDispatcher } from './ReferenceDispatcher'
 import { SetBannerBackgroundButton } from './SetBannerBackgroundButton'
+import { BannerPickerButton } from './BannerPickerButton'
 import { EditableHeaderImage } from './EditableHeaderImage'
 import { EmojiPickerButton } from './EmojiPickerButton'
 import { CampaignIcon } from './CampaignIcon'
@@ -18,6 +19,7 @@ import { NotesFab } from './NotesFab'
 import { ImageLightbox } from '../ImageLightbox'
 import { ConfirmPopup } from '../ConfirmPopup'
 import { PixelIcon } from '../icons/PixelIcon'
+import { EyeIcon } from '../icons/EyeIcon'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../../lib/panelStyles'
 import { formatDateFr } from '../../lib/formatDate'
@@ -40,7 +42,7 @@ interface Props {
   updateDisplayState: UpdateDisplayState
 }
 
-const emptyChapterForm = { title: '', icon: '📄', image_url: '' }
+const emptyChapterForm = { title: '', icon: '📄' }
 
 export function SessionDetailView({
   session,
@@ -132,7 +134,6 @@ export function SessionDetailView({
     const created = await createChapter({
       title: chapterForm.title,
       icon: chapterForm.icon,
-      image_url: chapterForm.image_url.trim() || null,
     })
     setCreatingChapter(false)
     setChapterForm(emptyChapterForm)
@@ -213,13 +214,23 @@ export function SessionDetailView({
             onChange={(e) => setSessionForm((f) => ({ ...f, session_date: e.target.value }))}
             className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none mb-2"
           />
-          <input
-            type="text"
-            value={sessionForm.image_url}
-            onChange={(e) => setSessionForm((f) => ({ ...f, image_url: e.target.value }))}
-            placeholder="Lien de l'image de référence (optionnel)"
-            className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none mb-3"
-          />
+          <div className="flex items-center gap-2 mb-3">
+            <BannerPickerButton
+              displayAssets={displayAssets}
+              onSelect={(url) => setSessionForm((f) => ({ ...f, image_url: url }))}
+              variant="button"
+              label={sessionForm.image_url ? "Changer l'image" : 'Choisir une image'}
+            />
+            {sessionForm.image_url && (
+              <button
+                type="button"
+                onClick={() => setSessionForm((f) => ({ ...f, image_url: '' }))}
+                className={`text-xs px-2 py-2 rounded ${BUTTON_STYLE.gray}`}
+              >
+                Retirer
+              </button>
+            )}
+          </div>
           <div className="grid grid-cols-2 gap-2">
             <button onClick={() => setEditingSession(false)} className={`py-2 rounded text-sm ${BUTTON_STYLE.gray}`}>
               Annuler
@@ -247,9 +258,9 @@ export function SessionDetailView({
           <button
             onClick={() => setViewingSession(true)}
             title="Voir toute la session"
-            className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
+            className={`text-xs rounded px-2 py-1 inline-flex items-center gap-1 ${BUTTON_STYLE.gray}`}
           >
-            👁 Voir tout
+            <EyeIcon className="w-3.5 h-3.5" /> Voir tout
           </button>
           <button onClick={() => setEditingSession(true)} className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}>
             Éditer
@@ -286,13 +297,6 @@ export function SessionDetailView({
               className="flex-1 bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
             />
           </div>
-          <input
-            type="text"
-            value={chapterForm.image_url}
-            onChange={(e) => setChapterForm((f) => ({ ...f, image_url: e.target.value }))}
-            placeholder="Lien de l'image de référence (optionnel)"
-            className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none mb-3"
-          />
           <button
             type="submit"
             disabled={creatingChapter || !chapterForm.title.trim()}

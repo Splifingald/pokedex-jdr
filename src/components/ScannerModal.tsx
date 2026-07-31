@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Pokemon } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
+import { CloseIcon } from './icons/CloseIcon'
 
 interface Props {
   pokemon: Pokemon[]
@@ -231,7 +232,7 @@ export function ScannerModal({ pokemon, discovered, onDiscover, onClose }: Props
           onClick={onClose}
           className="text-white text-2xl leading-none p-1 pointer-events-auto"
         >
-          ✕
+          <CloseIcon className="w-5 h-5" />
         </button>
         <span className="flex-1 text-center text-white/70 text-sm tracking-widest">
           SCANNER

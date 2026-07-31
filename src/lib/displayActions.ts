@@ -1,4 +1,4 @@
-import type { DisplayAsset, DisplayState } from '../types'
+import type { DisplayAsset, DisplayState, Player } from '../types'
 import type { ReferenceEntry, ReferenceType } from '../hooks/useReferenceIndex'
 import { addToLayer } from './displayLayers'
 
@@ -10,11 +10,22 @@ export type DisplayLayer = 'npc' | 'pokemon' | 'item' | 'background'
 export const normalizeName = (s: string) => s.trim().toLowerCase()
 const normalize = normalizeName
 
+/** Convention de signe pour `display_state.npc_ids` : les entrées ≥ 1 sont des
+ * `display_assets.id` (PNJ importés en CSV) ; les entrées ≤ -1 encodent `-players.id`,
+ * un joueur/PNJ dont l'image plein pied (`full_body_image_url`) vient directement de son
+ * profil. `display_assets.id` est toujours ≥ 1 (bigserial) donc ces plages ne se chevauchent
+ * jamais — pas de changement de schéma nécessaire pour `display_state.npc_ids` (jsonb, sans FK). */
+export function playerToDisplayAsset(player: Player): DisplayAsset {
+  return { id: -player.id, nom: player.name, type: 'NPC', image_url: player.full_body_image_url }
+}
+
 /** Un PNJ/Lieu ne pousse pas sa propre image (portrait/icône) sur l'affichage : on cherche
  * une entrée display_assets du bon type dont le nom correspond, pensée pour la projection
  * plein écran. Pokémon/Objet utilisent directement leur propre id (déjà la bonne table). */
-export function resolveDisplayAssetForReference(entry: ReferenceEntry, assets: DisplayAsset[]): DisplayAsset | null {
+export function resolveDisplayAssetForReference(entry: ReferenceEntry, assets: DisplayAsset[], players: Player[] = []): DisplayAsset | null {
   if (entry.type === 'player') {
+    const player = players.find((p) => normalize(p.name) === normalize(entry.name) && p.full_body_image_url.trim())
+    if (player) return playerToDisplayAsset(player)
     return assets.find((a) => a.type === 'NPC' && normalize(a.nom) === normalize(entry.name)) ?? null
   }
   if (entry.type === 'location') {
@@ -23,9 +34,9 @@ export function resolveDisplayAssetForReference(entry: ReferenceEntry, assets: D
   return null
 }
 
-export function canAddToDisplay(entry: ReferenceEntry, assets: DisplayAsset[]): boolean {
+export function canAddToDisplay(entry: ReferenceEntry, assets: DisplayAsset[], players: Player[] = []): boolean {
   if (entry.type === 'pokemon' || entry.type === 'item') return true
-  if (entry.type === 'player' || entry.type === 'location') return resolveDisplayAssetForReference(entry, assets) !== null
+  if (entry.type === 'player' || entry.type === 'location') return resolveDisplayAssetForReference(entry, assets, players) !== null
   return false
 }
 
@@ -63,7 +74,8 @@ export function addReferenceToDisplay(
   entry: ReferenceEntry,
   state: DisplayState,
   assets: DisplayAsset[],
-  updateDisplayState: UpdateDisplayState
+  updateDisplayState: UpdateDisplayState,
+  players: Player[] = []
 ): boolean {
   if (entry.type === 'pokemon') {
     updateDisplayState({ pokemon_ids: addToLayer(state.pokemon_ids, entry.id) })
@@ -74,13 +86,13 @@ export function addReferenceToDisplay(
     return true
   }
   if (entry.type === 'player') {
-    const asset = resolveDisplayAssetForReference(entry, assets)
+    const asset = resolveDisplayAssetForReference(entry, assets, players)
     if (!asset) return false
     updateDisplayState({ npc_ids: addToLayer(state.npc_ids, asset.id) })
     return true
   }
   if (entry.type === 'location') {
-    const asset = resolveDisplayAssetForReference(entry, assets)
+    const asset = resolveDisplayAssetForReference(entry, assets, players)
     if (!asset) return false
     setBackgroundAsset(asset.id, updateDisplayState)
     return true

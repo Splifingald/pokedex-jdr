@@ -13,6 +13,8 @@ import { Chip } from './Chip'
 import { PokemonOwnedCard } from './PokemonOwnedCard'
 import { PokemonSearchInput } from './PokemonSearchInput'
 import { PokemonDetailSheet } from './PokemonDetailSheet'
+import { PixelIcon } from './icons/PixelIcon'
+import { STAT_ICON } from '../lib/icons'
 
 type SortKey = 'numero' | 'type' | 'alpha' | 'equipe'
 
@@ -142,9 +144,9 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
         {sortedRoster.length > 0 && (
           <button
             onClick={handleRestoreAll}
-            className={`text-xs px-2.5 py-1 rounded-md font-bold ${BUTTON_STYLE.green}`}
+            className={`text-xs px-2.5 py-1 rounded-md font-bold inline-flex items-center gap-1 ${BUTTON_STYLE.green}`}
           >
-            ❤️ Tout soigner
+            <PixelIcon src={STAT_ICON.hp} size={12} colored /> Tout soigner
           </button>
         )}
       </div>

@@ -11,6 +11,7 @@ import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { CASINO_ICON, CASINO_MASCOT_ICON } from '../lib/icons'
 import { PixelIcon } from './icons/PixelIcon'
+import { CloseIcon } from './icons/CloseIcon'
 import { PokedollarIcon } from './PokedollarIcon'
 
 type View = 'list' | 'slots' | 'dice'
@@ -121,7 +122,7 @@ export function CasinoPopup({ player, playerItems, pokedollarImageUrl, onClose }
             onClick={onClose}
             className="absolute right-3 top-3 z-10 w-8 h-8 rounded-full flex items-center justify-center text-ink hover:bg-black/10"
           >
-            ✕
+            <CloseIcon className="w-4 h-4" />
           </button>
         )}
 

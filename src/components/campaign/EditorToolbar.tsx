@@ -4,7 +4,9 @@ import type { DisplayAsset } from '../../types'
 import type { ReferenceIndex } from '../../hooks/useReferenceIndex'
 import { EmojiPickerButton } from './EmojiPickerButton'
 import { DisplayCommandPickerButton } from './DisplayCommandPickerButton'
+import { InsertBannerButton } from './InsertBannerButton'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
+import { CloseIcon } from '../icons/CloseIcon'
 
 interface Props {
   editor: Editor | null
@@ -81,7 +83,7 @@ export function EditorToolbar({ editor, referenceIndex, displayAssets }: Props) 
           onClick={() => editor.chain().focus().unsetColor().run()}
           className="w-5 h-5 rounded-full border-2 border-ink bg-white flex items-center justify-center text-[8px] text-ink-muted-2"
         >
-          ✕
+          <CloseIcon className="w-2.5 h-2.5" />
         </button>
         {TEXT_COLORS.map((c) => (
           <button
@@ -105,6 +107,7 @@ export function EditorToolbar({ editor, referenceIndex, displayAssets }: Props) 
       />
 
       <DisplayCommandPickerButton editor={editor} referenceIndex={referenceIndex} displayAssets={displayAssets} />
+      <InsertBannerButton editor={editor} displayAssets={displayAssets} />
     </div>
   )
 }

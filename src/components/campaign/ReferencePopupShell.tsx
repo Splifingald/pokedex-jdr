@@ -1,15 +1,18 @@
 import { useEffect, type ReactNode } from 'react'
 import { PANEL_LG } from '../../lib/panelStyles'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
+import { CloseIcon } from '../icons/CloseIcon'
 
 interface Props {
   icon?: string
   title?: string
   onClose: () => void
   children: ReactNode
+  /** Passe au-dessus d'un SheetShell déjà élevé (ex : capacité ouverte depuis un Pokémon déjà en popup) */
+  elevated?: boolean
 }
 
-export function ReferencePopupShell({ icon, title, onClose, children }: Props) {
+export function ReferencePopupShell({ icon, title, onClose, children, elevated = false }: Props) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', handler)
@@ -18,7 +21,7 @@ export function ReferencePopupShell({ icon, title, onClose, children }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+      className={`fixed inset-0 ${elevated ? 'z-[80]' : 'z-50'} flex items-center justify-center bg-black/80 p-4`}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div className={`${PANEL_LG} max-w-sm w-full max-h-[80vh] flex flex-col overflow-hidden relative`}>
@@ -30,7 +33,7 @@ export function ReferencePopupShell({ icon, title, onClose, children }: Props) {
               onClick={onClose}
               className={`w-7 h-7 shrink-0 rounded-md text-sm font-bold ${BUTTON_STYLE.gray}`}
             >
-              ✕
+              <CloseIcon className="w-4 h-4 mx-auto" />
             </button>
           </div>
         )}
@@ -39,7 +42,7 @@ export function ReferencePopupShell({ icon, title, onClose, children }: Props) {
             onClick={onClose}
             className={`absolute top-3 right-3 z-10 w-7 h-7 shrink-0 rounded-md text-sm font-bold ${BUTTON_STYLE.gray}`}
           >
-            ✕
+            <CloseIcon className="w-4 h-4 mx-auto" />
           </button>
         )}
 

@@ -5,6 +5,7 @@ import { useEncounters } from '../hooks/useEncounters'
 import { CarteImageViewer } from './CarteImageViewer'
 import { EncounterTableModal } from './EncounterTableModal'
 import { PixelIcon } from './icons/PixelIcon'
+import { CloseIcon } from './icons/CloseIcon'
 import { NAV_ICON } from '../lib/icons'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 
@@ -281,7 +282,7 @@ export function CarteTab({ parameters, isAdmin, pokemonByName, attacksByName }: 
               onClick={() => setSelected(null)}
               className={`w-7 h-7 shrink-0 rounded-md text-sm font-bold ${BUTTON_STYLE.gray}`}
             >
-              ✕
+              <CloseIcon className="w-4 h-4 mx-auto" />
             </button>
           </div>
           {selected.image_url && (

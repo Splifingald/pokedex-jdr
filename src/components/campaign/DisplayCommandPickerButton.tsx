@@ -15,6 +15,8 @@ import {
 import type { DisplayLayer } from '../../lib/displayActions'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../../lib/panelStyles'
+import { PixelIcon } from '../icons/PixelIcon'
+import { DISPLAY_ICON } from '../../lib/icons'
 
 interface Props {
   editor: Editor | null
@@ -144,7 +146,7 @@ export function DisplayCommandPickerButton({ editor, referenceIndex, displayAsse
         onClick={() => setOpen(true)}
         className={`w-8 h-8 rounded text-sm flex items-center justify-center shrink-0 ${BUTTON_STYLE.gray}`}
       >
-        🖥️
+        <PixelIcon src={DISPLAY_ICON} size={16} colored />
       </button>
       {open && (
         <div

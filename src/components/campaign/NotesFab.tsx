@@ -6,6 +6,7 @@ import type { UpdateDisplayState } from '../../lib/displayActions'
 import { NotesEditor } from './NotesEditor'
 import { PANEL_LG } from '../../lib/panelStyles'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
+import { CloseIcon } from '../icons/CloseIcon'
 
 interface Props {
   notes: JSONContent
@@ -48,7 +49,7 @@ export function NotesFab({ notes, onSave, referenceIndex, onReferenceClick, disp
               onClick={() => setOpen(false)}
               className={`w-7 h-7 shrink-0 rounded-md text-sm font-bold ${BUTTON_STYLE.gray}`}
             >
-              ✕
+              <CloseIcon className="w-4 h-4 mx-auto" />
             </button>
           </div>
           <div className="flex-1 overflow-y-auto p-3 bg-cream">

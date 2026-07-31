@@ -37,6 +37,8 @@ export const STATUS_ICON = {
   ko: `${BASE}/icon_status_KO.png`,
 }
 
+export const ABILITY_DISTANCE_ICON = `${BASE}/icon_ability_distance.png`
+
 export const PHOTO_ICON = `${BASE}/icon_photo_pokemon.png`
 
 export const SETTINGS_ICON = `${BASE}/icon_settings.png`

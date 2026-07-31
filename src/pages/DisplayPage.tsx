@@ -3,6 +3,7 @@ import { useDisplayState } from '../hooks/useDisplayState'
 import { useDisplayAssets } from '../hooks/useDisplayAssets'
 import { usePokemon } from '../hooks/usePokemon'
 import { useItems } from '../hooks/useItems'
+import { usePlayers } from '../hooks/usePlayers'
 import { useFullscreen } from '../hooks/useFullscreen'
 import { DisplayCanvas } from '../components/display/DisplayCanvas'
 import { resolveDisplayState } from '../lib/resolveDisplayState'
@@ -17,6 +18,7 @@ export function DisplayPage() {
   const { assets } = useDisplayAssets()
   const { pokemon } = usePokemon()
   const { items } = useItems()
+  const { players } = usePlayers()
   const { toggle } = useFullscreen()
 
   useEffect(() => {
@@ -31,8 +33,8 @@ export function DisplayPage() {
   }, [])
 
   const { backgroundUrl, npcs, pokemons, items: displayItems } = useMemo(
-    () => resolveDisplayState(state, assets, pokemon, items),
-    [state, assets, pokemon, items]
+    () => resolveDisplayState(state, assets, pokemon, items, players),
+    [state, assets, pokemon, items, players]
   )
 
   return (

@@ -71,7 +71,7 @@ export function usePlayers() {
     return created as Player
   }, [])
 
-  const updatePlayer = useCallback(async (id: number, data: { name: string; color: string; image_url: string; is_npc: boolean }) => {
+  const updatePlayer = useCallback(async (id: number, data: Partial<Omit<Player, 'id' | 'created_at'>>) => {
     setPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, ...data } : p)))
     const { error } = await supabase.from('players').update(data).eq('id', id)
     if (error) {

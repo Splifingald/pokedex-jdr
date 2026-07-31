@@ -26,6 +26,7 @@ import { SacTab } from './components/SacTab'
 import { CarteTab } from './components/CarteTab'
 import { PokedollarChip } from './components/PokedollarChip'
 import { SettingsPopup } from './components/SettingsPopup'
+import { PlayerProfilePopup } from './components/PlayerProfilePopup'
 import { FullscreenPromptModal } from './components/FullscreenPromptModal'
 import { PixelIcon } from './components/icons/PixelIcon'
 import { useFullscreen } from './hooks/useFullscreen'
@@ -50,7 +51,7 @@ const TAB_TITLES: Record<TabId, string> = {
 export default function App() {
   const { pokemon, discovered, discoverPokemon, undiscoverPokemon, refetch } = usePokemon()
   const { byName: attacksByName, refetch: refetchAttacks } = useAttacks()
-  const { player, players, playersLoading, login, logout } = usePlayerContext()
+  const { player, players, playersLoading, login, logout, updatePlayer } = usePlayerContext()
   const { roster, addOwnedPokemon, setNextGiftAt } = usePlayerPokemon(player?.id ?? null)
   const { items, byName: itemsByName, refetch: refetchItems } = useItems()
   const playerItems = usePlayerItems(player?.id ?? null)
@@ -66,6 +67,7 @@ export default function App() {
   const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(true)
   const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem('adminMode') === 'true')
   const [showSettings, setShowSettings] = useState(false)
+  const [showNestedSettings, setShowNestedSettings] = useState(false)
   const [showManualModal, setShowManualModal] = useState(false)
   const [showScannerModal, setShowScannerModal] = useState(false)
   const [showLoginModal, setShowLoginModal] = useState(false)
@@ -252,15 +254,39 @@ export default function App() {
 
       {/* Modals */}
       {showSettings && (
+        player ? (
+          <PlayerProfilePopup
+            player={player}
+            canEdit={true}
+            parameters={parameters}
+            onUpdate={updatePlayer}
+            onOpenSettings={() => setShowNestedSettings(true)}
+            onClose={() => setShowSettings(false)}
+          />
+        ) : (
+          <SettingsPopup
+            player={player}
+            isAdmin={isAdmin}
+            notificationsAvailable={notificationsAvailable}
+            onRequestLogin={() => { setShowSettings(false); setShowLoginModal(true) }}
+            onLogout={logout}
+            onAdminSuccess={() => { setIsAdmin(true); setShowSettings(false); setActiveTab('admin') }}
+            onAdminLogout={handleAdminLogout}
+            onClose={() => setShowSettings(false)}
+          />
+        )
+      )}
+
+      {showNestedSettings && (
         <SettingsPopup
           player={player}
           isAdmin={isAdmin}
           notificationsAvailable={notificationsAvailable}
-          onRequestLogin={() => { setShowSettings(false); setShowLoginModal(true) }}
-          onLogout={logout}
-          onAdminSuccess={() => { setIsAdmin(true); setShowSettings(false); setActiveTab('admin') }}
+          onRequestLogin={() => { setShowNestedSettings(false); setShowSettings(false); setShowLoginModal(true) }}
+          onLogout={() => { logout(); setShowNestedSettings(false); setShowSettings(false) }}
+          onAdminSuccess={() => { setIsAdmin(true); setShowNestedSettings(false); setShowSettings(false); setActiveTab('admin') }}
           onAdminLogout={handleAdminLogout}
-          onClose={() => setShowSettings(false)}
+          onClose={() => setShowNestedSettings(false)}
         />
       )}
 

@@ -159,6 +159,20 @@ html, body, #root {
   image-rendering: crisp-edges;
 }
 
+/* Effet "sticker" pour les PNG affichés en mode Affichage (PNJ/Pokémon/objet) :
+   plusieurs passes de drop-shadow blanc identiques se superposent pour former
+   un contour opaque (une seule passe ne donnerait qu'une lueur translucide),
+   suivies d'une ombre portée. En cqh pour que l'épaisseur du contour suive la
+   taille du conteneur (aperçu admin vs plein écran), pas la fenêtre du navigateur. */
+.sticker-effect {
+  filter:
+    drop-shadow(0 0 0.8cqh #fff)
+    drop-shadow(0 0 0.8cqh #fff)
+    drop-shadow(0 0 0.8cqh #fff)
+    drop-shadow(0 0 0.8cqh #fff)
+    drop-shadow(0.3cqh 0.6cqh 0.5cqh rgba(0, 0, 0, 0.4));
+}
+
 /* Scrollbar sombre */
 ::-webkit-scrollbar {
   width: 6px;

@@ -9,16 +9,17 @@ import { EMPTY_CHAPTER_CONTENT } from '../../types'
 import type { ReferenceEntry, ReferenceIndex } from '../../hooks/useReferenceIndex'
 import { ReferenceHighlight, forceReferenceRecompute } from '../../lib/referenceExtension'
 import { DisplayCommandHighlight, forceDisplayCommandRecompute } from '../../lib/displayCommandExtension'
+import { Banner } from '../../lib/bannerExtension'
 import { executeDisplayCommand, type DisplayCommand } from '../../lib/displayCommand'
 import type { UpdateDisplayState } from '../../lib/displayActions'
 import { useToast } from '../../context/ToastContext'
 import { ReferenceDispatcher } from './ReferenceDispatcher'
-import { SetBannerBackgroundButton } from './SetBannerBackgroundButton'
 import { DoneToggle } from './DoneToggle'
 import { NotesFab } from './NotesFab'
 import { PANEL_LG } from '../../lib/panelStyles'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 import { CampaignIcon } from './CampaignIcon'
+import { CloseIcon } from '../icons/CloseIcon'
 
 interface Props {
   chapter: CampaignChapter
@@ -63,6 +64,8 @@ export function ChapterViewPopup({
   useEffect(() => { displayStateRef.current = displayState }, [displayState])
   const displayAssetsRef = useRef(displayAssets)
   useEffect(() => { displayAssetsRef.current = displayAssets }, [displayAssets])
+  const updateDisplayStateRef = useRef(updateDisplayState)
+  useEffect(() => { updateDisplayStateRef.current = updateDisplayState }, [updateDisplayState])
 
   const handleDisplayCommand = (cmd: DisplayCommand) => {
     executeDisplayCommand(cmd, {
@@ -95,6 +98,11 @@ export function ChapterViewPopup({
         getIndex: () => indexRef.current,
         getDisplayAssets: () => displayAssetsRef.current,
         onCommand: handleDisplayCommand,
+        bannerHeightClass: 'h-32',
+      }),
+      // eslint-disable-next-line react-hooks/refs -- same lazy-getter pattern as above
+      Banner.configure({
+        getUpdateDisplayState: () => updateDisplayStateRef.current,
       }),
     ],
   })
@@ -124,22 +132,11 @@ export function ChapterViewPopup({
             onClick={onClose}
             className={`w-8 h-8 shrink-0 rounded-md text-sm font-bold ${BUTTON_STYLE.gray}`}
           >
-            ✕
+            <CloseIcon className="w-4 h-4 mx-auto" />
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 bg-cream text-ink">
-          {chapter.image_url && (
-            <div className="relative w-full h-32 rounded-lg mb-4 border-2 border-ink overflow-hidden">
-              <img
-                src={chapter.image_url}
-                alt={chapter.title}
-                className="w-full h-full object-cover"
-                style={{ objectPosition: `50% ${chapter.image_position ?? 50}%` }}
-              />
-              <SetBannerBackgroundButton imageUrl={chapter.image_url} updateDisplayState={updateDisplayState} />
-            </div>
-          )}
           <EditorContent editor={editor} />
         </div>
       </div>

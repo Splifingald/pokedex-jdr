@@ -4,6 +4,7 @@ import { EncounterRow } from './EncounterRow'
 import { EncounterQuickPickBar } from './EncounterQuickPickBar'
 import { PokemonDetailSheet } from './PokemonDetailSheet'
 import { PixelIcon } from './icons/PixelIcon'
+import { CloseIcon } from './icons/CloseIcon'
 import { NAV_ICON } from '../lib/icons'
 import { PANEL_LG } from '../lib/panelStyles'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
@@ -58,7 +59,7 @@ export function EncounterTableModal({ lieu, rows, pokemonByName, attacksByName, 
               onClick={onClose}
               className={`w-7 h-7 shrink-0 rounded-md text-sm font-bold ${BUTTON_STYLE.gray}`}
             >
-              ✕
+              <CloseIcon className="w-4 h-4 mx-auto" />
             </button>
           </div>
 

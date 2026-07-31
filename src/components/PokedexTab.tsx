@@ -8,6 +8,7 @@ import { normalizeSearch } from '../lib/normalizeSearch'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PANEL, PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { PixelIcon } from './icons/PixelIcon'
+import { CloseIcon } from './icons/CloseIcon'
 import { NAV_ICON, PHOTO_ICON } from '../lib/icons'
 
 type SortKey = 'numero' | 'type' | 'alpha'
@@ -155,7 +156,7 @@ export function PokedexTab({
                 onClick={() => setSearch('')}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-muted-2 hover:text-ink"
               >
-                ✕
+                <CloseIcon className="w-4 h-4" />
               </button>
             )}
           </div>

@@ -130,6 +130,13 @@ export function findCommandRanges(text: string, index: ReferenceIndex, displayAs
   return scanDisplayCommands(text, index, displayAssets).map(({ from, to }) => ({ from, to }))
 }
 
+// Résout un nom de commande "Fond" vers le display_asset correspondant — partagé entre
+// l'exécution de la commande (push vers l'Affichage) et son rendu en bannière inline dans
+// l'éditeur/la vue du chapitre.
+export function resolveBackgroundAsset(name: string, displayAssets: DisplayAsset[]): DisplayAsset | null {
+  return displayAssets.find((a) => a.type === 'Background' && normalizeName(a.nom) === normalizeName(name)) ?? null
+}
+
 const PARSE_MATCHER = new RegExp(
   `^${INTRO_SRC}(?:(?<clearAll>Tout\\s+Effacer)|Effacer\\s+${CLEAR_TYPE_SRC}|${ADD_TYPE_SRC}-(?<addName>.+))$`,
   'iu'
@@ -175,7 +182,7 @@ export function executeDisplayCommand(cmd: DisplayCommand, ctx: ExecuteDisplayCo
   // Fond : cible directement les display_assets de type Background, indépendamment de la
   // carte/des lieux référencés (un fond peut ne correspondre à aucun lieu réel).
   if (cmd.refType === 'background') {
-    const asset = ctx.displayAssets.find((a) => a.type === 'Background' && normalizeName(a.nom) === normalizeName(cmd.name))
+    const asset = resolveBackgroundAsset(cmd.name, ctx.displayAssets)
     if (!asset) {
       ctx.showToast(`Aucun fond d'écran trouvé pour ${cmd.name}`)
       return

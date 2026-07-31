@@ -71,7 +71,7 @@ export function PokemonOwnedCard({ playerPokemon, pokemon, variant, showPcBadge 
           <span className="text-ink text-sm font-bold truncate block">{displayName}</span>
           <HpGauge current={hp} max={maxHp} />
         </div>
-        {showPcBadge && <span className="text-base shrink-0" title="Au PC">💻</span>}
+        {showPcBadge && <span className="text-ink shrink-0" title="Au PC"><PixelIcon src={PC_ICON} size={16} colored /></span>}
         {pokemon && <TypeBadge type={pokemon.type} small />}
       </button>
     )

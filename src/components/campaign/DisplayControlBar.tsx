@@ -1,4 +1,4 @@
-import type { DisplayAsset, DisplayState } from '../../types'
+import type { DisplayAsset, DisplayState, Player } from '../../types'
 import type { ReferenceEntry } from '../../hooks/useReferenceIndex'
 import {
   canAddToDisplay,
@@ -13,21 +13,24 @@ import {
 import { moveInArray } from '../../lib/displayLayers'
 import { useToast } from '../../context/ToastContext'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
+import { PixelIcon } from '../icons/PixelIcon'
+import { DISPLAY_ICON } from '../../lib/icons'
 
 interface Props {
   entry: ReferenceEntry
   displayState: DisplayState
   displayAssets: DisplayAsset[]
   updateDisplayState: UpdateDisplayState
+  players?: Player[]
 }
 
 // Barre des 3 boutons "affichage" placée en haut des popups de référence
 // (Pokémon/PNJ/Lieu/Objet) — n'affiche rien si aucune image projetable n'est
-// résolue (ex : PNJ/Lieu sans entrée display_assets du même nom).
-export function DisplayControlBar({ entry, displayState, displayAssets, updateDisplayState }: Props) {
+// résolue (ex : PNJ/Lieu sans entrée display_assets du même nom, ni image plein pied de profil).
+export function DisplayControlBar({ entry, displayState, displayAssets, updateDisplayState, players = [] }: Props) {
   const { showToast } = useToast()
 
-  if (!canAddToDisplay(entry, displayAssets)) return null
+  if (!canAddToDisplay(entry, displayAssets, players)) return null
 
   const layer = layerForReferenceType(entry.type)
   if (!layer) return null
@@ -35,14 +38,14 @@ export function DisplayControlBar({ entry, displayState, displayAssets, updateDi
   const resolvedId =
     entry.type === 'pokemon' || entry.type === 'item'
       ? entry.id
-      : resolveDisplayAssetForReference(entry, displayAssets)?.id ?? null
+      : resolveDisplayAssetForReference(entry, displayAssets, players)?.id ?? null
 
   const ids = layerIdsForReference(entry, displayState)
   const indexInLayer = ids && resolvedId !== null ? ids.indexOf(resolvedId) : -1
   const showReorder = !!ids && indexInLayer !== -1 && ids.length > 1
 
   const handleAdd = () => {
-    const ok = addReferenceToDisplay(entry, displayState, displayAssets, updateDisplayState)
+    const ok = addReferenceToDisplay(entry, displayState, displayAssets, updateDisplayState, players)
     if (!ok) showToast(`Aucune image d'affichage trouvée pour ${entry.name}`)
   }
 
@@ -56,7 +59,7 @@ export function DisplayControlBar({ entry, displayState, displayAssets, updateDi
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 mb-3">
-      <span className="text-base shrink-0" title="Affichage">🖼️</span>
+      <span className="shrink-0 text-ink" title="Affichage"><PixelIcon src={DISPLAY_ICON} size={16} colored /></span>
       {showReorder ? (
         <div className="flex items-center gap-1">
           <button

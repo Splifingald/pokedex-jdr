@@ -33,13 +33,13 @@ export function DisplayCanvas({ backgroundUrl, npcs, pokemons, items, className 
       )}
 
       {npcs.length > 0 && (
-        <div className="absolute inset-0 flex items-end justify-center gap-2 px-4 pb-0">
+        <div className="absolute inset-0 flex items-center justify-center gap-2 px-4">
           {npcs.map((npc) => (
             <img
               key={npc.id}
               src={npc.image_url}
               alt={npc.nom}
-              className="h-1/2 w-auto object-contain [filter:drop-shadow(2px_4px_2px_rgba(0,0,0,0.4))]"
+              className="h-[70cqh] w-auto object-contain sticker-effect"
             />
           ))}
         </div>
@@ -55,7 +55,7 @@ export function DisplayCanvas({ backgroundUrl, npcs, pokemons, items, className 
               <img
                 src={p.image_url}
                 alt={p.nom}
-                className="pixelated w-full h-full object-contain [filter:drop-shadow(2px_4px_2px_rgba(0,0,0,0.3))]"
+                className="pixelated w-full h-full object-contain sticker-effect"
               />
             </div>
           ))}
@@ -69,7 +69,7 @@ export function DisplayCanvas({ backgroundUrl, npcs, pokemons, items, className 
               key={item.id}
               src={item.image_url}
               alt={item.nom}
-              className="max-w-[25cqw] max-h-[25cqh] object-contain [filter:drop-shadow(2px_4px_2px_rgba(0,0,0,0.4))]"
+              className="max-w-[25cqw] max-h-[25cqh] object-contain sticker-effect"
             />
           ))}
         </div>

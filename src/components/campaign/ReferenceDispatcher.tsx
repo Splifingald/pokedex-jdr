@@ -53,6 +53,7 @@ export function ReferenceDispatcher({
             displayState={displayState}
             displayAssets={displayAssets}
             updateDisplayState={updateDisplayState}
+            players={[...playersByName.values()]}
           />
         }
         onClose={onClose}
@@ -74,6 +75,7 @@ export function ReferenceDispatcher({
             displayState={displayState}
             displayAssets={displayAssets}
             updateDisplayState={updateDisplayState}
+            players={[...playersByName.values()]}
           />
         }
         onClose={onClose}
@@ -95,6 +97,7 @@ export function ReferenceDispatcher({
             displayState={displayState}
             displayAssets={displayAssets}
             updateDisplayState={updateDisplayState}
+            players={[...playersByName.values()]}
           />
         }
         onClose={onClose}
@@ -119,6 +122,7 @@ export function ReferenceDispatcher({
             displayState={displayState}
             displayAssets={displayAssets}
             updateDisplayState={updateDisplayState}
+            players={[...playersByName.values()]}
           />
         }
         onClose={onClose}

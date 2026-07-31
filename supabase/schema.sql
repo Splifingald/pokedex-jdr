@@ -66,6 +66,7 @@
 -- ALTER TABLE casino_config ADD COLUMN IF NOT EXISTS ticket_full_notify_enabled boolean NOT NULL DEFAULT false;
 -- ALTER TABLE casino_player_state ADD COLUMN IF NOT EXISTS ticket_full_notified boolean NOT NULL DEFAULT false;
 -- ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS gift_notified boolean NOT NULL DEFAULT false;
+-- ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS gift_notified_at timestamptz;
 -- ALTER TABLE campaign_sessions ADD COLUMN IF NOT EXISTS image_position integer NOT NULL DEFAULT 50;
 -- ALTER TABLE campaign_chapters ADD COLUMN IF NOT EXISTS image_position integer NOT NULL DEFAULT 50;
 -- Fusion de la table backgrounds dans display_assets (type = 'Background'), et passage du
@@ -86,6 +87,24 @@
 -- ALTER TABLE display_state DROP COLUMN item_id;
 -- DROP TABLE backgrounds; -- seulement après avoir vérifié que /display et Admin → Affichage sont corrects
 -- ALTER TABLE display_state ADD COLUMN IF NOT EXISTS background_url text;
+-- ALTER TABLE players ADD COLUMN IF NOT EXISTS full_body_image_url text NOT NULL DEFAULT '';
+-- ALTER TABLE players ADD COLUMN IF NOT EXISTS age integer;
+-- ALTER TABLE players ADD COLUMN IF NOT EXISTS background_story text NOT NULL DEFAULT '';
+-- ALTER TABLE players ADD COLUMN IF NOT EXISTS level integer NOT NULL DEFAULT 1;
+-- ALTER TABLE players ADD COLUMN IF NOT EXISTS stat_charisme integer NOT NULL DEFAULT 10;
+-- ALTER TABLE players ADD COLUMN IF NOT EXISTS stat_intelligence integer NOT NULL DEFAULT 10;
+-- ALTER TABLE players ADD COLUMN IF NOT EXISTS stat_sagesse integer NOT NULL DEFAULT 10;
+-- ALTER TABLE players ADD COLUMN IF NOT EXISTS stat_dexterite integer NOT NULL DEFAULT 10;
+-- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS stat_points_base integer NOT NULL DEFAULT 40;
+-- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS stat_min integer NOT NULL DEFAULT 5;
+-- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS stat_max integer NOT NULL DEFAULT 15;
+-- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS stat_points_per_level integer NOT NULL DEFAULT 1;
+-- ALTER TABLE campaign_sessions ADD COLUMN IF NOT EXISTS position integer NOT NULL DEFAULT 0;
+-- WITH ranked AS (
+--   SELECT id, ROW_NUMBER() OVER (ORDER BY session_date DESC NULLS LAST, created_at DESC) - 1 AS rn
+--   FROM campaign_sessions
+-- )
+-- UPDATE campaign_sessions c SET position = ranked.rn FROM ranked WHERE ranked.id = c.id;
 -- ============================================================
 
 -- Table principale des pokémon
@@ -223,12 +242,20 @@ CREATE POLICY "Public delete discovered"
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS players (
-  id          bigserial PRIMARY KEY,
-  name        text NOT NULL,
-  color       text NOT NULL DEFAULT '#3B82F6',
-  image_url   text NOT NULL DEFAULT '',
-  is_npc      boolean NOT NULL DEFAULT false,
-  created_at  timestamptz NOT NULL DEFAULT now()
+  id                    bigserial PRIMARY KEY,
+  name                  text NOT NULL,
+  color                 text NOT NULL DEFAULT '#3B82F6',
+  image_url             text NOT NULL DEFAULT '',
+  is_npc                boolean NOT NULL DEFAULT false,
+  full_body_image_url   text NOT NULL DEFAULT '',
+  age                   integer,
+  background_story      text NOT NULL DEFAULT '',
+  level                 integer NOT NULL DEFAULT 1,
+  stat_charisme         integer NOT NULL DEFAULT 10,
+  stat_intelligence     integer NOT NULL DEFAULT 10,
+  stat_sagesse          integer NOT NULL DEFAULT 10,
+  stat_dexterite        integer NOT NULL DEFAULT 10,
+  created_at            timestamptz NOT NULL DEFAULT now()
 );
 
 -- Pokémon possédés (une ligne par instance capturée, pas par espèce :
@@ -244,6 +271,7 @@ CREATE TABLE IF NOT EXISTS player_pokemon (
   in_team         boolean NOT NULL DEFAULT false,
   next_gift_at    timestamptz,       -- prochain cadeau du pokémon (cadeaux Pokémon), NULL = aucun cadeau prévu
   gift_notified   boolean NOT NULL DEFAULT false, -- push déjà envoyé pour ce cadeau, évite les doublons entre passages du cron
+  gift_notified_at timestamptz,      -- horodatage du dernier push envoyé pour ce cadeau, sert à renvoyer un rappel 72h après si toujours pas réclamé
   created_at      timestamptz NOT NULL DEFAULT now()
 );
 
@@ -265,6 +293,10 @@ CREATE TABLE IF NOT EXISTS admin_parameters (
   feature_map_enabled            boolean NOT NULL DEFAULT true,
   feature_gifting_enabled        boolean NOT NULL DEFAULT true,
   feature_casino_enabled         boolean NOT NULL DEFAULT true,
+  stat_points_base          integer NOT NULL DEFAULT 40,
+  stat_min                  integer NOT NULL DEFAULT 5,
+  stat_max                  integer NOT NULL DEFAULT 15,
+  stat_points_per_level     integer NOT NULL DEFAULT 1,
   CONSTRAINT single_row CHECK (id = 1)
 );
 INSERT INTO admin_parameters (id, max_moves, max_team_size)
@@ -504,6 +536,7 @@ CREATE TABLE IF NOT EXISTS campaign_sessions (
   image_position integer NOT NULL DEFAULT 50,
   done         boolean NOT NULL DEFAULT false,
   notes        jsonb NOT NULL DEFAULT '{"type":"doc","content":[{"type":"paragraph"}]}'::jsonb,
+  position     integer NOT NULL DEFAULT 0,
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 

@@ -1,4 +1,6 @@
 import { BUTTON_STYLE } from '../lib/buttonStyles'
+import { PixelIcon } from './icons/PixelIcon'
+import { SETTINGS_ICON } from '../lib/icons'
 
 interface Props {
   onEnable: () => void
@@ -12,8 +14,8 @@ export function FullscreenPromptModal({ onEnable, onClose }: Props) {
         <div className="text-center mb-5">
           <div className="text-4xl mb-2">⛶</div>
           <h3 className="text-ink text-lg">Activer le plein écran</h3>
-          <p className="text-ink-muted text-xs mt-2">
-            Vous pourrez l'activer à tout moment via le bouton ⚙️ en haut de l'écran.
+          <p className="text-ink-muted text-xs mt-2 inline-flex flex-wrap items-center justify-center gap-1">
+            Vous pourrez l'activer à tout moment via le bouton <PixelIcon src={SETTINGS_ICON} size={12} colored /> en haut de l'écran.
           </p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

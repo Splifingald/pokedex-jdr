@@ -116,8 +116,8 @@ export function usePlayerPokemon(playerId: number | null) {
   const setNextGiftAt = useCallback(async (id: number, nextGiftAt: string | null) => {
     // gift_notified repart à false à chaque nouveau minuteur, pour que la
     // fonction planifiée de notifications puisse re-notifier au prochain cadeau
-    setRoster((prev) => prev.map((r) => (r.id === id ? { ...r, next_gift_at: nextGiftAt, gift_notified: false } : r)))
-    const { error } = await supabase.from('player_pokemon').update({ next_gift_at: nextGiftAt, gift_notified: false }).eq('id', id)
+    setRoster((prev) => prev.map((r) => (r.id === id ? { ...r, next_gift_at: nextGiftAt, gift_notified: false, gift_notified_at: null } : r)))
+    const { error } = await supabase.from('player_pokemon').update({ next_gift_at: nextGiftAt, gift_notified: false, gift_notified_at: null }).eq('id', id)
     if (error) {
       console.error('Erreur lors de la mise à jour du minuteur de cadeau :', error)
     }

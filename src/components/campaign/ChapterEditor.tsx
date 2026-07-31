@@ -9,6 +9,7 @@ import { EMPTY_CHAPTER_CONTENT } from '../../types'
 import type { ReferenceEntry, ReferenceIndex } from '../../hooks/useReferenceIndex'
 import { ReferenceHighlight, forceReferenceRecompute } from '../../lib/referenceExtension'
 import { DisplayCommandHighlight, forceDisplayCommandRecompute } from '../../lib/displayCommandExtension'
+import { Banner } from '../../lib/bannerExtension'
 import { executeDisplayCommand, type DisplayCommand } from '../../lib/displayCommand'
 import type { UpdateDisplayState } from '../../lib/displayActions'
 import { useToast } from '../../context/ToastContext'
@@ -16,11 +17,10 @@ import { EditorToolbar } from './EditorToolbar'
 import { EmojiPickerButton } from './EmojiPickerButton'
 import { CampaignIcon } from './CampaignIcon'
 import { ReferenceDispatcher } from './ReferenceDispatcher'
-import { EditableHeaderImage } from './EditableHeaderImage'
-import { ImageLightbox } from '../ImageLightbox'
 import { ConfirmPopup } from '../ConfirmPopup'
 import { DoneToggle } from './DoneToggle'
 import { PixelIcon } from '../icons/PixelIcon'
+import { TrashIcon } from '../icons/TrashIcon'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../../lib/panelStyles'
 import { SAVE_ICON } from '../../lib/icons'
@@ -40,7 +40,7 @@ interface Props {
   displayState: DisplayState
   displayAssets: DisplayAsset[]
   updateDisplayState: UpdateDisplayState
-  onUpdate: (id: number, data: { title?: string; icon?: string; image_url?: string | null; image_position?: number; content?: CampaignChapter['content']; done?: boolean }) => void
+  onUpdate: (id: number, data: { title?: string; icon?: string; content?: CampaignChapter['content']; done?: boolean }) => void
   onDelete: (id: number) => void
   onBack: () => void
 }
@@ -63,10 +63,7 @@ export function ChapterEditor({
 }: Props) {
   const [title, setTitle] = useState(chapter.title)
   const [icon, setIcon] = useState(chapter.icon)
-  const [imageUrl, setImageUrl] = useState(chapter.image_url ?? '')
-  const [imagePosition, setImagePosition] = useState(chapter.image_position ?? 50)
   const [dirty, setDirty] = useState(false)
-  const [viewerOpen, setViewerOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [activeReference, setActiveReference] = useState<ReferenceEntry | null>(null)
   const { setGuard, guardedNavigate } = useUnsavedChangesGuard()
@@ -81,6 +78,8 @@ export function ChapterEditor({
   useEffect(() => { displayStateRef.current = displayState }, [displayState])
   const displayAssetsRef = useRef(displayAssets)
   useEffect(() => { displayAssetsRef.current = displayAssets }, [displayAssets])
+  const updateDisplayStateRef = useRef(updateDisplayState)
+  useEffect(() => { updateDisplayStateRef.current = updateDisplayState }, [updateDisplayState])
 
   const handleDisplayCommand = (cmd: DisplayCommand) => {
     executeDisplayCommand(cmd, {
@@ -112,6 +111,11 @@ export function ChapterEditor({
         getIndex: () => indexRef.current,
         getDisplayAssets: () => displayAssetsRef.current,
         onCommand: handleDisplayCommand,
+        bannerHeightClass: 'h-36',
+      }),
+      // eslint-disable-next-line react-hooks/refs -- same lazy-getter pattern as above
+      Banner.configure({
+        getUpdateDisplayState: () => updateDisplayStateRef.current,
       }),
     ],
     onUpdate: () => setDirty(true),
@@ -132,7 +136,7 @@ export function ChapterEditor({
   }, [dirty])
 
   const handleSave = () => {
-    onUpdate(chapter.id, { title, icon, image_url: imageUrl.trim() || null, image_position: imagePosition, content: editor?.getJSON() })
+    onUpdate(chapter.id, { title, icon, content: editor?.getJSON() })
     setDirty(false)
   }
 
@@ -184,32 +188,12 @@ export function ChapterEditor({
           Enregistrer
         </button>
         <button onClick={() => setConfirmDelete(true)} className={`text-sm rounded px-3 py-1.5 ${BUTTON_STYLE.red}`}>
-          🗑
+          <TrashIcon className="w-4 h-4" />
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto bg-cream text-ink">
         <div className="p-4 border-b-2 border-[#cfc7a8]">
-          {imageUrl && (
-            <div className="relative w-full h-36 rounded-lg mb-3 border-2 border-ink overflow-hidden">
-              <EditableHeaderImage
-                src={imageUrl}
-                alt={title}
-                position={imagePosition}
-                onPositionChange={(p) => { setImagePosition(p); setDirty(true) }}
-                className="w-full h-full"
-              />
-              <button
-                type="button"
-                onClick={() => setViewerOpen(true)}
-                title="Agrandir"
-                className="absolute top-1 left-1 w-7 h-7 rounded-md flex items-center justify-center text-sm bg-black/50 text-white"
-              >
-                🔍
-              </button>
-            </div>
-          )}
-
           <div className="flex items-center gap-2">
             <EmojiPickerButton
               trigger={<CampaignIcon icon={icon} size={24} emojiClassName="text-xl" />}
@@ -228,13 +212,6 @@ export function ChapterEditor({
               className={`flex-1 px-3 py-2 rounded-lg ${PIXEL_BORDER_SM} bg-cream text-ink text-sm outline-none`}
             />
           </div>
-          <input
-            type="text"
-            value={imageUrl}
-            onChange={(e) => { setImageUrl(e.target.value); setDirty(true) }}
-            placeholder="Lien de l'image de référence (optionnel)"
-            className={`w-full mt-2 px-3 py-2 rounded-lg ${PIXEL_BORDER_SM} bg-cream text-ink text-sm outline-none`}
-          />
         </div>
 
         <div className="sticky top-0 z-10">
@@ -245,10 +222,6 @@ export function ChapterEditor({
           <EditorContent editor={editor} />
         </div>
       </div>
-
-      {viewerOpen && imageUrl && (
-        <ImageLightbox src={imageUrl} alt={title} onClose={() => setViewerOpen(false)} />
-      )}
 
       {confirmDelete && (
         <ConfirmPopup

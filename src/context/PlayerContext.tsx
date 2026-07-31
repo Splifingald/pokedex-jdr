@@ -10,12 +10,13 @@ interface PlayerContextValue {
   playersLoading: boolean
   login: (player: Player) => void
   logout: () => void
+  updatePlayer: (id: number, data: Partial<Omit<Player, 'id' | 'created_at'>>) => void
 }
 
 const PlayerContext = createContext<PlayerContextValue | null>(null)
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
-  const { players, loading: playersLoading } = usePlayers()
+  const { players, loading: playersLoading, updatePlayer } = usePlayers()
   const [currentPlayerId, setCurrentPlayerId] = useState<number | null>(() => {
     const stored = localStorage.getItem(STORAGE_KEY)
     return stored ? parseInt(stored, 10) : null
@@ -45,7 +46,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <PlayerContext.Provider value={{ player, players, playersLoading, login, logout }}>
+    <PlayerContext.Provider value={{ player, players, playersLoading, login, logout, updatePlayer }}>
       {children}
     </PlayerContext.Provider>
   )

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import type { CampaignSession } from '../types'
 
-type SessionInput = { title: string; icon: string; session_date: string | null; image_url: string | null; image_position?: number; done?: boolean; notes?: CampaignSession['notes'] }
+type SessionInput = { title: string; icon: string; session_date: string | null; image_url: string | null; image_position?: number; done?: boolean; notes?: CampaignSession['notes']; position?: number }
 
 export function useCampaignSessions() {
   const channelId = useRef(Math.random().toString(36).slice(2))
@@ -10,23 +10,15 @@ export function useCampaignSessions() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const sortSessions = (list: CampaignSession[]) =>
-    [...list].sort((a, b) => {
-      if (a.session_date !== b.session_date) {
-        if (!a.session_date) return 1
-        if (!b.session_date) return -1
-        return b.session_date.localeCompare(a.session_date)
-      }
-      return b.created_at.localeCompare(a.created_at)
-    })
+  const sortSessions = (list: CampaignSession[]) => [...list].sort((a, b) => a.position - b.position)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const { data, error } = await supabase.from('campaign_sessions').select('*')
+      const { data, error } = await supabase.from('campaign_sessions').select('*').order('position')
       if (error) throw error
-      setSessions(sortSessions(data ?? []))
+      setSessions(data ?? [])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur de chargement')
     } finally {
@@ -74,20 +66,38 @@ export function useCampaignSessions() {
   }, [])
 
   const createSession = useCallback(async (data: SessionInput) => {
-    const { data: created, error } = await supabase.from('campaign_sessions').insert(data).select().single()
+    const { data: created, error } = await supabase
+      .from('campaign_sessions')
+      .insert({ position: sessions.length, ...data })
+      .select()
+      .single()
     if (error) {
       console.error('Erreur lors de la création de la session :', error)
       return null
     }
     setSessions((prev) => sortSessions([...prev, created as CampaignSession]))
     return created as CampaignSession
-  }, [])
+  }, [sessions.length])
 
   const updateSession = useCallback(async (id: number, data: Partial<SessionInput>) => {
     setSessions((prev) => sortSessions(prev.map((s) => (s.id === id ? { ...s, ...data } : s))))
     const { error } = await supabase.from('campaign_sessions').update(data).eq('id', id)
     if (error) {
       console.error('Erreur lors de la mise à jour de la session :', error)
+      await fetchAll()
+    }
+  }, [fetchAll])
+
+  const reorderSessions = useCallback(async (orderedIds: number[]) => {
+    setSessions((prev) => {
+      const byId = new Map(prev.map((s) => [s.id, s]))
+      return orderedIds.map((id, i) => ({ ...byId.get(id)!, position: i }))
+    })
+    const results = await Promise.all(
+      orderedIds.map((id, i) => supabase.from('campaign_sessions').update({ position: i }).eq('id', id))
+    )
+    if (results.some((r) => r.error)) {
+      console.error('Erreur lors de la réorganisation des sessions :', results.find((r) => r.error)?.error)
       await fetchAll()
     }
   }, [fetchAll])
@@ -102,5 +112,5 @@ export function useCampaignSessions() {
     }
   }, [fetchAll])
 
-  return { sessions, loading, error, createSession, updateSession, deleteSession, refetch: fetchAll }
+  return { sessions, loading, error, createSession, updateSession, deleteSession, reorderSessions, refetch: fetchAll }
 }

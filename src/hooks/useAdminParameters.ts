@@ -16,6 +16,10 @@ const DEFAULTS: AdminParameters = {
   feature_map_enabled: true,
   feature_gifting_enabled: true,
   feature_casino_enabled: true,
+  stat_points_base: 40,
+  stat_min: 5,
+  stat_max: 15,
+  stat_points_per_level: 1,
 }
 
 export function useAdminParameters() {

@@ -2,10 +2,14 @@ import { useState, useEffect, useMemo } from 'react'
 import { usePlayers } from '../hooks/usePlayers'
 import { usePokemon } from '../hooks/usePokemon'
 import { useAttacks } from '../hooks/useAttacks'
+import { useAdminParameters } from '../hooks/useAdminParameters'
 import { PLAYER_COLORS } from '../types'
 import type { Player } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { TeamTab } from './TeamTab'
+import { PlayerProfilePopup } from './PlayerProfilePopup'
+import { PixelIcon } from './icons/PixelIcon'
+import { NAV_ICON } from '../lib/icons'
 
 const emptyForm = { name: '', color: PLAYER_COLORS[0], image_url: '', is_npc: false }
 
@@ -13,8 +17,11 @@ export function AdminPlayersPanel() {
   const { players, loading, createPlayer, updatePlayer, deletePlayer } = usePlayers()
   const { pokemon, discovered } = usePokemon()
   const { byName: attacksByName } = useAttacks()
+  const { parameters } = useAdminParameters()
   const pokemonByName = useMemo(() => new Map(pokemon.map((p) => [p.nom, p])), [pokemon])
   const [editing, setEditing] = useState<Player | null>(null)
+  const [profileEditingId, setProfileEditingId] = useState<number | null>(null)
+  const profileEditing = players.find((p) => p.id === profileEditingId) ?? null
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(null)
@@ -114,9 +121,9 @@ export function AdminPlayersPanel() {
                     <>
                       <button
                         onClick={() => setViewingTeamPlayer(p)}
-                        className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
+                        className={`text-xs rounded px-2 py-1 inline-flex items-center gap-1 ${BUTTON_STYLE.gray}`}
                       >
-                        🐾 Équipe
+                        <PixelIcon src={NAV_ICON.equipe!} size={12} colored /> Équipe
                       </button>
                       <button
                         onClick={() => setEditing(p)}
@@ -174,6 +181,12 @@ export function AdminPlayersPanel() {
                           className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
                         >
                           🐾 Équipe
+                        </button>
+                        <button
+                          onClick={() => setProfileEditingId(p.id)}
+                          className={`text-xs rounded px-2 py-1 ${BUTTON_STYLE.gray}`}
+                        >
+                          Profil
                         </button>
                         <button
                           onClick={() => setEditing(p)}
@@ -266,6 +279,16 @@ export function AdminPlayersPanel() {
           </button>
         </div>
       </form>
+
+      {profileEditing && (
+        <PlayerProfilePopup
+          player={profileEditing}
+          canEdit={true}
+          parameters={parameters}
+          onUpdate={updatePlayer}
+          onClose={() => setProfileEditingId(null)}
+        />
+      )}
     </div>
   )
 }

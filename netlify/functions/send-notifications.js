@@ -7,6 +7,7 @@ const webpush = require('web-push')
 
 const TICKET_CASINO_ITEM_NAME = 'Ticket Casino'
 const POKEDOLLAR_ICON_PATH = '/website_icons/icon_pokedollar.png'
+const GIFT_REMINDER_DELAY_MS = 72 * 60 * 60 * 1000 // relance si le cadeau n'est toujours pas réclamé 72h après le 1er push
 
 function absoluteUrl(siteUrl, path) {
   if (!path) return `${siteUrl}${POKEDOLLAR_ICON_PATH}`
@@ -68,17 +69,25 @@ exports.handler = async () => {
   }
 
   // ── Cadeaux pokémon prêts ────────────────────────────────────────────────
-  const { data: giftReady, error: giftReadyError } = await supabase
+  // Prêts, mais pas encore réclamés : soit jamais notifiés, soit notifiés il y
+  // a plus de 72h (relance tant que le cadeau n'est pas ouvert).
+  const now = new Date()
+  const { data: giftCandidates, error: giftReadyError } = await supabase
     .from('player_pokemon')
-    .select('id, player_id, pokemon_nom')
+    .select('id, player_id, pokemon_nom, gift_notified, gift_notified_at')
     .eq('in_team', true)
-    .eq('gift_notified', false)
     .not('next_gift_at', 'is', null)
-    .lte('next_gift_at', new Date().toISOString())
+    .lte('next_gift_at', now.toISOString())
+
+  const giftReady = (giftCandidates || []).filter((pp) => {
+    if (!pp.gift_notified) return true
+    if (!pp.gift_notified_at) return false
+    return now.getTime() - new Date(pp.gift_notified_at).getTime() >= GIFT_REMINDER_DELAY_MS
+  })
 
   if (giftReadyError) {
     console.error('Erreur lecture player_pokemon :', giftReadyError.message)
-  } else if (giftReady && giftReady.length > 0) {
+  } else if (giftReady.length > 0) {
     const { data: npcPlayers } = await supabase.from('players').select('id').eq('is_npc', true)
     const npcPlayerIds = new Set((npcPlayers || []).map((p) => p.id))
 
@@ -95,7 +104,7 @@ exports.handler = async () => {
         body: `${pp.pokemon_nom} à une surprise pour toi, viens la découvrir`,
         icon,
       })
-      await supabase.from('player_pokemon').update({ gift_notified: true }).eq('id', pp.id)
+      await supabase.from('player_pokemon').update({ gift_notified: true, gift_notified_at: now.toISOString() }).eq('id', pp.id)
     }
   }
 

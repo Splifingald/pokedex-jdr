@@ -30,12 +30,14 @@ interface Props {
 }
 
 // Fond d'accueil : image configurable dans Admin → Paramètres.
-// L'image occupe toujours toute la hauteur (auto 100%) et reste centrée
-// quand l'écran est plus étroit qu'elle.
+// "cover" priorise le remplissage de la hauteur (c'est déjà le facteur
+// limitant sur écran étroit) mais évite les bandes vides sur écran large
+// en agrandissant l'image jusqu'à couvrir aussi la largeur, quitte à
+// rogner un peu le haut/bas.
 const homeBgStyle = (url: string): React.CSSProperties => ({
   backgroundColor: '#4f9a41',
   backgroundImage: `url(${url})`,
-  backgroundSize: 'auto 100%',
+  backgroundSize: 'cover',
   backgroundPosition: 'center',
   backgroundRepeat: 'no-repeat',
 })

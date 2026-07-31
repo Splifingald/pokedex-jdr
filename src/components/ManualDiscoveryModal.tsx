@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import type { Pokemon } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { normalizeSearch } from '../lib/normalizeSearch'
+import { CloseIcon } from './icons/CloseIcon'
 
 interface Props {
   pokemon: Pokemon[]
@@ -73,7 +74,7 @@ export function ManualDiscoveryModal({ pokemon, discovered, onDiscover, onClose 
       <div className="bg-cream border-[3px] border-ink rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel-lg)] max-w-sm w-full p-6">
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-ink text-lg">Découvrir un Pokémon</h3>
-          <button onClick={onClose} className="text-ink-muted-2 hover:text-ink text-xl leading-none">✕</button>
+          <button onClick={onClose} className="text-ink-muted-2 hover:text-ink text-xl leading-none"><CloseIcon className="w-5 h-5" /></button>
         </div>
 
         <form onSubmit={handleSearch} className="flex gap-2 mb-4">

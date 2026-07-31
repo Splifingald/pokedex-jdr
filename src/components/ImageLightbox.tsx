@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { CloseIcon } from './icons/CloseIcon'
 
 interface Props {
   src: string
@@ -29,7 +30,7 @@ export function ImageLightbox({ src, alt, onClose }: Props) {
         onClick={onClose}
         className="absolute top-4 right-4 text-white text-3xl hover:text-gray-300 leading-none"
       >
-        ✕
+        <CloseIcon className="w-7 h-7" />
       </button>
     </div>
   )

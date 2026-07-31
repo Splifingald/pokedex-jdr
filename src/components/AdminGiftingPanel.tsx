@@ -10,6 +10,8 @@ import { ConfirmPopup } from './ConfirmPopup'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { PixelIcon } from './icons/PixelIcon'
+import { CloseIcon } from './icons/CloseIcon'
+import { TrashIcon } from './icons/TrashIcon'
 import { GIFT_ICON } from '../lib/icons'
 
 export function AdminGiftingPanel() {
@@ -102,7 +104,7 @@ export function AdminGiftingPanel() {
                     title={lb.is_default ? 'Désignez un autre lootbox par défaut avant de supprimer celui-ci' : undefined}
                     className={`text-xs px-2 py-1 rounded shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${BUTTON_STYLE.gray}`}
                   >
-                    🗑
+                    <TrashIcon className="w-3 h-3" />
                   </button>
                 </div>
               ))
@@ -194,7 +196,7 @@ export function AdminGiftingPanel() {
                             className="w-14 bg-white border-2 border-ink rounded px-1 py-1 text-ink text-sm text-center outline-none"
                           />
                           <button onClick={() => removeLootboxItem(row.id)} className={`text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>
-                            ✕
+                            <CloseIcon className="w-3 h-3" />
                           </button>
                         </div>
                       )
@@ -224,7 +226,7 @@ export function AdminGiftingPanel() {
                           onClick={() => unassignSpecies(s.pokemon_nom)}
                           className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-black/10"
                         >
-                          ✕
+                          <CloseIcon className="w-2.5 h-2.5" />
                         </button>
                       </span>
                     ))

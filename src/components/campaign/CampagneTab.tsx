@@ -11,6 +11,7 @@ import { useDisplayAssets } from '../../hooks/useDisplayAssets'
 import { SessionCard } from './SessionCard'
 import { SessionDetailView } from './SessionDetailView'
 import { EmojiPickerButton } from './EmojiPickerButton'
+import { BannerPickerButton } from './BannerPickerButton'
 import { CampaignIcon } from './CampaignIcon'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../../lib/panelStyles'
@@ -27,7 +28,7 @@ export function CampagneTab({ pokemonByName, attacksByName }: Props) {
   const { locations } = useCarteLocations()
   const { items, byName: itemsByName } = useItems()
   const { encounters } = useEncounters()
-  const { sessions, loading, createSession, updateSession, deleteSession } = useCampaignSessions()
+  const { sessions, loading, createSession, updateSession, deleteSession, reorderSessions } = useCampaignSessions()
   const { state: displayState, updateDisplayState } = useDisplayState()
   const { assets: displayAssets } = useDisplayAssets()
 
@@ -35,6 +36,7 @@ export function CampagneTab({ pokemonByName, attacksByName }: Props) {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(emptySessionForm)
   const [creating, setCreating] = useState(false)
+  const [draggedSessionId, setDraggedSessionId] = useState<number | null>(null)
 
   const pokemonList = useMemo(() => [...pokemonByName.values()], [pokemonByName])
   const attacksList = useMemo(() => [...attacksByName.values()], [attacksByName])
@@ -91,6 +93,19 @@ export function CampagneTab({ pokemonByName, attacksByName }: Props) {
     if (created) setSelectedSessionId(created.id)
   }
 
+  const handleDrop = (targetId: number) => {
+    if (draggedSessionId == null || draggedSessionId === targetId) {
+      setDraggedSessionId(null)
+      return
+    }
+    const ids = sessions.map((s) => s.id)
+    const from = ids.indexOf(draggedSessionId)
+    const to = ids.indexOf(targetId)
+    ids.splice(to, 0, ids.splice(from, 1)[0])
+    reorderSessions(ids)
+    setDraggedSessionId(null)
+  }
+
   return (
     <div className="flex-1 overflow-y-auto p-4">
       <div className="flex items-center justify-between mb-3">
@@ -125,13 +140,23 @@ export function CampagneTab({ pokemonByName, attacksByName }: Props) {
             onChange={(e) => setForm((f) => ({ ...f, session_date: e.target.value }))}
             className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none mb-2"
           />
-          <input
-            type="text"
-            value={form.image_url}
-            onChange={(e) => setForm((f) => ({ ...f, image_url: e.target.value }))}
-            placeholder="Lien de l'image de référence (optionnel)"
-            className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none mb-3"
-          />
+          <div className="flex items-center gap-2 mb-3">
+            <BannerPickerButton
+              displayAssets={displayAssets}
+              onSelect={(url) => setForm((f) => ({ ...f, image_url: url }))}
+              variant="button"
+              label={form.image_url ? "Changer l'image" : 'Choisir une image'}
+            />
+            {form.image_url && (
+              <button
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, image_url: '' }))}
+                className={`text-xs px-2 py-2 rounded ${BUTTON_STYLE.gray}`}
+              >
+                Retirer
+              </button>
+            )}
+          </div>
           <button
             type="submit"
             disabled={creating || !form.title.trim()}
@@ -149,7 +174,17 @@ export function CampagneTab({ pokemonByName, attacksByName }: Props) {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {sessions.map((session) => (
-            <SessionCard key={session.id} session={session} onClick={() => setSelectedSessionId(session.id)} />
+            <div
+              key={session.id}
+              draggable
+              onDragStart={() => setDraggedSessionId(session.id)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => handleDrop(session.id)}
+              onDragEnd={() => setDraggedSessionId(null)}
+              className={draggedSessionId === session.id ? 'opacity-40' : ''}
+            >
+              <SessionCard session={session} onClick={() => setSelectedSessionId(session.id)} />
+            </div>
           ))}
         </div>
       )}

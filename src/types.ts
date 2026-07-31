@@ -153,6 +153,14 @@ export interface Player {
   color: string
   image_url: string
   is_npc: boolean
+  full_body_image_url: string
+  age: number | null
+  background_story: string
+  level: number
+  stat_charisme: number
+  stat_intelligence: number
+  stat_sagesse: number
+  stat_dexterite: number
   created_at: string
 }
 
@@ -178,6 +186,7 @@ export interface PlayerPokemon {
   in_team: boolean
   next_gift_at: string | null
   gift_notified: boolean
+  gift_notified_at: string | null
   created_at: string
 }
 
@@ -200,6 +209,10 @@ export interface AdminParameters {
   feature_map_enabled: boolean
   feature_gifting_enabled: boolean
   feature_casino_enabled: boolean
+  stat_points_base: number
+  stat_min: number
+  stat_max: number
+  stat_points_per_level: number
 }
 
 // Fond par défaut de l'écran d'accueil (modifiable dans Admin → Paramètres)
@@ -389,6 +402,7 @@ export interface CampaignSession {
   image_position: number
   done: boolean
   notes: import('@tiptap/core').JSONContent
+  position: number
   created_at: string
 }
 
@@ -397,8 +411,6 @@ export interface CampaignChapter {
   session_id: number
   title: string
   icon: string
-  image_url: string | null
-  image_position: number
   content: import('@tiptap/core').JSONContent
   notes: import('@tiptap/core').JSONContent
   done: boolean
