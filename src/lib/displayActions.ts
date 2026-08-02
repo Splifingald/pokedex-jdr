@@ -26,7 +26,7 @@ export function playerToDisplayAsset(player: Player): DisplayAsset {
 export function resolveDisplayAssetCandidates(entry: ReferenceEntry, assets: DisplayAsset[], players: Player[] = []): DisplayAsset[] {
   if (entry.type === 'player') {
     const candidates: DisplayAsset[] = []
-    const player = players.find((p) => normalize(p.name) === normalize(entry.name) && p.full_body_image_url.trim())
+    const player = players.find((p) => normalize(p.name) === normalize(entry.name) && (p.full_body_image_url ?? '').trim())
     if (player) candidates.push(playerToDisplayAsset(player))
     candidates.push(...assets.filter((a) => a.type === 'NPC' && normalize(a.reference) === normalize(entry.name)))
     return candidates

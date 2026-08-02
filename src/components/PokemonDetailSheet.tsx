@@ -36,6 +36,7 @@ import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { logHistoryEvent } from '../lib/historyLog'
 import { EvolutionPopup } from './EvolutionPopup'
+import { useToast } from '../context/ToastContext'
 import type { StatusId } from '../lib/status'
 
 export type DetailContext = 'home' | 'pokemon' | 'pokedex'
@@ -105,6 +106,7 @@ function OwnedVitals({
   const [status, setStatus] = useLocalStatus(playerPokemon.id)
   const hpRef = useRef(hp)
   useEffect(() => { hpRef.current = hp }, [hp])
+  const { showToast } = useToast()
   const [evolving, setEvolving] = useState<{
     fromSpecies: Pokemon | undefined
     toSpecies: Pokemon | undefined
@@ -151,7 +153,13 @@ function OwnedVitals({
   }, [playerPokemon, pokemon, evolutionsByPokemonNom, pokemonByName, itemsByName, playerItems?.inventory])
 
   const handleEvolveClick = (opt: EvolutionOption) => {
-    if (!opt.clickable || evolving != null || !onEvolve) return
+    if (evolving != null || !onEvolve) return
+
+    if (!opt.clickable) {
+      const itemName = opt.conditionItem?.nom ?? opt.evolution.condition_item_nom
+      showToast(`Il vous faut ${itemName} pour faire évoluer ce Pokémon`)
+      return
+    }
 
     const fromDisplayName = ownedPokemonName(playerPokemon)
     const toDisplayName = opt.evolution.evolution_nom
@@ -177,7 +185,10 @@ function OwnedVitals({
         }
       }
 
-      if (toSpecies) restoreLocalHp(playerPokemon.id, getMaxHp(playerPokemon, toSpecies))
+      // evolvePokemon remet toujours l'XP à 0 côté serveur — on calcule les PV max
+      // sur cette base plutôt que sur playerPokemon.xp, qui est figé (fermeture) sur
+      // l'XP d'avant évolution tant que ce composant n'a pas re-rendu avec les nouvelles props.
+      if (toSpecies) restoreLocalHp(playerPokemon.id, getMaxHp({ ...playerPokemon, xp: 0 }, toSpecies))
       setStatus('aucun')
 
       void logHistoryEvent('team', 'pokemon_evolve', playerPokemon.player_id, {
@@ -258,7 +269,7 @@ function OwnedVitals({
             {evolutionOptions.map((opt) => (
               <button
                 key={opt.evolution.id}
-                disabled={!opt.clickable || evolving != null}
+                disabled={evolving != null}
                 onClick={() => handleEvolveClick(opt)}
                 className={`py-3 rounded-lg text-sm font-bold inline-flex items-center justify-center gap-2 ${
                   opt.clickable

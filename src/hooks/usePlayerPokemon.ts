@@ -105,8 +105,8 @@ export function usePlayerPokemon(playerId: number | null) {
   }, [])
 
   const evolvePokemon = useCallback(async (id: number, newPokemonNom: string, newPokemonNumero: string | null) => {
-    setRoster((prev) => prev.map((r) => (r.id === id ? { ...r, pokemon_nom: newPokemonNom, pokemon_numero: newPokemonNumero } : r)))
-    const { error } = await supabase.from('player_pokemon').update({ pokemon_nom: newPokemonNom, pokemon_numero: newPokemonNumero }).eq('id', id)
+    setRoster((prev) => prev.map((r) => (r.id === id ? { ...r, pokemon_nom: newPokemonNom, pokemon_numero: newPokemonNumero, xp: 0 } : r)))
+    const { error } = await supabase.from('player_pokemon').update({ pokemon_nom: newPokemonNom, pokemon_numero: newPokemonNumero, xp: 0 }).eq('id', id)
     if (error) {
       console.error("Erreur lors de l'évolution :", error)
     }

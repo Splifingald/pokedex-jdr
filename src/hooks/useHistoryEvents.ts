@@ -47,5 +47,16 @@ export function useHistoryEvents() {
     }
   }, [])
 
-  return { events, loading, error, refetch: fetchAll }
+  // Vide tout le journal (bouton admin "Vider l'historique") — idiome delete-all
+  // sans filtre réel déjà utilisé par les fonctions d'import (.neq('id', 0)).
+  const clearAll = useCallback(async () => {
+    setEvents([])
+    const { error } = await supabase.from('history_events').delete().neq('id', 0)
+    if (error) {
+      console.error("Erreur lors de la suppression de l'historique :", error)
+      await fetchAll()
+    }
+  }, [fetchAll])
+
+  return { events, loading, error, refetch: fetchAll, clearAll }
 }

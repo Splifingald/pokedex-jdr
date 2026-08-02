@@ -1,5 +1,5 @@
 import type { Pokemon, PlayerPokemon, PokemonEvolution, Item, PlayerItem } from '../types'
-import { getMaxXp } from './xpBonuses'
+import { getMilestones } from './xpBonuses'
 
 export interface EvolutionOption {
   evolution: PokemonEvolution
@@ -9,9 +9,21 @@ export interface EvolutionOption {
   clickable: boolean
 }
 
-// Options d'évolution disponibles pour une instance possédée : nécessite d'avoir
-// atteint le dernier palier d'XP de l'espèce ET au moins une ligne dans le
-// catalogue d'évolutions importé par CSV pour cette espèce.
+// XP du palier le plus bas dont le libellé (texte libre de la case xp_*) satisfait
+// le prédicat donné — sert à repérer les paliers "Évolution" / "Évolution possible".
+function findTriggerXp(pokemon: Pokemon | undefined, matches: (label: string) => boolean): number | null {
+  const xps = getMilestones(pokemon)
+    .filter((m) => m.kind === 'text' && matches(m.label.trim().toLowerCase()))
+    .map((m) => m.xp)
+  return xps.length ? Math.min(...xps) : null
+}
+
+// Options d'évolution disponibles pour une instance possédée. Le palier XP qui
+// déclenche l'affichage n'est pas forcément le dernier de la jauge : c'est celui
+// dont le libellé vaut exactement "Évolution" (évolutions sans objet requis) ou
+// commence par "Évolution" et contient "possible" (évolutions avec objet requis,
+// ex : "Évolution possible (Pierre Feu)") — tout autre texte (ex : "Évolution
+// aléatoire") est ignoré, le MJ gère ce cas manuellement.
 export function getEvolutionOptions(
   playerPokemon: PlayerPokemon,
   pokemon: Pokemon | undefined,
@@ -20,12 +32,17 @@ export function getEvolutionOptions(
   itemsByName: Map<string, Item>,
   inventory: PlayerItem[]
 ): EvolutionOption[] {
-  const maxXp = getMaxXp(pokemon)
-  if (maxXp == null || playerPokemon.xp < maxXp) return []
-
   const rows = evolutionsByPokemonNom.get(playerPokemon.pokemon_nom) ?? []
+  if (rows.length === 0) return []
+
+  const noConditionXp = findTriggerXp(pokemon, (l) => l === 'évolution')
+  const conditionXp = findTriggerXp(pokemon, (l) => l.startsWith('évolution') && l.includes('possible'))
+  const noConditionReady = noConditionXp != null && playerPokemon.xp >= noConditionXp
+  const conditionReady = conditionXp != null && playerPokemon.xp >= conditionXp
+
   return rows
     .filter((e) => pokemonByName.has(e.evolution_nom))
+    .filter((e) => (e.condition_item_nom ? conditionReady : noConditionReady))
     .map((evolution) => {
       const conditionItem = evolution.condition_item_nom ? itemsByName.get(evolution.condition_item_nom) ?? null : null
       const playerHasItem = evolution.condition_item_nom

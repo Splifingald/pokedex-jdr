@@ -17,9 +17,12 @@ interface Props {
   playersByName: Map<string, Player>
   locationsByName: Map<string, CarteLocation>
   encountersByLieu: Map<string, Encounter[]>
-  displayState: DisplayState
-  displayAssets: DisplayAsset[]
-  updateDisplayState: UpdateDisplayState
+  displayState?: DisplayState
+  displayAssets?: DisplayAsset[]
+  updateDisplayState?: UpdateDisplayState
+  /** Masque la barre "Ajouter à l'affichage" (défaut true) — désactivée pour les popups
+   * ouverts depuis l'Historique, qui n'a pas vocation à piloter l'écran joueurs en direct. */
+  showDisplayBar?: boolean
   onClose: () => void
 }
 
@@ -35,9 +38,22 @@ export function ReferenceDispatcher({
   displayState,
   displayAssets,
   updateDisplayState,
+  showDisplayBar = true,
   onClose,
 }: Props) {
   if (!activeReference) return null
+
+  const displayBar =
+    showDisplayBar && displayState && displayAssets && updateDisplayState ? (
+      <DisplayControlBar
+        key={`${activeReference.type}:${activeReference.name}`}
+        entry={activeReference}
+        displayState={displayState}
+        displayAssets={displayAssets}
+        updateDisplayState={updateDisplayState}
+        players={[...playersByName.values()]}
+      />
+    ) : undefined
 
   if (activeReference.type === 'pokemon') {
     return (
@@ -47,16 +63,7 @@ export function ReferenceDispatcher({
         attacksByName={attacksByName}
         isAdmin={true}
         isDiscovered={true}
-        displayBar={
-          <DisplayControlBar
-            key={`${activeReference.type}:${activeReference.name}`}
-            entry={activeReference}
-            displayState={displayState}
-            displayAssets={displayAssets}
-            updateDisplayState={updateDisplayState}
-            players={[...playersByName.values()]}
-          />
-        }
+        displayBar={displayBar}
         onClose={onClose}
       />
     )
@@ -70,16 +77,7 @@ export function ReferenceDispatcher({
         pokemonByName={pokemonByName}
         attacksByName={attacksByName}
         itemsByName={itemsByName}
-        displayBar={
-          <DisplayControlBar
-            key={`${activeReference.type}:${activeReference.name}`}
-            entry={activeReference}
-            displayState={displayState}
-            displayAssets={displayAssets}
-            updateDisplayState={updateDisplayState}
-            players={[...playersByName.values()]}
-          />
-        }
+        displayBar={displayBar}
         onClose={onClose}
       />
     )
@@ -93,16 +91,7 @@ export function ReferenceDispatcher({
         encounters={encountersByLieu.get(location.titre) ?? []}
         pokemonByName={pokemonByName}
         attacksByName={attacksByName}
-        displayBar={
-          <DisplayControlBar
-            key={`${activeReference.type}:${activeReference.name}`}
-            entry={activeReference}
-            displayState={displayState}
-            displayAssets={displayAssets}
-            updateDisplayState={updateDisplayState}
-            players={[...playersByName.values()]}
-          />
-        }
+        displayBar={displayBar}
         onClose={onClose}
       />
     )
@@ -119,16 +108,7 @@ export function ReferenceDispatcher({
       <ItemReferencePopup
         item={item}
         pokedollarImageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
-        displayBar={
-          <DisplayControlBar
-            key={`${activeReference.type}:${activeReference.name}`}
-            entry={activeReference}
-            displayState={displayState}
-            displayAssets={displayAssets}
-            updateDisplayState={updateDisplayState}
-            players={[...playersByName.values()]}
-          />
-        }
+        displayBar={displayBar}
         onClose={onClose}
       />
     )
