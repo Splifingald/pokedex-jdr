@@ -9,6 +9,7 @@ import { usePlayerItems } from '../../hooks/usePlayerItems'
 import { useAdminParameters } from '../../hooks/useAdminParameters'
 import { useGiftLootboxes } from '../../hooks/useGiftLootboxes'
 import { maybeResetGiftTimerOnEntry } from '../../lib/gifting'
+import { logHistoryEvent } from '../../lib/historyLog'
 import { PixelIcon } from '../icons/PixelIcon'
 import { NAV_ICON } from '../../lib/icons'
 import { PokedollarIcon } from '../PokedollarIcon'
@@ -33,6 +34,12 @@ export function PlayerReferencePopup({ player, pokemonByName, attacksByName, ite
     const pp = roster.find((r) => r.id === id)
     await toggleInTeam(id, inTeam)
     if (pp) {
+      void logHistoryEvent('team', 'pokemon_move', player.id, {
+        pokemon_nom: pp.pokemon_nom,
+        player_pokemon_id: pp.id,
+        nickname: pp.nickname,
+        destination: inTeam ? 'team' : 'pc',
+      })
       await maybeResetGiftTimerOnEntry({
         giftingEnabled: parameters.feature_gifting_enabled,
         isNpc: player.is_npc,

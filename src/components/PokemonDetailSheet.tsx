@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo, type ReactNode } from 'react'
-import type { Pokemon, PlayerPokemon, Attack } from '../types'
+import type { Pokemon, PlayerPokemon, Attack, Item, PokemonEvolution } from '../types'
 import { ownedPokemonName } from '../types'
+import type { usePlayerItems } from '../hooks/usePlayerItems'
 import { SheetShell } from './SheetShell'
 import { EditableName } from './EditableName'
 import { TypeBadge } from './TypeBadge'
@@ -21,17 +22,21 @@ import { PixelIcon } from './icons/PixelIcon'
 import { CloseIcon } from './icons/CloseIcon'
 import { TrashIcon } from './icons/TrashIcon'
 import { STAT_ICON, PC_ICON, GIFT_ICON } from '../lib/icons'
-import { useLocalHp } from '../hooks/useLocalHp'
+import { useLocalHp, restoreLocalHp } from '../hooks/useLocalHp'
 import { useLocalStatus } from '../hooks/useLocalStatus'
 import { useHoldRepeat } from '../hooks/useHoldRepeat'
 import { getMaxHp } from '../lib/maxHp'
 import { getHpBreakdown, getDamageBreakdown, getMilestones, getMaxXp } from '../lib/xpBonuses'
+import { getEvolutionOptions, type EvolutionOption } from '../lib/evolution'
 import { getStatusInfo } from '../lib/status'
 import { StatusSelect } from './StatusSelect'
 import { getSuperEfficace, getLocalisations, getAttaques } from '../lib/pokemonFacts'
 import { toDatetimeLocalInput, fromDatetimeLocalInput } from '../lib/gifting'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
+import { logHistoryEvent } from '../lib/historyLog'
+import { EvolutionPopup } from './EvolutionPopup'
+import type { StatusId } from '../lib/status'
 
 export type DetailContext = 'home' | 'pokemon' | 'pokedex'
 
@@ -59,6 +64,13 @@ interface Props {
   onDelete?: (id: number) => void
   onSetNextGiftAt?: (id: number, nextGiftAt: string | null) => void
 
+  // Évolution (contexts home / pokemon)
+  pokemonByName?: Map<string, Pokemon>
+  itemsByName?: Map<string, Item>
+  evolutionsByPokemonNom?: Map<string, PokemonEvolution[]>
+  playerItems?: ReturnType<typeof usePlayerItems>
+  onEvolve?: (id: number, newPokemonNom: string, newPokemonNumero: string | null) => Promise<void>
+
   // Context pokédex
   isDiscovered?: boolean
   ownedCount?: number
@@ -73,21 +85,109 @@ function OwnedVitals({
   playerPokemon,
   pokemon,
   onUpdateXp,
+  pokemonByName,
+  itemsByName,
+  evolutionsByPokemonNom,
+  playerItems,
+  onEvolve,
 }: {
   playerPokemon: PlayerPokemon
   pokemon: Pokemon | undefined
   onUpdateXp?: (id: number, xp: number) => void
+  pokemonByName?: Map<string, Pokemon>
+  itemsByName?: Map<string, Item>
+  evolutionsByPokemonNom?: Map<string, PokemonEvolution[]>
+  playerItems?: ReturnType<typeof usePlayerItems>
+  onEvolve?: (id: number, newPokemonNom: string, newPokemonNumero: string | null) => Promise<void>
 }) {
   const maxHp = getMaxHp(playerPokemon, pokemon)
   const [hp, setHp] = useLocalHp(playerPokemon.id, maxHp)
   const [status, setStatus] = useLocalStatus(playerPokemon.id)
   const hpRef = useRef(hp)
   useEffect(() => { hpRef.current = hp }, [hp])
-  const decrementHold = useHoldRepeat(() => setHp(hpRef.current - 1))
-  const incrementHold = useHoldRepeat(() => setHp(hpRef.current + 1))
+  const [evolving, setEvolving] = useState<{
+    fromSpecies: Pokemon | undefined
+    toSpecies: Pokemon | undefined
+    fromDisplayName: string
+    toDisplayName: string
+  } | null>(null)
+
+  const combatBase = {
+    pokemon_nom: playerPokemon.pokemon_nom,
+    player_pokemon_id: playerPokemon.id,
+    nickname: playerPokemon.nickname,
+  }
+
+  const handleSetHp = (value: number) => {
+    const wasKo = hpRef.current <= 0
+    setHp(value)
+    const willBeKo = Math.max(0, Math.min(maxHp, value)) <= 0
+    if (wasKo !== willBeKo) {
+      void logHistoryEvent('combat', 'ko', playerPokemon.player_id, { ...combatBase, ko: willBeKo })
+    }
+  }
+
+  const handleSetStatus = (value: StatusId) => {
+    const prev = status
+    setStatus(value)
+    if (prev === value) return
+    if (prev !== 'aucun') {
+      void logHistoryEvent('combat', 'status_change', playerPokemon.player_id, { ...combatBase, status_id: prev, status_gained: false })
+    }
+    if (value !== 'aucun') {
+      void logHistoryEvent('combat', 'status_change', playerPokemon.player_id, { ...combatBase, status_id: value, status_gained: true })
+    }
+  }
+
+  const decrementHold = useHoldRepeat(() => handleSetHp(hpRef.current - 1))
+  const incrementHold = useHoldRepeat(() => handleSetHp(hpRef.current + 1))
   const milestones = useMemo(() => getMilestones(pokemon), [pokemon])
   const maxXp = useMemo(() => getMaxXp(pokemon), [pokemon])
   const handleXpChange = (xp: number) => onUpdateXp?.(playerPokemon.id, xp)
+
+  const evolutionOptions = useMemo(() => {
+    if (!pokemonByName || !itemsByName || !evolutionsByPokemonNom) return []
+    return getEvolutionOptions(playerPokemon, pokemon, evolutionsByPokemonNom, pokemonByName, itemsByName, playerItems?.inventory ?? [])
+  }, [playerPokemon, pokemon, evolutionsByPokemonNom, pokemonByName, itemsByName, playerItems?.inventory])
+
+  const handleEvolveClick = (opt: EvolutionOption) => {
+    if (!opt.clickable || evolving != null || !onEvolve) return
+
+    const fromDisplayName = ownedPokemonName(playerPokemon)
+    const toDisplayName = opt.evolution.evolution_nom
+    const fromSpecies = pokemon
+    const toSpecies = opt.targetSpecies
+
+    setEvolving({ fromSpecies, toSpecies, fromDisplayName, toDisplayName })
+
+    void (async () => {
+      await onEvolve(playerPokemon.id, opt.evolution.evolution_nom, toSpecies?.numero ?? null)
+
+      if (opt.evolution.condition_item_nom && playerItems) {
+        const row = playerItems.inventory.find((r) => r.item_nom === opt.evolution.condition_item_nom)
+        if (row && row.quantity > 0) {
+          const total = row.quantity - 1
+          await playerItems.setQuantity(row, total)
+          void logHistoryEvent('inventory', 'item_remove', playerPokemon.player_id, {
+            item_nom: opt.evolution.condition_item_nom,
+            delta: 1,
+            total,
+            source: `l'évolution de ${fromDisplayName}`,
+          })
+        }
+      }
+
+      if (toSpecies) restoreLocalHp(playerPokemon.id, getMaxHp(playerPokemon, toSpecies))
+      setStatus('aucun')
+
+      void logHistoryEvent('team', 'pokemon_evolve', playerPokemon.player_id, {
+        pokemon_nom: playerPokemon.pokemon_nom,
+        player_pokemon_id: playerPokemon.id,
+        nickname: playerPokemon.nickname,
+        to_pokemon_nom: opt.evolution.evolution_nom,
+      })
+    })()
+  }
 
   return (
     <div className="mb-3">
@@ -102,7 +202,7 @@ function OwnedVitals({
           </button>
           <NumberInput
             value={hp}
-            onCommit={setHp}
+            onCommit={handleSetHp}
             className="w-14 bg-white border-2 border-ink rounded px-1 py-0.5 text-ink text-sm text-center outline-none"
           />
           <button
@@ -113,7 +213,7 @@ function OwnedVitals({
           </button>
         </div>
 
-        <StatusSelect value={status} onChange={setStatus} />
+        <StatusSelect value={status} onChange={handleSetStatus} />
       </div>
 
       {status !== 'aucun' && (
@@ -127,7 +227,7 @@ function OwnedVitals({
       )}
 
       <div className="flex flex-col gap-2">
-        <HpGauge current={hp} max={maxHp} onChange={setHp} />
+        <HpGauge current={hp} max={maxHp} onChange={handleSetHp} />
         {maxXp != null ? (
           <XpGauge xp={playerPokemon.xp} max={maxXp} milestones={milestones} onXpChange={handleXpChange} />
         ) : (
@@ -152,7 +252,43 @@ function OwnedVitals({
             </button>
           </div>
         )}
+
+        {evolutionOptions.length > 0 && (
+          <div className="flex flex-col gap-2 mt-1">
+            {evolutionOptions.map((opt) => (
+              <button
+                key={opt.evolution.id}
+                disabled={!opt.clickable || evolving != null}
+                onClick={() => handleEvolveClick(opt)}
+                className={`py-3 rounded-lg text-sm font-bold inline-flex items-center justify-center gap-2 ${
+                  opt.clickable
+                    ? BUTTON_STYLE.yellow
+                    : 'bg-[#3a3c58] text-[#7a7c9a] border-2 border-[#6a6a6a] cursor-not-allowed'
+                }`}
+              >
+                {opt.conditionItem?.image_url && (
+                  <img
+                    src={opt.conditionItem.image_url}
+                    alt=""
+                    className={`w-6 h-6 object-contain ${opt.clickable ? '' : 'grayscale opacity-60'}`}
+                  />
+                )}
+                ✨ ÉVOLUTION !
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+
+      {evolving && (
+        <EvolutionPopup
+          fromSpecies={evolving.fromSpecies}
+          toSpecies={evolving.toSpecies}
+          fromDisplayName={evolving.fromDisplayName}
+          toDisplayName={evolving.toDisplayName}
+          onDone={() => setEvolving(null)}
+        />
+      )}
     </div>
   )
 }
@@ -176,6 +312,11 @@ export function PokemonDetailSheet({
   onRemoveMove,
   onDelete,
   onSetNextGiftAt,
+  pokemonByName,
+  itemsByName,
+  evolutionsByPokemonNom,
+  playerItems,
+  onEvolve,
   isDiscovered = true,
   ownedCount = 0,
   onAddToRoster,
@@ -264,7 +405,16 @@ export function PokemonDetailSheet({
 
         {/* PV / Statut / XP (instance possédée uniquement) */}
         {isOwnedContext && playerPokemon && (
-          <OwnedVitals playerPokemon={playerPokemon} pokemon={pokemon} onUpdateXp={onUpdateXp} />
+          <OwnedVitals
+            playerPokemon={playerPokemon}
+            pokemon={pokemon}
+            onUpdateXp={onUpdateXp}
+            pokemonByName={pokemonByName}
+            itemsByName={itemsByName}
+            evolutionsByPokemonNom={evolutionsByPokemonNom}
+            playerItems={playerItems}
+            onEvolve={onEvolve}
+          />
         )}
 
         {/* Grille de stats numériques : icône + valeur uniquement */}

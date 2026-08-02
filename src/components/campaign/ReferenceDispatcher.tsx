@@ -49,6 +49,7 @@ export function ReferenceDispatcher({
         isDiscovered={true}
         displayBar={
           <DisplayControlBar
+            key={`${activeReference.type}:${activeReference.name}`}
             entry={activeReference}
             displayState={displayState}
             displayAssets={displayAssets}
@@ -71,6 +72,7 @@ export function ReferenceDispatcher({
         itemsByName={itemsByName}
         displayBar={
           <DisplayControlBar
+            key={`${activeReference.type}:${activeReference.name}`}
             entry={activeReference}
             displayState={displayState}
             displayAssets={displayAssets}
@@ -93,6 +95,7 @@ export function ReferenceDispatcher({
         attacksByName={attacksByName}
         displayBar={
           <DisplayControlBar
+            key={`${activeReference.type}:${activeReference.name}`}
             entry={activeReference}
             displayState={displayState}
             displayAssets={displayAssets}
@@ -118,6 +121,7 @@ export function ReferenceDispatcher({
         pokedollarImageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
         displayBar={
           <DisplayControlBar
+            key={`${activeReference.type}:${activeReference.name}`}
             entry={activeReference}
             displayState={displayState}
             displayAssets={displayAssets}

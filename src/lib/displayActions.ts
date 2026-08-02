@@ -16,27 +16,37 @@ const normalize = normalizeName
  * profil. `display_assets.id` est toujours ≥ 1 (bigserial) donc ces plages ne se chevauchent
  * jamais — pas de changement de schéma nécessaire pour `display_state.npc_ids` (jsonb, sans FK). */
 export function playerToDisplayAsset(player: Player): DisplayAsset {
-  return { id: -player.id, nom: player.name, type: 'NPC', image_url: player.full_body_image_url }
+  return { id: -player.id, nom: player.name, type: 'NPC', image_url: player.full_body_image_url, reference: player.name }
 }
 
-/** Un PNJ/Lieu ne pousse pas sa propre image (portrait/icône) sur l'affichage : on cherche
- * une entrée display_assets du bon type dont le nom correspond, pensée pour la projection
+/** Un PNJ/Lieu ne pousse pas sa propre image (portrait/icône) sur l'affichage : on cherche les
+ * entrées display_assets du bon type dont le champ `reference` correspond (plusieurs images
+ * peuvent partager la même référence — variantes d'un même PNJ/lieu), pensées pour la projection
  * plein écran. Pokémon/Objet utilisent directement leur propre id (déjà la bonne table). */
-export function resolveDisplayAssetForReference(entry: ReferenceEntry, assets: DisplayAsset[], players: Player[] = []): DisplayAsset | null {
+export function resolveDisplayAssetCandidates(entry: ReferenceEntry, assets: DisplayAsset[], players: Player[] = []): DisplayAsset[] {
   if (entry.type === 'player') {
+    const candidates: DisplayAsset[] = []
     const player = players.find((p) => normalize(p.name) === normalize(entry.name) && p.full_body_image_url.trim())
-    if (player) return playerToDisplayAsset(player)
-    return assets.find((a) => a.type === 'NPC' && normalize(a.nom) === normalize(entry.name)) ?? null
+    if (player) candidates.push(playerToDisplayAsset(player))
+    candidates.push(...assets.filter((a) => a.type === 'NPC' && normalize(a.reference) === normalize(entry.name)))
+    return candidates
   }
   if (entry.type === 'location') {
-    return assets.find((a) => a.type === 'Background' && normalize(a.nom) === normalize(entry.name)) ?? null
+    return assets.filter((a) => a.type === 'Background' && normalize(a.reference) === normalize(entry.name))
   }
-  return null
+  return []
+}
+
+/** Premier candidat (image de profil du joueur en priorité, sinon première correspondance CSV
+ * par `reference`) — utilisé partout où une résolution non interactive suffit (commandes texte
+ * de l'éditeur, garde `canAddToDisplay`). */
+export function resolveDisplayAssetForReference(entry: ReferenceEntry, assets: DisplayAsset[], players: Player[] = []): DisplayAsset | null {
+  return resolveDisplayAssetCandidates(entry, assets, players)[0] ?? null
 }
 
 export function canAddToDisplay(entry: ReferenceEntry, assets: DisplayAsset[], players: Player[] = []): boolean {
   if (entry.type === 'pokemon' || entry.type === 'item') return true
-  if (entry.type === 'player' || entry.type === 'location') return resolveDisplayAssetForReference(entry, assets, players) !== null
+  if (entry.type === 'player' || entry.type === 'location') return resolveDisplayAssetCandidates(entry, assets, players).length > 0
   return false
 }
 
@@ -75,7 +85,8 @@ export function addReferenceToDisplay(
   state: DisplayState,
   assets: DisplayAsset[],
   updateDisplayState: UpdateDisplayState,
-  players: Player[] = []
+  players: Player[] = [],
+  selectedAssetId?: number
 ): boolean {
   if (entry.type === 'pokemon') {
     updateDisplayState({ pokemon_ids: addToLayer(state.pokemon_ids, entry.id) })
@@ -86,15 +97,15 @@ export function addReferenceToDisplay(
     return true
   }
   if (entry.type === 'player') {
-    const asset = resolveDisplayAssetForReference(entry, assets, players)
-    if (!asset) return false
-    updateDisplayState({ npc_ids: addToLayer(state.npc_ids, asset.id) })
+    const assetId = selectedAssetId ?? resolveDisplayAssetForReference(entry, assets, players)?.id
+    if (assetId === undefined) return false
+    updateDisplayState({ npc_ids: addToLayer(state.npc_ids, assetId) })
     return true
   }
   if (entry.type === 'location') {
-    const asset = resolveDisplayAssetForReference(entry, assets, players)
-    if (!asset) return false
-    setBackgroundAsset(asset.id, updateDisplayState)
+    const assetId = selectedAssetId ?? resolveDisplayAssetForReference(entry, assets, players)?.id
+    if (assetId === undefined) return false
+    setBackgroundAsset(assetId, updateDisplayState)
     return true
   }
   return false

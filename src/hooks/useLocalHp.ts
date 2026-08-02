@@ -7,6 +7,13 @@ function clamp(value: number, max: number) {
   return Math.max(0, Math.min(max, value))
 }
 
+// Lecture directe hors cycle de vie d'un composant (ex : détecter un K.O.
+// avant un "tout soigner" groupé) — voir restoreLocalHp ci-dessous.
+export function getLocalHp(playerPokemonId: number): number | null {
+  const stored = localStorage.getItem(key(playerPokemonId))
+  return stored === null ? null : parseInt(stored, 10) || 0
+}
+
 function dispatchChange(playerPokemonId: number, hp: number) {
   window.dispatchEvent(new CustomEvent(EVENT, { detail: { id: playerPokemonId, hp } }))
 }

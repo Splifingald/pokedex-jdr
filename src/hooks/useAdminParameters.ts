@@ -8,6 +8,7 @@ const DEFAULTS: AdminParameters = {
   max_team_size: 3,
   carte_image_url: '',
   carte_couleurs_image_url: '',
+  map_addon_image_urls: [],
   accueil_image_url: '',
   feature_pokedex_enabled: true,
   feature_photo_capture_enabled: true,

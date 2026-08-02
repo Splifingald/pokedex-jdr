@@ -3,6 +3,9 @@ import { usePlayers } from '../hooks/usePlayers'
 import { usePokemon } from '../hooks/usePokemon'
 import { useAttacks } from '../hooks/useAttacks'
 import { useAdminParameters } from '../hooks/useAdminParameters'
+import { useItems } from '../hooks/useItems'
+import { usePlayerItems } from '../hooks/usePlayerItems'
+import { usePokemonEvolutions } from '../hooks/usePokemonEvolutions'
 import { PLAYER_COLORS } from '../types'
 import type { Player } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
@@ -18,6 +21,8 @@ export function AdminPlayersPanel() {
   const { pokemon, discovered } = usePokemon()
   const { byName: attacksByName } = useAttacks()
   const { parameters } = useAdminParameters()
+  const { byName: itemsByName } = useItems()
+  const { byPokemonNom: evolutionsByPokemonNom } = usePokemonEvolutions()
   const pokemonByName = useMemo(() => new Map(pokemon.map((p) => [p.nom, p])), [pokemon])
   const [editing, setEditing] = useState<Player | null>(null)
   const [profileEditingId, setProfileEditingId] = useState<number | null>(null)
@@ -26,6 +31,7 @@ export function AdminPlayersPanel() {
   const [saving, setSaving] = useState(false)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(null)
   const [viewingTeamPlayer, setViewingTeamPlayer] = useState<Player | null>(null)
+  const viewingTeamPlayerItems = usePlayerItems(viewingTeamPlayer?.id ?? null)
 
   const regularPlayers = players.filter((p) => !p.is_npc)
   const npcs = players.filter((p) => p.is_npc)
@@ -51,6 +57,9 @@ export function AdminPlayersPanel() {
           isAdmin={true}
           pokemonByName={pokemonByName}
           attacksByName={attacksByName}
+          itemsByName={itemsByName}
+          playerItems={viewingTeamPlayerItems}
+          evolutionsByPokemonNom={evolutionsByPokemonNom}
         />
       </div>
     )

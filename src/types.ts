@@ -201,6 +201,7 @@ export interface AdminParameters {
   max_team_size: number
   carte_image_url: string
   carte_couleurs_image_url: string
+  map_addon_image_urls: string[]
   accueil_image_url: string
   feature_pokedex_enabled: boolean
   feature_photo_capture_enabled: boolean
@@ -251,6 +252,23 @@ export interface PlayerItem {
 
 export const POKEDOLLAR_ITEM_NAME = 'Pokédollar'
 export const sellValue = (cout: number) => Math.floor(cout / 2)
+
+// ── Évolutions ────────────────────────────────────────────────
+export interface PokemonEvolution {
+  id: number
+  pokemon_nom: string
+  evolution_nom: string
+  condition_item_nom: string | null
+  created_at: string
+}
+
+export interface PokemonEvolutionCsvRow {
+  'Nom': string
+  'Évolution': string
+  'Condition': string
+}
+
+export const POKEMON_EVOLUTION_CSV_REQUIRED_HEADERS: (keyof PokemonEvolutionCsvRow)[] = ['Nom', 'Évolution']
 
 // ── Cadeaux Pokémon (lootboxes) ───────────────────────────────
 export type GiftTimerUnit = 'hours' | 'minutes'
@@ -346,22 +364,25 @@ export interface PushSubscriptionRow {
 }
 
 // ── Mode Affichage ───────────────────────────────────────────
-// Types en usage dans display_assets.type : 'NPC' (figures PNJ) et 'Background'
-// (fonds d'écran, table `backgrounds` fusionnée ici — voir schema.sql).
+// Types en usage dans display_assets.type : 'NPC' (figures PNJ), 'Background'
+// (fonds d'écran, table `backgrounds` fusionnée ici — voir schema.sql) et
+// 'Map Add-On' (calque superposé à la Carte, voir CarteTab.tsx).
 export interface DisplayAsset {
   id: number
   nom: string
   type: string
   image_url: string
+  reference: string
 }
 
 export interface DisplayAssetCsvRow {
   'Nom': string
   'Type': string
   'Image': string
+  'Reference': string
 }
 
-export const DISPLAY_ASSET_CSV_REQUIRED_HEADERS: (keyof DisplayAssetCsvRow)[] = ['Nom', 'Type', 'Image']
+export const DISPLAY_ASSET_CSV_REQUIRED_HEADERS: (keyof DisplayAssetCsvRow)[] = ['Nom', 'Type', 'Image', 'Reference']
 
 export interface DisplayState {
   id: number
@@ -421,4 +442,71 @@ export interface CampaignChapter {
 export const EMPTY_CHAPTER_CONTENT: import('@tiptap/core').JSONContent = {
   type: 'doc',
   content: [{ type: 'paragraph' }],
+}
+
+// ── Historique (journal des actions joueurs) ──────────────────
+export type HistoryCategory = 'inventory' | 'pokedex' | 'team' | 'combat'
+
+export type HistoryActionType =
+  | 'item_add'          // ajout générique (Sac, achat de ticket, recharge de tickets)
+  | 'item_remove'       // retrait générique (Sac, achat de ticket)
+  | 'item_sale'         // vente d'un objet (crédit Pokédollar uniquement, une seule ligne)
+  | 'item_gift'         // cadeau reçu d'un Pokémon
+  | 'item_casino_win'   // gains au Casino
+  | 'item_casino_spend' // ticket dépensé au Casino
+  | 'pokedex_add'       // espèce découverte
+  | 'pokemon_new'       // nouveau Pokémon obtenu (équipe ou PC)
+  | 'pokemon_move'      // Pokémon existant déplacé équipe <-> PC
+  | 'pokemon_evolve'    // Pokémon existant a évolué vers une nouvelle espèce
+  | 'ko'                // K.O. / sortie de K.O.
+  | 'status_change'     // statut appliqué / retiré
+
+// Sur une ligne brute en base, `delta` est signé (négatif pour un retrait).
+// Le regroupement à la lecture (src/lib/historyGrouping.ts) le normalise en
+// valeur positive une fois le action_type net résolu (add vs remove).
+export interface HistoryInventoryPayload {
+  item_nom: string // nom de l'objet, ou 'Pokédollar' / 'Ticket Casino'
+  delta: number
+  total: number
+  // ex: 'le Sac', 'la recharge de tickets', 'la vente de : Filet Ball',
+  // "l'achat de tickets", nom d'affichage du Pokémon (cadeau), ou nom du
+  // jeu de Casino (config.dice_nom / slots_nom)
+  source: string
+}
+
+export interface HistoryPokedexPayload {
+  pokemon_nom: string
+  total: number // total de découvertes campagne-wide après l'événement
+}
+
+export interface HistoryTeamPayload {
+  pokemon_nom: string
+  player_pokemon_id: number
+  nickname: string | null
+  destination?: 'team' | 'pc'   // absent pour pokemon_evolve
+  to_pokemon_nom?: string       // action_type === 'pokemon_evolve' : nouvelle espèce
+}
+
+export interface HistoryCombatPayload {
+  pokemon_nom: string
+  player_pokemon_id: number
+  nickname: string | null
+  ko?: boolean             // action_type === 'ko' : true = entre en K.O., false = sort du K.O.
+  status_id?: import('./lib/status').StatusId // action_type === 'status_change'
+  status_gained?: boolean  // true = statut appliqué, false = statut retiré
+}
+
+export type HistoryPayload =
+  | HistoryInventoryPayload
+  | HistoryPokedexPayload
+  | HistoryTeamPayload
+  | HistoryCombatPayload
+
+export interface HistoryEvent {
+  id: number
+  player_id: number
+  category: HistoryCategory
+  action_type: HistoryActionType
+  payload: HistoryPayload
+  created_at: string
 }

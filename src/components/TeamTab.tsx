@@ -1,11 +1,13 @@
 import { useState, useMemo } from 'react'
-import type { Player, Pokemon, Attack, PlayerPokemon } from '../types'
+import type { Player, Pokemon, Attack, PlayerPokemon, Item, PokemonEvolution } from '../types'
 import { ownedPokemonName } from '../types'
 import { usePlayerPokemon } from '../hooks/usePlayerPokemon'
+import type { usePlayerItems } from '../hooks/usePlayerItems'
 import { useAdminParameters } from '../hooks/useAdminParameters'
 import { useGiftLootboxes } from '../hooks/useGiftLootboxes'
 import { useToast } from '../context/ToastContext'
-import { restoreLocalHp } from '../hooks/useLocalHp'
+import { restoreLocalHp, getLocalHp } from '../hooks/useLocalHp'
+import { logHistoryEvent } from '../lib/historyLog'
 import { getMaxHp } from '../lib/maxHp'
 import { maybeResetGiftTimerOnEntry } from '../lib/gifting'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
@@ -27,10 +29,13 @@ interface Props {
   isAdmin: boolean
   pokemonByName: Map<string, Pokemon>
   attacksByName: Map<string, Attack>
+  itemsByName: Map<string, Item>
+  playerItems: ReturnType<typeof usePlayerItems>
+  evolutionsByPokemonNom: Map<string, PokemonEvolution[]>
 }
 
-export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByName, attacksByName }: Props) {
-  const { roster, loading, addOwnedPokemon, updateXp, updateNickname, toggleInTeam, setNextGiftAt, addMove, removeMove, deleteOwnedPokemon } = usePlayerPokemon(player.id)
+export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByName, attacksByName, itemsByName, playerItems, evolutionsByPokemonNom }: Props) {
+  const { roster, loading, addOwnedPokemon, updateXp, updateNickname, evolvePokemon, toggleInTeam, setNextGiftAt, addMove, removeMove, deleteOwnedPokemon } = usePlayerPokemon(player.id)
   const { parameters } = useAdminParameters()
   const { lootboxes, speciesAssignments } = useGiftLootboxes()
   const { showToast } = useToast()
@@ -74,6 +79,12 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
     const inTeam = !teamFull
     const created = await addOwnedPokemon(p.nom, p.numero, inTeam)
     if (created) {
+      void logHistoryEvent('team', 'pokemon_new', player.id, {
+        pokemon_nom: p.nom,
+        player_pokemon_id: created.id,
+        nickname: null,
+        destination: inTeam ? 'team' : 'pc',
+      })
       await maybeResetGiftTimerOnEntry({
         giftingEnabled: parameters.feature_gifting_enabled,
         isNpc: player.is_npc,
@@ -93,6 +104,12 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
     const pp = roster.find((r) => r.id === id)
     await toggleInTeam(id, inTeam)
     if (pp) {
+      void logHistoryEvent('team', 'pokemon_move', player.id, {
+        pokemon_nom: pp.pokemon_nom,
+        player_pokemon_id: pp.id,
+        nickname: pp.nickname,
+        destination: inTeam ? 'team' : 'pc',
+      })
       await maybeResetGiftTimerOnEntry({
         giftingEnabled: parameters.feature_gifting_enabled,
         isNpc: player.is_npc,
@@ -117,7 +134,16 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
 
   const handleRestoreAll = () => {
     sortedRoster.forEach((pp) => {
+      const wasKo = (getLocalHp(pp.id) ?? getMaxHp(pp, pokemonByName.get(pp.pokemon_nom))) <= 0
       restoreLocalHp(pp.id, getMaxHp(pp, pokemonByName.get(pp.pokemon_nom)))
+      if (wasKo) {
+        void logHistoryEvent('combat', 'ko', player.id, {
+          pokemon_nom: pp.pokemon_nom,
+          player_pokemon_id: pp.id,
+          nickname: pp.nickname,
+          ko: false,
+        })
+      }
     })
     showToast('Pokémon soignés !')
   }
@@ -187,6 +213,11 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
           onRemoveMove={removeMove}
           onDelete={handleDeleteOwned}
           onSetNextGiftAt={setNextGiftAt}
+          pokemonByName={pokemonByName}
+          itemsByName={itemsByName}
+          evolutionsByPokemonNom={evolutionsByPokemonNom}
+          playerItems={playerItems}
+          onEvolve={evolvePokemon}
           onClose={() => setSelectedId(null)}
         />
       )}

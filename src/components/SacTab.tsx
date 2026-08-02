@@ -11,6 +11,8 @@ import { PokedollarIcon } from './PokedollarIcon'
 import { useToast } from '../context/ToastContext'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PANEL } from '../lib/panelStyles'
+import { logHistoryEvent } from '../lib/historyLog'
+import type { HistoryActionType } from '../types'
 
 interface Props {
   player: Player
@@ -19,9 +21,23 @@ interface Props {
   playerItems: ReturnType<typeof usePlayerItems>
 }
 
-function PokedollarRow({ itemsByName, playerItems }: Pick<Props, 'itemsByName' | 'playerItems'>) {
+function PokedollarRow({ player, itemsByName, playerItems }: Pick<Props, 'player' | 'itemsByName' | 'playerItems'>) {
   const pokedollarItem = itemsByName.get(POKEDOLLAR_ITEM_NAME)
   const { pokedollars, setPokedollars } = playerItems
+
+  const changePokedollars = (value: number) => {
+    const clamped = Math.max(0, value)
+    const delta = clamped - pokedollars
+    setPokedollars(clamped)
+    if (delta !== 0) {
+      void logHistoryEvent('inventory', delta > 0 ? 'item_add' : 'item_remove', player.id, {
+        item_nom: POKEDOLLAR_ITEM_NAME,
+        delta: Math.abs(delta),
+        total: clamped,
+        source: 'le Sac',
+      })
+    }
+  }
 
   return (
     <div className={`${PANEL} flex items-center gap-3 p-3 mb-3.5`}>
@@ -31,7 +47,7 @@ function PokedollarRow({ itemsByName, playerItems }: Pick<Props, 'itemsByName' |
       <span className="text-ink font-bold flex-1 min-w-0 truncate">Pokédollars</span>
       <div className="flex items-center gap-2">
         <button
-          onClick={() => setPokedollars(pokedollars - 1)}
+          onClick={() => changePokedollars(pokedollars - 1)}
           className={`w-8 h-8 rounded-md font-bold ${BUTTON_STYLE.gray}`}
         >
           −
@@ -39,11 +55,11 @@ function PokedollarRow({ itemsByName, playerItems }: Pick<Props, 'itemsByName' |
         <NumberInput
           min={0}
           value={pokedollars}
-          onCommit={(v) => setPokedollars(Math.max(0, v))}
+          onCommit={changePokedollars}
           className="w-16 text-center bg-white border-2 border-ink rounded-md py-1 text-ink"
         />
         <button
-          onClick={() => setPokedollars(pokedollars + 1)}
+          onClick={() => changePokedollars(pokedollars + 1)}
           className={`w-8 h-8 rounded-md font-bold ${BUTTON_STYLE.gray}`}
         >
           +
@@ -53,11 +69,17 @@ function PokedollarRow({ itemsByName, playerItems }: Pick<Props, 'itemsByName' |
   )
 }
 
-export function SacTab({ items, itemsByName, playerItems }: Props) {
-  const { inventory, addItem, setQuantity, sellOne } = playerItems
+export function SacTab({ player, items, itemsByName, playerItems }: Props) {
+  const { inventory, pokedollars, addItem, setQuantity, sellOne } = playerItems
   const { showToast } = useToast()
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [category, setCategory] = useState('Tous')
+
+  const logInventoryChange = (itemNom: string, delta: number, total: number, source: string) => {
+    if (delta === 0) return
+    const actionType: HistoryActionType = delta > 0 ? 'item_add' : 'item_remove'
+    void logHistoryEvent('inventory', actionType, player.id, { item_nom: itemNom, delta: Math.abs(delta), total, source })
+  }
 
   const ownedItems = useMemo(
     () =>
@@ -93,7 +115,9 @@ export function SacTab({ items, itemsByName, playerItems }: Props) {
   const selectedRow = selectedId != null ? inventory.find((r) => r.id === selectedId) : undefined
 
   const handleSelectItem = (item: Item) => {
+    const total = (ownedQty.get(item.nom) ?? 0) + 1
     addItem(item.nom)
+    logInventoryChange(item.nom, 1, total, 'le Sac')
     showToast(`${item.nom} ajouté au Sac !`)
   }
 
@@ -105,6 +129,12 @@ export function SacTab({ items, itemsByName, playerItems }: Props) {
     const value = sellValue(item.cout)
     flyCoin(rect, value, pokedollarImageUrl)
     sellOne(row, value)
+    void logHistoryEvent('inventory', 'item_sale', player.id, {
+      item_nom: POKEDOLLAR_ITEM_NAME,
+      delta: value,
+      total: pokedollars + value,
+      source: `la vente de : ${row.item_nom}`,
+    })
   }
 
   return (
@@ -113,7 +143,7 @@ export function SacTab({ items, itemsByName, playerItems }: Props) {
         <ItemSearchInput options={items} ownedQty={ownedQty} onSelect={handleSelectItem} />
       </div>
 
-      <PokedollarRow itemsByName={itemsByName} playerItems={playerItems} />
+      <PokedollarRow player={player} itemsByName={itemsByName} playerItems={playerItems} />
 
       {categories.length > 1 && (
         <div className="flex gap-1.5 flex-wrap mb-3.5">
@@ -147,14 +177,22 @@ export function SacTab({ items, itemsByName, playerItems }: Props) {
                   <span className="text-ink text-sm flex-1 truncate">{row.item_nom}</span>
                 </button>
                 <button
-                  onClick={() => setQuantity(row, Math.max(0, row.quantity - 1))}
+                  onClick={() => {
+                    const total = Math.max(0, row.quantity - 1)
+                    setQuantity(row, total)
+                    logInventoryChange(row.item_nom, total - row.quantity, total, 'le Sac')
+                  }}
                   className={`w-7 h-7 rounded-md font-bold text-sm shrink-0 ${BUTTON_STYLE.gray}`}
                 >
                   −
                 </button>
                 <span className="min-w-6 text-center text-ink text-sm font-bold shrink-0">{row.quantity}</span>
                 <button
-                  onClick={() => setQuantity(row, row.quantity + 1)}
+                  onClick={() => {
+                    const total = row.quantity + 1
+                    setQuantity(row, total)
+                    logInventoryChange(row.item_nom, total - row.quantity, total, 'le Sac')
+                  }}
                   className={`w-7 h-7 rounded-md font-bold text-sm shrink-0 ${BUTTON_STYLE.gray}`}
                 >
                   +
@@ -170,7 +208,11 @@ export function SacTab({ items, itemsByName, playerItems }: Props) {
           row={selectedRow}
           item={itemsByName.get(selectedRow.item_nom)}
           pokedollarImageUrl={pokedollarImageUrl}
-          onSetQuantity={(q) => setQuantity(selectedRow, q)}
+          onSetQuantity={(q) => {
+            const total = Math.max(0, q)
+            setQuantity(selectedRow, total)
+            logInventoryChange(selectedRow.item_nom, total - selectedRow.quantity, total, 'le Sac')
+          }}
           onSell={(rect) => handleSell(selectedRow, rect)}
           onClose={() => setSelectedId(null)}
         />

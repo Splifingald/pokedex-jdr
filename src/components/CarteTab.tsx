@@ -250,6 +250,15 @@ export function CarteTab({ parameters, isAdmin, pokemonByName, attacksByName }: 
               className="w-full h-auto block max-w-none"
               draggable={false}
             />
+            {parameters.map_addon_image_urls.map((url, i) => (
+              <img
+                key={`${url}-${i}`}
+                src={url}
+                alt=""
+                className="absolute inset-0 w-full h-full pointer-events-none select-none"
+                draggable={false}
+              />
+            ))}
           </div>
 
           {colorMapError && (

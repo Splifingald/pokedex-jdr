@@ -104,6 +104,14 @@ export function usePlayerPokemon(playerId: number | null) {
     }
   }, [])
 
+  const evolvePokemon = useCallback(async (id: number, newPokemonNom: string, newPokemonNumero: string | null) => {
+    setRoster((prev) => prev.map((r) => (r.id === id ? { ...r, pokemon_nom: newPokemonNom, pokemon_numero: newPokemonNumero } : r)))
+    const { error } = await supabase.from('player_pokemon').update({ pokemon_nom: newPokemonNom, pokemon_numero: newPokemonNumero }).eq('id', id)
+    if (error) {
+      console.error("Erreur lors de l'évolution :", error)
+    }
+  }, [])
+
   const toggleInTeam = useCallback(async (id: number, inTeam: boolean) => {
     setRoster((prev) => prev.map((r) => (r.id === id ? { ...r, in_team: inTeam } : r)))
     const { error } = await supabase.from('player_pokemon').update({ in_team: inTeam }).eq('id', id)
@@ -160,6 +168,7 @@ export function usePlayerPokemon(playerId: number | null) {
     addOwnedPokemon,
     updateXp,
     updateNickname,
+    evolvePokemon,
     toggleInTeam,
     setNextGiftAt,
     addMove,

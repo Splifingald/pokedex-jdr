@@ -5,6 +5,7 @@ import { usePlayerContext } from './context/PlayerContext'
 import { usePlayerPokemon } from './hooks/usePlayerPokemon'
 import { useItems } from './hooks/useItems'
 import { usePlayerItems } from './hooks/usePlayerItems'
+import { usePokemonEvolutions } from './hooks/usePokemonEvolutions'
 import { useAdminParameters } from './hooks/useAdminParameters'
 import { useGiftLootboxes } from './hooks/useGiftLootboxes'
 import { useCasinoConfig } from './hooks/useCasinoConfig'
@@ -12,6 +13,7 @@ import { useToast } from './context/ToastContext'
 import type { Pokemon } from './types'
 import { POKEDOLLAR_ITEM_NAME } from './types'
 import { maybeResetGiftTimerOnEntry } from './lib/gifting'
+import { logHistoryEvent } from './lib/historyLog'
 import { AdminTab } from './components/AdminTab'
 import { AdminAttacksPanel } from './components/AdminAttacksPanel'
 import { RencontresTab } from './components/RencontresTab'
@@ -55,6 +57,7 @@ export default function App() {
   const { roster, addOwnedPokemon, setNextGiftAt } = usePlayerPokemon(player?.id ?? null)
   const { items, byName: itemsByName, refetch: refetchItems } = useItems()
   const playerItems = usePlayerItems(player?.id ?? null)
+  const { byPokemonNom: evolutionsByPokemonNom, refetch: refetchEvolutions } = usePokemonEvolutions()
   const { parameters } = useAdminParameters()
   const { lootboxes, speciesAssignments } = useGiftLootboxes()
   const { config: casinoConfig } = useCasinoConfig()
@@ -96,6 +99,14 @@ export default function App() {
     const inTeam = !teamFull
     const created = await addOwnedPokemon(p.nom, p.numero, inTeam)
     if (created) {
+      if (player) {
+        void logHistoryEvent('team', 'pokemon_new', player.id, {
+          pokemon_nom: p.nom,
+          player_pokemon_id: created.id,
+          nickname: null,
+          destination: inTeam ? 'team' : 'pc',
+        })
+      }
       await maybeResetGiftTimerOnEntry({
         giftingEnabled: parameters.feature_gifting_enabled,
         isNpc: player?.is_npc ?? false,
@@ -111,8 +122,16 @@ export default function App() {
     showToast(`${p.nom} ajouté ${inTeam ? "à l'équipe" : 'au PC'} !`)
   }
 
+  // Attribué au joueur actuellement connecté sur cet appareil (discovered_pokemon
+  // est campagne-wide, sans player_id) — si personne n'est connecté, on ne log pas.
+  const logPokedexDiscovery = (p: Pokemon) => {
+    if (!player) return
+    void logHistoryEvent('pokedex', 'pokedex_add', player.id, { pokemon_nom: p.nom, total: discovered.size + 1 })
+  }
+
   const handleDiscoverWithCelebration = async (p: Pokemon) => {
     await discoverPokemon(p.nom)
+    logPokedexDiscovery(p)
     setCelebration(p)
     clearTimeout(celebrationTimer.current)
     celebrationTimer.current = window.setTimeout(() => {
@@ -180,6 +199,7 @@ export default function App() {
               attacksByName={attacksByName}
               itemsByName={itemsByName}
               playerItems={playerItems}
+              evolutionsByPokemonNom={evolutionsByPokemonNom}
               canScan={canScan}
               onScan={() => setShowScannerModal(true)}
               onRequestLogin={() => setShowLoginModal(true)}
@@ -196,7 +216,7 @@ export default function App() {
               teamFull={teamFull}
               canAddToRoster={!!player}
               onAddToRoster={handleAddToRoster}
-              onDiscover={(p) => discoverPokemon(p.nom)}
+              onDiscover={async (p) => { await discoverPokemon(p.nom); logPokedexDiscovery(p) }}
               onUndiscover={(p) => undiscoverPokemon(p.nom)}
               canScan={canScan}
               onScan={() => setShowScannerModal(true)}
@@ -214,6 +234,9 @@ export default function App() {
               isAdmin={isAdmin}
               pokemonByName={pokemonByName}
               attacksByName={attacksByName}
+              itemsByName={itemsByName}
+              playerItems={playerItems}
+              evolutionsByPokemonNom={evolutionsByPokemonNom}
             />
           )}
 
@@ -243,7 +266,7 @@ export default function App() {
 
           {activeTab === 'admin' && isAdmin && (
             <AdminTab
-              onImportSuccess={() => { refetch(); refetchAttacks(); refetchItems() }}
+              onImportSuccess={() => { refetch(); refetchAttacks(); refetchItems(); refetchEvolutions() }}
             />
           )}
         </main>

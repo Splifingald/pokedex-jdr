@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import type { Player, Pokemon, Attack, Item, PlayerPokemon } from '../types'
+import type { Player, Pokemon, Attack, Item, PlayerPokemon, PokemonEvolution } from '../types'
 import { DEFAULT_ACCUEIL_IMAGE_URL, ownedPokemonName, POKEDOLLAR_ITEM_NAME } from '../types'
 import { usePlayerPokemon } from '../hooks/usePlayerPokemon'
 import { usePlayerItems } from '../hooks/usePlayerItems'
@@ -16,6 +16,7 @@ import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { PixelIcon } from './icons/PixelIcon'
 import { PHOTO_ICON, CASINO_MASCOT_ICON } from '../lib/icons'
 import { isGiftReady, resolveLootboxForSpecies, drawLootboxReward, randomNextGiftAt, maybeResetGiftTimerOnEntry } from '../lib/gifting'
+import { logHistoryEvent } from '../lib/historyLog'
 
 interface Props {
   player: Player | null
@@ -24,6 +25,7 @@ interface Props {
   attacksByName: Map<string, Attack>
   itemsByName: Map<string, Item>
   playerItems: ReturnType<typeof usePlayerItems>
+  evolutionsByPokemonNom: Map<string, PokemonEvolution[]>
   canScan: boolean
   onScan: () => void
   onRequestLogin: () => void
@@ -42,8 +44,8 @@ const homeBgStyle = (url: string): React.CSSProperties => ({
   backgroundRepeat: 'no-repeat',
 })
 
-export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsByName, playerItems, canScan, onScan, onRequestLogin }: Props) {
-  const { roster, updateXp, updateNickname, toggleInTeam, setNextGiftAt, addMove, removeMove, deleteOwnedPokemon } = usePlayerPokemon(player?.id ?? null)
+export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsByName, playerItems, evolutionsByPokemonNom, canScan, onScan, onRequestLogin }: Props) {
+  const { roster, updateXp, updateNickname, evolvePokemon, toggleInTeam, setNextGiftAt, addMove, removeMove, deleteOwnedPokemon } = usePlayerPokemon(player?.id ?? null)
   const { pokedollars, addItems, setPokedollars } = playerItems
   const { parameters } = useAdminParameters()
   const { backgrounds } = useDisplayAssets()
@@ -108,6 +110,14 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
     const pp = roster.find((r) => r.id === id)
     await toggleInTeam(id, inTeam)
     if (pp) {
+      if (player) {
+        void logHistoryEvent('team', 'pokemon_move', player.id, {
+          pokemon_nom: pp.pokemon_nom,
+          player_pokemon_id: pp.id,
+          nickname: pp.nickname,
+          destination: inTeam ? 'team' : 'pc',
+        })
+      }
       await maybeResetGiftTimerOnEntry({
         giftingEnabled: parameters.feature_gifting_enabled,
         isNpc: player?.is_npc ?? false,
@@ -132,10 +142,20 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
 
   const handleClaimGift = async () => {
     if (giftPokemon && giftReward) {
+      const source = ownedPokemonName(giftPokemon)
       if (giftReward.itemNom === POKEDOLLAR_ITEM_NAME) {
-        await setPokedollars(pokedollars + giftReward.quantity)
+        const total = pokedollars + giftReward.quantity
+        await setPokedollars(total)
+        if (player) {
+          void logHistoryEvent('inventory', 'item_gift', player.id, { item_nom: POKEDOLLAR_ITEM_NAME, delta: giftReward.quantity, total, source })
+        }
       } else {
+        const existing = playerItems.inventory.find((r) => r.item_nom === giftReward.itemNom)
+        const total = (existing?.quantity ?? 0) + giftReward.quantity
         await addItems(giftReward.itemNom, giftReward.quantity)
+        if (player) {
+          void logHistoryEvent('inventory', 'item_gift', player.id, { item_nom: giftReward.itemNom, delta: giftReward.quantity, total, source })
+        }
       }
       const lootbox = resolveLootboxForSpecies(giftPokemon.pokemon_nom, lootboxes, speciesAssignments)
       if (lootbox) await setNextGiftAt(giftPokemon.id, randomNextGiftAt(lootbox))
@@ -231,6 +251,11 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           onRemoveMove={removeMove}
           onDelete={handleDelete}
           onSetNextGiftAt={setNextGiftAt}
+          pokemonByName={pokemonByName}
+          itemsByName={itemsByName}
+          evolutionsByPokemonNom={evolutionsByPokemonNom}
+          playerItems={playerItems}
+          onEvolve={evolvePokemon}
           onClose={() => setSelectedId(null)}
         />
       )}

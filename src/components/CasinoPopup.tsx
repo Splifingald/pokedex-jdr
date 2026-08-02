@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { Player } from '../types'
-import { TICKET_CASINO_ITEM_NAME } from '../types'
+import { TICKET_CASINO_ITEM_NAME, POKEDOLLAR_ITEM_NAME } from '../types'
 import { usePlayerItems } from '../hooks/usePlayerItems'
 import { useCasinoConfig } from '../hooks/useCasinoConfig'
 import { useCasinoPlayerState } from '../hooks/useCasinoPlayerState'
@@ -13,6 +13,7 @@ import { CASINO_ICON, CASINO_MASCOT_ICON } from '../lib/icons'
 import { PixelIcon } from './icons/PixelIcon'
 import { CloseIcon } from './icons/CloseIcon'
 import { PokedollarIcon } from './PokedollarIcon'
+import { logHistoryEvent } from '../lib/historyLog'
 
 type View = 'list' | 'slots' | 'dice'
 
@@ -59,11 +60,17 @@ export function CasinoPopup({ player, playerItems, pokedollarImageUrl, onClose }
     const result = computeTicketRegen(state.next_ticket_at, ticketCount, config, new Date())
     if (result.ticketsGranted > 0) {
       await playerItems.addItems(TICKET_CASINO_ITEM_NAME, result.ticketsGranted)
+      void logHistoryEvent('inventory', 'item_add', player.id, {
+        item_nom: TICKET_CASINO_ITEM_NAME,
+        delta: result.ticketsGranted,
+        total: ticketCount + result.ticketsGranted,
+        source: 'la recharge de tickets',
+      })
     }
     if (result.nextTicketAt !== state.next_ticket_at) {
       await updateState({ next_ticket_at: result.nextTicketAt })
     }
-  }, [state, ticketCount, config, playerItems, updateState])
+  }, [state, ticketCount, config, playerItems, updateState, player.id])
 
   useEffect(() => {
     tickRegen()
@@ -80,15 +87,37 @@ export function CasinoPopup({ player, playerItems, pokedollarImageUrl, onClose }
     const today = localDateString()
     if (playerItems.pokedollars < config.ticket_buy_cost) return
     if (isPurchaseCapReached(state, config, today)) return
-    await playerItems.setPokedollars(playerItems.pokedollars - config.ticket_buy_cost)
+    const pokedollarTotal = playerItems.pokedollars - config.ticket_buy_cost
+    await playerItems.setPokedollars(pokedollarTotal)
+    void logHistoryEvent('inventory', 'item_remove', player.id, {
+      item_nom: POKEDOLLAR_ITEM_NAME,
+      delta: config.ticket_buy_cost,
+      total: pokedollarTotal,
+      source: "l'achat de tickets",
+    })
     await playerItems.addItems(TICKET_CASINO_ITEM_NAME, 1)
+    void logHistoryEvent('inventory', 'item_add', player.id, {
+      item_nom: TICKET_CASINO_ITEM_NAME,
+      delta: 1,
+      total: ticketCount + 1,
+      source: "l'achat de tickets",
+    })
     const sameDay = state.purchase_date === today
     await updateState({ purchase_count: sameDay ? state.purchase_count + 1 : 1, purchase_date: today })
   }
 
+  const gameName = (game: 'slots' | 'dice') => (game === 'slots' ? config.slots_nom : config.dice_nom)
+
   const handlePlay = async (game: 'slots' | 'dice') => {
     if (ticketCount < 1 || !ticketRow) return
-    await playerItems.setQuantity(ticketRow, ticketRow.quantity - 1)
+    const total = ticketRow.quantity - 1
+    await playerItems.setQuantity(ticketRow, total)
+    void logHistoryEvent('inventory', 'item_casino_spend', player.id, {
+      item_nom: TICKET_CASINO_ITEM_NAME,
+      delta: 1,
+      total,
+      source: `au jeu de Casino ${gameName(game)}`,
+    })
     setView(game)
   }
 
@@ -96,7 +125,18 @@ export function CasinoPopup({ player, playerItems, pokedollarImageUrl, onClose }
   // final de chaque jeu crédite directement les gains et revient à la liste,
   // pas de popup de récompense séparée.
   const handleFinish = async (amount: number) => {
-    if (amount > 0) await playerItems.setPokedollars(playerItems.pokedollars + amount)
+    if (amount > 0) {
+      const total = playerItems.pokedollars + amount
+      await playerItems.setPokedollars(total)
+      if (view === 'slots' || view === 'dice') {
+        void logHistoryEvent('inventory', 'item_casino_win', player.id, {
+          item_nom: POKEDOLLAR_ITEM_NAME,
+          delta: amount,
+          total,
+          source: `au jeu de Casino ${gameName(view)}`,
+        })
+      }
+    }
     setView('list')
   }
 

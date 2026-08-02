@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import Papa from 'papaparse'
-import type { CsvRow, AttackCsvRow, CarteCsvRow, ItemCsvRow, EncounterCsvRow, DisplayAssetCsvRow } from '../types'
-import { CSV_REQUIRED_HEADERS, ATTACK_CSV_REQUIRED_HEADERS, CARTE_CSV_REQUIRED_HEADERS, ITEM_CSV_REQUIRED_HEADERS, ENCOUNTER_CSV_REQUIRED_HEADERS, DISPLAY_ASSET_CSV_REQUIRED_HEADERS } from '../types'
+import type { CsvRow, AttackCsvRow, CarteCsvRow, ItemCsvRow, EncounterCsvRow, DisplayAssetCsvRow, PokemonEvolutionCsvRow } from '../types'
+import { CSV_REQUIRED_HEADERS, ATTACK_CSV_REQUIRED_HEADERS, CARTE_CSV_REQUIRED_HEADERS, ITEM_CSV_REQUIRED_HEADERS, ENCOUNTER_CSV_REQUIRED_HEADERS, DISPLAY_ASSET_CSV_REQUIRED_HEADERS, POKEMON_EVOLUTION_CSV_REQUIRED_HEADERS } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 
 // L'import CSV passe par une Netlify Function côté serveur
@@ -12,6 +12,7 @@ const IMPORT_CARTE_URL = '/.netlify/functions/import-carte'
 const IMPORT_ITEMS_URL = '/.netlify/functions/import-items'
 const IMPORT_ENCOUNTERS_URL = '/.netlify/functions/import-encounters'
 const IMPORT_DISPLAY_ASSETS_URL = '/.netlify/functions/import-display-assets'
+const IMPORT_POKEMON_EVOLUTIONS_URL = '/.netlify/functions/import-pokemon-evolutions'
 const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET as string
 
 interface Props {
@@ -116,6 +117,15 @@ function mapDisplayAssetCsvRow(row: DisplayAssetCsvRow) {
     nom:       row['Nom']?.trim() ?? '',
     type:      row['Type']?.trim() ?? '',
     image_url: row['Image']?.trim() ?? '',
+    reference: row['Reference']?.trim() ?? '',
+  }
+}
+
+function mapPokemonEvolutionCsvRow(row: PokemonEvolutionCsvRow) {
+  return {
+    pokemon_nom:        row['Nom']?.trim() ?? '',
+    evolution_nom:       row['Évolution']?.trim() ?? '',
+    condition_item_nom:  row['Condition']?.trim() || null,
   }
 }
 
@@ -147,9 +157,13 @@ export function AdminPanel({ onImportSuccess }: Props) {
         const isItemsCsv = fields.includes('Coût')
         // Une colonne "Lieu" n'existe que dans le CSV de rencontres
         const isEncountersCsv = fields.includes('Lieu')
-        // Le CSV du mode Affichage contient ces 3 colonnes (Nom + Type + Image) — couvre
-        // aussi les fonds d'écran désormais (Type = "Background")
-        const isDisplayAssetsCsv = fields.length === 3 && fields.includes('Nom') && fields.includes('Type') && fields.includes('Image')
+        // Une colonne "Évolution" n'existe que dans le CSV d'évolutions
+        const isEvolutionsCsv = fields.includes('Évolution')
+        // Le CSV du mode Affichage contient ces 4 colonnes (Nom + Type + Image + Reference) —
+        // couvre aussi les fonds d'écran (Type = "Background") et les calques superposés à la
+        // Carte (Type = "Map Add-On"). Reference permet à plusieurs images de partager le même
+        // PNJ/lieu (Nom reste unique par image).
+        const isDisplayAssetsCsv = fields.length === 4 && fields.includes('Nom') && fields.includes('Type') && fields.includes('Image') && fields.includes('Reference')
 
         if (isDisplayAssetsCsv) {
           const missing = DISPLAY_ASSET_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
@@ -386,6 +400,53 @@ export function AdminPanel({ onImportSuccess }: Props) {
           return
         }
 
+        if (isEvolutionsCsv) {
+          const missing = POKEMON_EVOLUTION_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
+          if (missing.length > 0) {
+            setStatus('error')
+            setMessage(`Colonnes manquantes : ${missing.join(', ')}`)
+            return
+          }
+
+          const rows = (results.data as unknown as PokemonEvolutionCsvRow[])
+            .map(mapPokemonEvolutionCsvRow)
+            .filter((r) => r.pokemon_nom && r.evolution_nom)
+
+          if (rows.length === 0) {
+            setStatus('error')
+            setMessage('Aucune ligne valide trouvée dans le CSV.')
+            return
+          }
+
+          setStatus('importing')
+          setMessage(`Import de ${rows.length} évolutions…`)
+
+          try {
+            const res = await fetch(IMPORT_POKEMON_EVOLUTIONS_URL, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${ADMIN_SECRET}`,
+              },
+              body: JSON.stringify({ rows }),
+            })
+
+            const data = await res.json()
+
+            if (!res.ok) {
+              throw new Error(data.error ?? `Erreur serveur ${res.status}`)
+            }
+
+            setStatus('success')
+            setMessage(`✅ ${data.imported} évolutions importées avec succès !`)
+            onImportSuccess()
+          } catch (err) {
+            setStatus('error')
+            setMessage(err instanceof Error ? err.message : 'Erreur inconnue')
+          }
+          return
+        }
+
         // Validation des en-têtes (CSV pokémon)
         const missing = CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
         if (missing.length > 0) {
@@ -451,7 +512,7 @@ export function AdminPanel({ onImportSuccess }: Props) {
 
         <div className="mb-5">
           <p className="text-ink-muted-2 text-sm mb-3">
-            Importer un CSV Pokémon, Capacités, Carte, Objets, Rencontres ou Fonds d'écran (détecté automatiquement).<br />
+            Importer un CSV Pokémon, Capacités, Carte, Objets, Rencontres, Évolutions ou Fonds d'écran (détecté automatiquement).<br />
             <span className="text-[#a3841a] text-xs">⚠ Remplace toute la liste existante correspondante.</span>
           </p>
           <button

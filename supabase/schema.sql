@@ -105,6 +105,8 @@
 --   FROM campaign_sessions
 -- )
 -- UPDATE campaign_sessions c SET position = ranked.rn FROM ranked WHERE ranked.id = c.id;
+-- ALTER TABLE display_assets ADD COLUMN IF NOT EXISTS reference text NOT NULL DEFAULT '';
+-- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS map_addon_image_urls jsonb NOT NULL DEFAULT '[]'::jsonb;
 -- ============================================================
 
 -- Table principale des pokémon
@@ -285,6 +287,7 @@ CREATE TABLE IF NOT EXISTS admin_parameters (
   max_team_size             integer NOT NULL DEFAULT 3,
   carte_image_url           text NOT NULL DEFAULT '',
   carte_couleurs_image_url  text NOT NULL DEFAULT '',
+  map_addon_image_urls      jsonb NOT NULL DEFAULT '[]'::jsonb,
   accueil_image_url         text NOT NULL DEFAULT '',
   feature_pokedex_enabled        boolean NOT NULL DEFAULT true,
   feature_photo_capture_enabled  boolean NOT NULL DEFAULT true,
@@ -715,6 +718,61 @@ CREATE POLICY "Public delete push_subscriptions"
   ON push_subscriptions FOR DELETE TO anon USING (true);
 
 -- ============================================================
+-- Évolutions de Pokémon (catalogue, importé par CSV via Netlify Function)
+-- ============================================================
+
+-- Une ligne par option d'évolution possible (une espèce peut avoir plusieurs
+-- lignes = évolutions multiples, ex : Évoli). Référence par nom vers pokemon.nom
+-- et items.nom, pas de FK — survit aux réimports CSV (même convention que le
+-- reste du schéma).
+CREATE TABLE IF NOT EXISTS pokemon_evolutions (
+  id                  bigserial PRIMARY KEY,
+  pokemon_nom         text NOT NULL,
+  evolution_nom       text NOT NULL,
+  condition_item_nom  text,
+  created_at          timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_pokemon_evolutions_pokemon_nom ON pokemon_evolutions(pokemon_nom);
+
+ALTER TABLE pokemon_evolutions ENABLE ROW LEVEL SECURITY;
+
+-- Lecture publique, écriture bloquée pour anon (via Netlify Function seulement) —
+-- même politique que la table items.
+CREATE POLICY "Public read pokemon_evolutions"
+  ON pokemon_evolutions FOR SELECT
+  TO anon
+  USING (true);
+
+-- ============================================================
+-- Historique (journal des actions joueurs, onglet Admin → Historique)
+-- ============================================================
+
+-- Un événement brut par mutation (pas de coalescing en écriture — le
+-- regroupement des lignes proches dans le temps se fait à la lecture, côté
+-- client, voir src/lib/historyGrouping.ts). player_id référence players.id
+-- sans FK (comme le reste du schéma). payload est spécifique à chaque
+-- (category, action_type), voir src/types.ts pour la forme exacte.
+CREATE TABLE IF NOT EXISTS history_events (
+  id           bigserial PRIMARY KEY,
+  player_id    bigint NOT NULL,
+  category     text NOT NULL CHECK (category IN ('inventory', 'pokedex', 'team', 'combat')),
+  action_type  text NOT NULL,
+  payload      jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_history_events_created_at ON history_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_history_events_player_id ON history_events(player_id);
+
+ALTER TABLE history_events ENABLE ROW LEVEL SECURITY;
+
+-- Lecture + insertion publiques (app sans vraie sécurité). Pas de policy
+-- UPDATE/DELETE : le journal est immuable depuis le client.
+CREATE POLICY "Public read history_events"
+  ON history_events FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert history_events"
+  ON history_events FOR INSERT TO anon WITH CHECK (true);
+
+-- ============================================================
 -- Mode Affichage (écran joueurs : fond, PNJ, Pokémon, objet)
 -- ============================================================
 
@@ -725,7 +783,8 @@ CREATE TABLE IF NOT EXISTS display_assets (
   id          bigserial PRIMARY KEY,
   nom         text NOT NULL UNIQUE,
   type        text NOT NULL,
-  image_url   text NOT NULL DEFAULT ''
+  image_url   text NOT NULL DEFAULT '',
+  reference   text NOT NULL DEFAULT ''
 );
 
 ALTER TABLE display_assets ENABLE ROW LEVEL SECURITY;

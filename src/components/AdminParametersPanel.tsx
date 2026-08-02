@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react'
 import { useAdminParameters } from '../hooks/useAdminParameters'
 import { useDisplayAssets } from '../hooks/useDisplayAssets'
 import { NumberInput } from './NumberInput'
+import { BUTTON_STYLE } from '../lib/buttonStyles'
 
 const CUSTOM_BACKGROUND = '__custom__'
 
 export function AdminParametersPanel() {
   const { parameters, loading, updateParameters } = useAdminParameters()
-  const { backgrounds, loading: backgroundsLoading } = useDisplayAssets()
+  const { backgrounds, mapAddOns, loading: backgroundsLoading } = useDisplayAssets()
   const [maxMoves, setMaxMoves] = useState(parameters.max_moves)
   const [maxTeamSize, setMaxTeamSize] = useState(parameters.max_team_size)
   const [statPointsBase, setStatPointsBase] = useState(parameters.stat_points_base)
@@ -100,6 +101,22 @@ export function AdminParametersPanel() {
 
   const saveCarte = () => {
     updateParameters({ carte_image_url: carteImageUrl, carte_couleurs_image_url: carteCouleursImageUrl })
+  }
+
+  const addMapAddon = (url: string) => {
+    updateParameters({ map_addon_image_urls: [...parameters.map_addon_image_urls, url] })
+  }
+
+  const removeMapAddon = (index: number) => {
+    updateParameters({ map_addon_image_urls: parameters.map_addon_image_urls.filter((_, i) => i !== index) })
+  }
+
+  const moveMapAddon = (index: number, direction: -1 | 1) => {
+    const arr = [...parameters.map_addon_image_urls]
+    const target = index + direction
+    if (target < 0 || target >= arr.length) return
+    ;[arr[index], arr[target]] = [arr[target], arr[index]]
+    updateParameters({ map_addon_image_urls: arr })
   }
 
   return (
@@ -203,6 +220,69 @@ export function AdminParametersPanel() {
               placeholder="https://…"
               className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
             />
+          </div>
+
+          <div className="border-t-2 border-[#cfc7a8] pt-4">
+            <label className="text-ink-muted-2 text-sm block mb-1">Éléments superposés à la carte</label>
+            {backgroundsLoading ? (
+              <p className="text-ink-muted-2 text-sm">Chargement…</p>
+            ) : (
+              <>
+                {parameters.map_addon_image_urls.length > 0 && (
+                  <div className="flex flex-col gap-2 mb-2">
+                    {parameters.map_addon_image_urls.map((url, i) => {
+                      const asset = mapAddOns.find((a) => a.image_url === url)
+                      return (
+                        <div key={`${url}-${i}`} className="flex items-center gap-2 bg-white border-2 border-ink rounded px-2 py-1.5">
+                          <img src={url} alt="" className="w-10 h-10 object-contain rounded shrink-0 bg-[#00000010]" />
+                          <span className="text-ink text-sm flex-1 truncate">{asset?.nom ?? url}</span>
+                          <button
+                            onClick={() => moveMapAddon(i, -1)}
+                            disabled={i === 0}
+                            title="Monter"
+                            className={`w-6 h-6 shrink-0 rounded text-xs font-bold disabled:opacity-30 ${BUTTON_STYLE.gray}`}
+                          >
+                            ▲
+                          </button>
+                          <button
+                            onClick={() => moveMapAddon(i, 1)}
+                            disabled={i === parameters.map_addon_image_urls.length - 1}
+                            title="Descendre"
+                            className={`w-6 h-6 shrink-0 rounded text-xs font-bold disabled:opacity-30 ${BUTTON_STYLE.gray}`}
+                          >
+                            ▼
+                          </button>
+                          <button
+                            onClick={() => removeMapAddon(i)}
+                            title="Retirer"
+                            className={`w-6 h-6 shrink-0 rounded text-xs font-bold ${BUTTON_STYLE.gray}`}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                <select
+                  value=""
+                  onChange={(e) => { if (e.target.value) addMapAddon(e.target.value) }}
+                  className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+                >
+                  <option value="">+ Ajouter un élément…</option>
+                  {mapAddOns
+                    .filter((a) => !parameters.map_addon_image_urls.includes(a.image_url))
+                    .map((a) => (
+                      <option key={a.id} value={a.image_url}>{a.nom}</option>
+                    ))}
+                </select>
+
+                <p className="text-ink-muted-2 text-xs mt-1">
+                  Gérés via Import CSV (colonnes « Nom » / « Type » = Map Add-On / « Image »). Le premier élément de la liste est superposé en dessous, le dernier au-dessus.
+                </p>
+              </>
+            )}
           </div>
 
           <div className="border-t-2 border-[#cfc7a8] pt-4">
