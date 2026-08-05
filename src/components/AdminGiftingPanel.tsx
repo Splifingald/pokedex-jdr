@@ -49,70 +49,75 @@ export function AdminGiftingPanel() {
   }
 
   return (
-    <div className="bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] max-w-2xl w-full p-6">
-      <div className="flex items-center gap-2 mb-5">
-        <PixelIcon src={GIFT_ICON} size={24} />
-        <h3 className="text-[#a3841a] text-lg font-bold">Cadeaux Pokémon</h3>
+    <div className="flex flex-col md:flex-row gap-4 w-full items-start">
+      <div className={`bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] w-full p-6 ${selectedLootbox ? 'md:w-96 shrink-0' : ''}`}>
+        <div className="flex items-center gap-2 mb-5">
+          <PixelIcon src={GIFT_ICON} size={24} />
+          <h3 className="text-[#a3841a] text-lg font-bold">Cadeaux Pokémon</h3>
+        </div>
+
+        {loading ? (
+          <p className="text-ink-muted-2 text-sm">Chargement…</p>
+        ) : (
+          <div className="flex flex-col gap-4">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleCreate() }}
+                placeholder="Nom du nouveau lootbox…"
+                className="flex-1 bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+              />
+              <button onClick={handleCreate} className={`px-4 py-2 rounded text-sm font-bold ${BUTTON_STYLE.green}`}>
+                Créer
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              {lootboxes.length === 0 ? (
+                <p className="text-ink-muted-2 text-sm">Aucun lootbox pour l'instant.</p>
+              ) : (
+                lootboxes.map((lb) => (
+                  <div key={lb.id} className={`flex items-center gap-2 px-3 py-2 rounded ${PIXEL_BORDER_SM} ${selectedId === lb.id ? 'bg-yellow-100 ring-2 ring-[#a3841a]' : 'bg-cream-secondary'}`}>
+                    <span className="flex-1 text-ink text-sm font-bold truncate">{lb.nom}</span>
+                    {lb.is_default ? (
+                      <span className="text-[10px] bg-yellow-200 text-yellow-900 border border-yellow-700 rounded px-1.5 py-0.5 shrink-0">
+                        ⭐ Par défaut
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => setDefaultLootbox(lb.id)}
+                        className={`text-xs px-2 py-1 rounded shrink-0 ${BUTTON_STYLE.gray}`}
+                      >
+                        Définir par défaut
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setSelectedId(selectedId === lb.id ? null : lb.id)}
+                      className={`text-xs px-2 py-1 rounded shrink-0 ${selectedId === lb.id ? BUTTON_STYLE.yellow : BUTTON_STYLE.gray}`}
+                    >
+                      Éditer
+                    </button>
+                    <button
+                      onClick={() => setConfirmingDeleteId(lb.id)}
+                      disabled={lb.is_default}
+                      title={lb.is_default ? 'Désignez un autre lootbox par défaut avant de supprimer celui-ci' : undefined}
+                      className={`text-xs px-2 py-1 rounded shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${BUTTON_STYLE.gray}`}
+                    >
+                      <TrashIcon className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
-      {loading ? (
-        <p className="text-ink-muted-2 text-sm">Chargement…</p>
-      ) : (
-        <div className="flex flex-col gap-4">
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleCreate() }}
-              placeholder="Nom du nouveau lootbox…"
-              className="flex-1 bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
-            />
-            <button onClick={handleCreate} className={`px-4 py-2 rounded text-sm font-bold ${BUTTON_STYLE.green}`}>
-              Créer
-            </button>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            {lootboxes.length === 0 ? (
-              <p className="text-ink-muted-2 text-sm">Aucun lootbox pour l'instant.</p>
-            ) : (
-              lootboxes.map((lb) => (
-                <div key={lb.id} className={`flex items-center gap-2 px-3 py-2 rounded ${PIXEL_BORDER_SM} bg-cream-secondary`}>
-                  <span className="flex-1 text-ink text-sm font-bold truncate">{lb.nom}</span>
-                  {lb.is_default ? (
-                    <span className="text-[10px] bg-yellow-200 text-yellow-900 border border-yellow-700 rounded px-1.5 py-0.5 shrink-0">
-                      ⭐ Par défaut
-                    </span>
-                  ) : (
-                    <button
-                      onClick={() => setDefaultLootbox(lb.id)}
-                      className={`text-xs px-2 py-1 rounded shrink-0 ${BUTTON_STYLE.gray}`}
-                    >
-                      Définir par défaut
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setSelectedId(selectedId === lb.id ? null : lb.id)}
-                    className={`text-xs px-2 py-1 rounded shrink-0 ${selectedId === lb.id ? BUTTON_STYLE.yellow : BUTTON_STYLE.gray}`}
-                  >
-                    Éditer
-                  </button>
-                  <button
-                    onClick={() => setConfirmingDeleteId(lb.id)}
-                    disabled={lb.is_default}
-                    title={lb.is_default ? 'Désignez un autre lootbox par défaut avant de supprimer celui-ci' : undefined}
-                    className={`text-xs px-2 py-1 rounded shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${BUTTON_STYLE.gray}`}
-                  >
-                    <TrashIcon className="w-3 h-3" />
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-
-          {selectedLootbox && (
-            <div className={`p-4 rounded ${PIXEL_BORDER_SM} bg-cream-secondary flex flex-col gap-4`}>
+      {selectedLootbox && (
+        <div className="flex-1 min-w-0 bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] w-full p-6">
+          <div className={`flex flex-col gap-4`}>
               <div>
                 <label className="text-ink-muted-2 text-sm block mb-1">Nom</label>
                 <input
@@ -238,8 +243,7 @@ export function AdminGiftingPanel() {
                   placeholder="Assigner une espèce…"
                 />
               </div>
-            </div>
-          )}
+          </div>
         </div>
       )}
 

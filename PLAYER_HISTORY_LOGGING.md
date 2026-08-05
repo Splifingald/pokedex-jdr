@@ -1,7 +1,7 @@
 # Journal des actions joueurs (Historique)
 
 L'onglet **Admin → Historique** affiche un journal chronologique de ce que
-font les joueurs : inventaire, Pokédex, équipe/PC, combat. C'est enregistré
+font les joueurs : inventaire, Pokédex, équipe/PC, combat, mini-jeux. C'est enregistré
 en base (table `history_events`) et lu en temps réel via Supabase Realtime,
 comme le reste de l'app.
 
@@ -19,11 +19,13 @@ réinventer un.
 | `inventory` | `item_gift` | "Joueur 1 a reçu 1 Baie Sitrus de la part de Salamèche en cadeau (total : 3)" |
 | `inventory` | `item_casino_win` | "Joueur 2 a gagné 35 Pokédollar au jeu de Casino Dé Métamorph (total : 1035)" |
 | `inventory` | `item_casino_spend` | "Joueur 1 a dépensé 1 Ticket Casino au jeu de Casino Dé Métamorph (total : 2)" |
+| `inventory` | `item_minigame_spend` | "Joueur 1 a dépensé 1 Ticket Trempette au jeu Magikarp (total : 2)" |
 | `pokedex` | `pokedex_add` | "Joueur 1 a ajouté Carapuce au Pokédex (total : 55)" |
 | `team` | `pokemon_new` | "Joueur 2 a obtenu Carapuce, ajouté à son équipe" |
 | `team` | `pokemon_move` | "Joueur 1 a placé Carapuce dans son PC" |
 | `combat` | `ko` | "Joueur 1 : Pikachu est K.O." / "...n'est plus K.O." |
 | `combat` | `status_change` | "Joueur 2 : Raichu est empoisonné" / "...n'est plus empoisonné" |
+| `minigame` | `minigame_xp_gain` | "Joueur 1 : Magicarpe a gagné 10 XP au jeu Magikarp (score : 32, 2 étoiles)" |
 
 **Volontairement exclu** : le "un-discover" Pokédex (bouton correctif
 admin-only dans `PokemonDetailSheet`) n'est pas loggé — ce n'est pas une
@@ -32,7 +34,7 @@ action joueur.
 ## Schéma — table `history_events`
 
 Voir `supabase/schema.sql`. Colonnes : `id`, `player_id`, `category`
-(`inventory`|`pokedex`|`team`|`combat`), `action_type`, `payload` (jsonb,
+(`inventory`|`pokedex`|`team`|`combat`|`minigame`), `action_type`, `payload` (jsonb,
 forme spécifique à chaque `(category, action_type)` — voir `src/types.ts`),
 `created_at`. Table append-only côté client (lecture + insertion publiques,
 pas d'update/delete).

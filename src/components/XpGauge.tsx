@@ -1,7 +1,7 @@
-import { useRef } from 'react'
+import { useRef, type ReactNode } from 'react'
 import type { CSSProperties } from 'react'
 import type { Milestone } from '../lib/xpBonuses'
-import { clampXp } from '../lib/xpBonuses'
+import { clampXp, ITEM_TOKEN } from '../lib/xpBonuses'
 import { NumberInput } from './NumberInput'
 
 interface Props {
@@ -9,6 +9,37 @@ interface Props {
   max: number
   milestones: Milestone[]
   onXpChange: (value: number) => void
+  /** Icône de l'objet requis pour l'évolution — remplace le token "[objet]" dans les libellés */
+  evolutionItemIconUrl?: string | null
+  evolutionItemName?: string | null
+}
+
+// Version texte brut du libellé pour le title="" (tooltip) : remplace le token par le
+// nom de l'objet quand connu, sinon le retire simplement.
+function labelTitle(label: string, itemName?: string | null): string {
+  const idx = label.toLowerCase().indexOf(ITEM_TOKEN)
+  if (idx === -1) return label
+  return `${label.slice(0, idx)}${itemName ?? ''}${label.slice(idx + ITEM_TOKEN.length)}`.replace(/\s{2,}/g, ' ').trim()
+}
+
+// Rendu du libellé : remplace le token "[objet]" par une icône (ou un emoji de repli
+// si l'objet n'est pas trouvé) plutôt que d'afficher le texte brut du token.
+function renderLabel(label: string, iconUrl?: string | null): ReactNode {
+  const idx = label.toLowerCase().indexOf(ITEM_TOKEN)
+  if (idx === -1) return label
+  const before = label.slice(0, idx)
+  const after = label.slice(idx + ITEM_TOKEN.length)
+  return (
+    <>
+      {before}
+      {iconUrl ? (
+        <img src={iconUrl} alt="" className="inline-block w-4 h-4 object-contain align-text-bottom mx-0.5" />
+      ) : (
+        <span className="mx-0.5">🎒</span>
+      )}
+      {after}
+    </>
+  )
 }
 
 function markerStyle(value: number, max: number): CSSProperties {
@@ -27,7 +58,7 @@ function markerAlign(value: number, max: number): keyof typeof ALIGN_CLASS {
   return 'center'
 }
 
-export function XpGauge({ xp, max, milestones, onXpChange }: Props) {
+export function XpGauge({ xp, max, milestones, onXpChange, evolutionItemIconUrl, evolutionItemName }: Props) {
   const dragging = useRef(false)
   const pct = max > 0 ? Math.max(0, Math.min(100, (xp / max) * 100)) : 0
 
@@ -38,7 +69,7 @@ export function XpGauge({ xp, max, milestones, onXpChange }: Props) {
 
   return (
     <div>
-      <div className="relative h-10 mb-1">
+      <div className="relative h-14 mb-1">
         {milestones.map((m) => (
           <div
             key={m.xp}
@@ -46,10 +77,10 @@ export function XpGauge({ xp, max, milestones, onXpChange }: Props) {
             style={markerStyle(m.xp, max)}
           >
             <div
-              title={m.label}
-              className="bg-cream-secondary border border-xp-blue rounded px-1.5 py-0.5 text-ink text-sm font-bold whitespace-nowrap max-w-[5.5rem] truncate"
+              title={labelTitle(m.label, evolutionItemName)}
+              className="bg-cream-secondary border border-xp-blue rounded px-1.5 py-0.5 text-ink text-sm font-bold max-w-[7.5rem] text-center line-clamp-2"
             >
-              {m.label}
+              {renderLabel(m.label, evolutionItemIconUrl)}
             </div>
             <div className="w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[5px] border-t-xp-blue" />
           </div>
@@ -74,20 +105,20 @@ export function XpGauge({ xp, max, milestones, onXpChange }: Props) {
         <div className="h-full rounded-full bg-xp-blue transition-all" style={{ width: `${pct}%` }} />
       </div>
 
-      <div className="relative h-11 mt-0.5">
+      <div className="relative h-14 mt-0.5">
         <span className="absolute top-0 left-0 text-ink-muted-2 text-xs">XP</span>
 
         {milestones.map((m) => (
           <span
             key={m.xp}
-            className={`absolute text-sm ${xp >= m.xp ? 'text-ink font-bold' : 'text-ink-muted-2'}`}
+            className={`absolute top-0 text-sm ${xp >= m.xp ? 'text-ink font-bold' : 'text-ink-muted-2'}`}
             style={markerStyle(m.xp, max)}
           >
             {m.xp}
           </span>
         ))}
 
-        <div className="absolute top-0 z-10 flex flex-col items-center" style={markerStyle(xp, max)}>
+        <div className="absolute top-5 z-10 flex flex-col items-center" style={markerStyle(xp, max)}>
           <div className="w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-b-[5px] border-b-xp-blue" />
           <div className="flex items-center gap-1 bg-cream-secondary border border-xp-blue rounded px-1 py-0.5">
             <button

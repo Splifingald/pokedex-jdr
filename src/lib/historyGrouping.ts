@@ -17,7 +17,9 @@ function isInventoryEvent(e: HistoryEvent): e is HistoryEvent & { payload: Histo
 
 // Signe de l'événement pour le calcul du delta net d'un groupe fusionné.
 function signedDelta(actionType: HistoryActionType, delta: number): number {
-  return actionType === 'item_remove' || actionType === 'item_casino_spend' ? -delta : delta
+  return actionType === 'item_remove' || actionType === 'item_casino_spend' || actionType === 'item_minigame_spend' || actionType === 'item_mining_spend'
+    ? -delta
+    : delta
 }
 
 interface OpenGroup {

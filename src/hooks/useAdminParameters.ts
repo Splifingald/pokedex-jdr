@@ -16,11 +16,20 @@ const DEFAULTS: AdminParameters = {
   feature_inventory_enabled: true,
   feature_map_enabled: true,
   feature_gifting_enabled: true,
-  feature_casino_enabled: true,
+  feature_minijeux_enabled: true,
+  feature_mining_enabled: true,
   stat_points_base: 40,
   stat_min: 5,
   stat_max: 15,
   stat_points_per_level: 1,
+  stat_charisme_icon_url: '',
+  stat_charisme_description: '',
+  stat_intelligence_icon_url: '',
+  stat_intelligence_description: '',
+  stat_sagesse_icon_url: '',
+  stat_sagesse_description: '',
+  stat_dexterite_icon_url: '',
+  stat_dexterite_description: '',
 }
 
 export function useAdminParameters() {

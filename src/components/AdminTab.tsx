@@ -3,7 +3,7 @@ import { AdminPanel } from './AdminPanel'
 import { AdminPlayersPanel } from './AdminPlayersPanel'
 import { AdminParametersPanel } from './AdminParametersPanel'
 import { AdminGiftingPanel } from './AdminGiftingPanel'
-import { AdminCasinoPanel } from './AdminCasinoPanel'
+import { AdminMiniGamesPanel } from './AdminMiniGamesPanel'
 import { AdminDisplayPanel } from './AdminDisplayPanel'
 import { AdminHistoryPanel } from './AdminHistoryPanel'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
@@ -18,13 +18,13 @@ export function AdminTab({ onImportSuccess }: Props) {
   const [section, setSection] = useState<Section>('import')
 
   const sections: { id: Section; label: string }[] = [
-    { id: 'import', label: 'Import CSV' },
-    { id: 'joueurs', label: 'Joueurs' },
-    { id: 'parametres', label: 'Paramètres' },
-    { id: 'cadeaux', label: 'Cadeaux Pokémon' },
-    { id: 'casino', label: 'Casino' },
-    { id: 'display', label: 'Affichage' },
-    { id: 'historique', label: 'Historique' },
+    { id: 'import', label: '🗂️ Import CSV' },
+    { id: 'joueurs', label: '👤 Joueurs' },
+    { id: 'parametres', label: '⚙️ Paramètres' },
+    { id: 'cadeaux', label: '🎁 Cadeaux Pokémon' },
+    { id: 'casino', label: '🎰 Mini-Jeux' },
+    { id: 'display', label: '🖼️ Affichage' },
+    { id: 'historique', label: '📈 Historique' },
   ]
 
   return (
@@ -45,7 +45,7 @@ export function AdminTab({ onImportSuccess }: Props) {
       {section === 'joueurs' && <AdminPlayersPanel />}
       {section === 'parametres' && <AdminParametersPanel />}
       {section === 'cadeaux' && <AdminGiftingPanel />}
-      {section === 'casino' && <AdminCasinoPanel />}
+      {section === 'casino' && <AdminMiniGamesPanel />}
       {section === 'display' && <AdminDisplayPanel />}
       {section === 'historique' && <AdminHistoryPanel />}
     </div>

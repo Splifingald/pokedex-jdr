@@ -1,5 +1,4 @@
 import type { Item, PlayerItem } from '../types'
-import { sellValue } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { rarityBadgeStyle } from '../lib/rarityColors'
 import { NumberInput } from './NumberInput'
@@ -26,9 +25,9 @@ export function ItemPopup({ row, item, pokedollarImageUrl, onSetQuantity, onSell
             {item.rarete}
           </div>
         )}
-        {item && (
+        {item && item.achat > 0 && (
           <div className="absolute top-3 right-3 text-[#a3841a] text-sm font-bold flex items-center gap-1">
-            <PokedollarIcon imageUrl={pokedollarImageUrl} size={21} className="align-[-5px]" /> {item.cout}
+            <PokedollarIcon imageUrl={pokedollarImageUrl} size={21} className="align-[-5px]" /> {item.achat}
           </div>
         )}
 
@@ -69,7 +68,7 @@ export function ItemPopup({ row, item, pokedollarImageUrl, onSetQuantity, onSell
           </div>
         </div>
 
-        {item && sellValue(item.cout) > 0 && (
+        {item && item.vente > 0 && (
           <div className="flex justify-center">
             <button
               disabled={row.quantity <= 0}
@@ -78,7 +77,7 @@ export function ItemPopup({ row, item, pokedollarImageUrl, onSetQuantity, onSell
             >
               <span className="text-sm">VENDRE</span>
               <span className="text-sm font-normal flex items-center gap-0.5">
-                <PokedollarIcon imageUrl={pokedollarImageUrl} size={21} className="align-[-5px]" /> {sellValue(item.cout)}
+                <PokedollarIcon imageUrl={pokedollarImageUrl} size={21} className="align-[-5px]" /> {item.vente}
               </span>
             </button>
           </div>

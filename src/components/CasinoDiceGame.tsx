@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import type { MouseEvent } from 'react'
 import type { CasinoConfig, Player } from '../types'
-import { rollDicePair, pickAiTarget, simulateAiTurn } from '../lib/casino'
+import { rollDicePair, pickAiTarget, simulateAiTurn, simulateAiSoloTurn } from '../lib/casino'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { DICE_ICON } from '../lib/icons'
@@ -66,6 +66,11 @@ export function CasinoDiceGame({ config, player, pokedollarImageUrl, onWin }: Pr
   const cycleIntervalRef = useRef<number | null>(null)
   const settleTimeoutRef = useRef<number | null>(null)
 
+  // Alternance du premier joueur par manche : manche 1, 3, 5… le joueur commence
+  // (comportement historique) ; manche 2, 4, 6… l'IA commence, à l'aveugle, sans
+  // connaître le total du joueur — ça évite que l'IA ait toujours l'information complète.
+  const aiPlayedFirst = round % 2 === 0
+
   useEffect(() => () => {
     if (cycleIntervalRef.current) window.clearInterval(cycleIntervalRef.current)
     if (settleTimeoutRef.current) window.clearTimeout(settleTimeoutRef.current)
@@ -74,15 +79,31 @@ export function CasinoDiceGame({ config, player, pokedollarImageUrl, onWin }: Pr
   useEffect(() => {
     if (phase !== 'ai-turn') return
     setAiRolling(true)
-    const { steps, outcome } = simulateAiTurn(aiTotal, aiTarget, playerTotal)
+
+    // Deux cas : l'IA joue en premier (à l'aveugle, cible seule — l'issue de la
+    // manche ne se décide qu'après le tour du joueur) ou en second (elle connaît
+    // déjà le total du joueur et l'outcome sort directement de la simulation).
+    const solo = aiPlayedFirst ? simulateAiSoloTurn(aiTotal, aiTarget) : null
+    const dual = solo ? null : simulateAiTurn(aiTotal, aiTarget, playerTotal)
+    const steps = solo ? solo.steps : dual!.steps
+
     let cancelled = false
     let i = 0
     const advance = () => {
       if (cancelled) return
       if (i >= steps.length) {
         setAiRolling(false)
-        setRoundOutcome(outcome)
-        setPhase('round-result')
+        if (solo) {
+          if (solo.busted) {
+            setRoundOutcome('win')
+            setPhase('round-result')
+          } else {
+            setPhase('player-turn')
+          }
+        } else {
+          setRoundOutcome(dual!.outcome)
+          setPhase('round-result')
+        }
         return
       }
       setAiTotal(steps[i].totalAfter)
@@ -119,7 +140,16 @@ export function CasinoDiceGame({ config, player, pokedollarImageUrl, onWin }: Pr
     }, ROLL_SETTLE_MS)
   }
 
-  const handleStand = () => setPhase('ai-turn')
+  const handleStand = () => {
+    // Si l'IA a déjà joué en premier, son total est déjà fixé : se figer maintenant
+    // détermine directement l'issue de la manche (égalité favorise le joueur).
+    if (aiPlayedFirst) {
+      setRoundOutcome(playerTotal >= aiTotal ? 'win' : 'lose')
+      setPhase('round-result')
+      return
+    }
+    setPhase('ai-turn')
+  }
 
   const nextGain = round === 1 ? config.dice_initial_gain : bankedGain * 2
   const isFinalRound = round >= config.dice_max_rounds
@@ -144,22 +174,28 @@ export function CasinoDiceGame({ config, player, pokedollarImageUrl, onWin }: Pr
   }
 
   const handleContinue = () => {
-    setRound((r) => r + 1)
+    const nextRound = round + 1
+    setRound(nextRound)
     setPlayerTotal(0)
     setAiTotal(0)
     setAiTarget(pickAiTarget(config))
     setRoundOutcome(null)
     setLastPlayerRoll(null)
     setLastAiRoll(null)
-    setPhase('player-turn')
+    setPhase(nextRound % 2 === 0 ? 'ai-turn' : 'player-turn')
   }
 
   const shownPlayerRoll = playerRolling ? displayRoll : lastPlayerRoll
+  // Le total de l'IA reste caché seulement quand elle joue en second et n'a pas
+  // encore joué (comportement historique) ; dès qu'elle a joué (en premier ou
+  // pendant son tour), son total est visible.
+  const aiTotalHidden = phase === 'player-turn' && !aiPlayedFirst
 
   return (
     <div className="flex flex-col items-center">
       <p className="text-ink-muted-2 text-xs mb-3">
         Manche {round} / {config.dice_max_rounds} — objectif : s'approcher de 21 sans le dépasser
+        {aiPlayedFirst && ' — ' + config.dice_opponent_name + ' commence cette manche'}
       </p>
 
       <div className="w-full flex gap-3 mb-4">
@@ -185,9 +221,9 @@ export function CasinoDiceGame({ config, player, pokedollarImageUrl, onWin }: Pr
             className={`text-2xl font-bold ${aiTotal > 21 ? 'text-red-700' : 'text-ink'}`}
             style={aiRolling ? { animation: 'dice-shake 0.3s ease-in-out infinite' } : undefined}
           >
-            {phase === 'player-turn' ? '?' : aiTotal}
+            {aiTotalHidden ? '?' : aiTotal}
           </p>
-          {lastAiRoll && phase !== 'player-turn' && (
+          {lastAiRoll && !aiTotalHidden && (
             <div className="flex justify-center gap-1 mt-1">
               <Die value={lastAiRoll[0]} />
               <Die value={lastAiRoll[1]} />

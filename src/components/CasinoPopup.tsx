@@ -4,9 +4,10 @@ import { TICKET_CASINO_ITEM_NAME, POKEDOLLAR_ITEM_NAME } from '../types'
 import { usePlayerItems } from '../hooks/usePlayerItems'
 import { useCasinoConfig } from '../hooks/useCasinoConfig'
 import { useCasinoPlayerState } from '../hooks/useCasinoPlayerState'
-import { computeTicketRegen, isPurchaseCapReached, localDateString } from '../lib/casino'
+import { computeTicketRegen, isPurchaseCapReached, localDateString, formatCountdown } from '../lib/casino'
 import { CasinoSlotGame } from './CasinoSlotGame'
 import { CasinoDiceGame } from './CasinoDiceGame'
+import { GameCard, GameBanner } from './CasinoGameCard'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { CASINO_ICON, CASINO_MASCOT_ICON } from '../lib/icons'
@@ -22,27 +23,6 @@ interface Props {
   playerItems: ReturnType<typeof usePlayerItems>
   pokedollarImageUrl?: string | null
   onClose: () => void
-}
-
-function formatCountdown(ms: number): string {
-  const totalSeconds = Math.max(0, Math.ceil(ms / 1000))
-  const h = Math.floor(totalSeconds / 3600)
-  const m = Math.floor((totalSeconds % 3600) / 60)
-  const s = totalSeconds % 60
-  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`
-  return `${m}m ${String(s).padStart(2, '0')}s`
-}
-
-function GameBanner({ bannerUrl, fallbackEmoji, className }: { bannerUrl: string; fallbackEmoji: string; className: string }) {
-  return (
-    <div className={`w-full bg-black/10 flex items-center justify-center overflow-hidden ${className}`}>
-      {bannerUrl ? (
-        <img src={bannerUrl} alt="" className="w-full h-full object-cover" />
-      ) : (
-        <span className="text-4xl">{fallbackEmoji}</span>
-      )}
-    </div>
-  )
 }
 
 export function CasinoPopup({ player, playerItems, pokedollarImageUrl, onClose }: Props) {
@@ -242,41 +222,6 @@ export function CasinoPopup({ player, playerItems, pokedollarImageUrl, onClose }
             </>
           )}
         </div>
-      </div>
-    </div>
-  )
-}
-
-function GameCard({
-  nom, iconUrl, bannerUrl, fallbackEmoji, disabled, onPlay,
-}: {
-  nom: string
-  iconUrl: string
-  bannerUrl: string
-  fallbackEmoji: string
-  disabled: boolean
-  onPlay: () => void
-}) {
-  return (
-    <div className={`p-3 rounded ${PIXEL_BORDER_SM} bg-cream-secondary`}>
-      <GameBanner bannerUrl={bannerUrl} fallbackEmoji={fallbackEmoji} className="h-24 rounded mb-2" />
-      <div className="flex items-center gap-2">
-        <div className="w-8 h-8 shrink-0 flex items-center justify-center">
-          {iconUrl ? (
-            <img src={iconUrl} alt="" className="w-full h-full object-contain" />
-          ) : (
-            <span className="text-xl">{fallbackEmoji}</span>
-          )}
-        </div>
-        <span className="flex-1 text-ink text-sm font-bold truncate">{nom}</span>
-        <button
-          onClick={onPlay}
-          disabled={disabled}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${BUTTON_STYLE.yellow}`}
-        >
-          <img src={CASINO_ICON.ticket} alt="" className="w-4 h-4 object-contain pixelated" />
-          Jouer
-        </button>
       </div>
     </div>
   )

@@ -47,14 +47,14 @@ export function AdminCasinoPanel() {
 
   if (loading) {
     return (
-      <div className="bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] max-w-2xl w-full p-6">
+      <div className="bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] w-full p-6">
         <p className="text-ink-muted-2 text-sm">Chargement…</p>
       </div>
     )
   }
 
   return (
-    <div className="bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] max-w-2xl w-full p-6">
+    <div className="bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] w-full p-6">
       <div className="flex items-center gap-2 mb-5">
         <span className="text-2xl">🎰</span>
         <h3 className="text-[#a3841a] text-lg font-bold">Casino</h3>
@@ -132,8 +132,9 @@ export function AdminCasinoPanel() {
           </div>
         </div>
 
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
         {/* ── Chance de Miaouss ────────────────────────────────── */}
-        <div className="border-t-2 border-[#cfc7a8] pt-4">
+        <div className="bg-cream-secondary border-2 border-ink rounded-[var(--radius-pixel)] p-4">
           <label className="flex items-center gap-2 text-sm text-ink-muted mb-2">
             <input
               type="checkbox"
@@ -264,7 +265,7 @@ export function AdminCasinoPanel() {
         </div>
 
         {/* ── Dé Chance ────────────────────────────────────────── */}
-        <div className="border-t-2 border-[#cfc7a8] pt-4">
+        <div className="bg-cream-secondary border-2 border-ink rounded-[var(--radius-pixel)] p-4">
           <label className="flex items-center gap-2 text-sm text-ink-muted mb-2">
             <input
               type="checkbox"
@@ -388,6 +389,7 @@ export function AdminCasinoPanel() {
               </div>
             </div>
           </div>
+        </div>
         </div>
       </div>
     </div>

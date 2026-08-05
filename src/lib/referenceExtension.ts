@@ -37,6 +37,12 @@ function createReferenceWidget(entry: ReferenceEntry): HTMLElement | null {
     span.textContent = '💥'
     return span
   }
+  if (entry.type === 'chapter') {
+    const span = document.createElement('span')
+    span.className = 'ref-icon'
+    span.textContent = '📖'
+    return span
+  }
   return null
 }
 
@@ -61,7 +67,7 @@ function buildDecorations(doc: PMNode, index: ReferenceIndex, displayAssets: Dis
       if (entry) {
         const from = pos + m.index
         const to = from + m[0].length
-        if (entry.icon || entry.type === 'location' || entry.type === 'ability') {
+        if (entry.icon || entry.type === 'location' || entry.type === 'ability' || entry.type === 'chapter') {
           decorations.push(Decoration.widget(from, () => createReferenceWidget(entry)!, { side: -1 }))
         }
         decorations.push(

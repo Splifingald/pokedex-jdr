@@ -97,7 +97,8 @@ function mapItemCsvRow(row: ItemCsvRow) {
     nom:         row['Nom']?.trim() ?? '',
     type:        row['Type']?.trim() ?? '',
     rarete:      row['Rareté']?.trim() || null,
-    cout:        parseInt((row['Coût'] ?? '').replace(/[^\d-]/g, '')) || 0,
+    achat:       parseInt((row['Achat'] ?? '').replace(/[^\d-]/g, '')) || 0,
+    vente:       parseInt((row['Vente'] ?? '').replace(/[^\d-]/g, '')) || 0,
     description: row['Description']?.trim() || null,
     image_url:   row['Image']?.trim() || null,
   }
@@ -129,380 +130,205 @@ function mapPokemonEvolutionCsvRow(row: PokemonEvolutionCsvRow) {
   }
 }
 
-export function AdminPanel({ onImportSuccess }: Props) {
-  const [status, setStatus] = useState<'idle' | 'parsing' | 'importing' | 'success' | 'error'>('idle')
-  const [message, setMessage] = useState('')
-  const fileRef = useRef<HTMLInputElement>(null)
+interface ImportResult {
+  name: string
+  ok: boolean
+  message: string
+}
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+async function postRows(url: string, rows: unknown[]): Promise<number> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${ADMIN_SECRET}`,
+    },
+    body: JSON.stringify({ rows }),
+  })
+  const data = await res.json()
+  if (!res.ok) {
+    throw new Error(data.error ?? `Erreur serveur ${res.status}`)
+  }
+  return data.imported
+}
 
-    setStatus('parsing')
-    setMessage('')
-
+function parseCsv(file: File): Promise<Papa.ParseResult<Record<string, string>>> {
+  return new Promise((resolve, reject) => {
     Papa.parse<Record<string, string>>(file, {
       header: true,
       skipEmptyLines: true,
       // Certains exports Excel préfixent le premier en-tête d'un BOM UTF-8 (﻿),
       // ce qui casse la comparaison exacte des noms de colonnes plus bas
       transformHeader: (h) => h.replace(/^﻿/, '').trim(),
-      complete: async (results) => {
-        const fields = results.meta.fields ?? []
-        // Une colonne "Couleur" n'existe que dans le CSV de la carte
-        const isCarteCsv = fields.includes('Couleur')
-        // Une colonne "Attaque" (sans suffixe numérique) n'existe que dans le CSV d'attaques
-        const isAttacksCsv = fields.includes('Attaque')
-        // Une colonne "Coût" n'existe que dans le CSV d'objets
-        const isItemsCsv = fields.includes('Coût')
-        // Une colonne "Lieu" n'existe que dans le CSV de rencontres
-        const isEncountersCsv = fields.includes('Lieu')
-        // Une colonne "Évolution" n'existe que dans le CSV d'évolutions
-        const isEvolutionsCsv = fields.includes('Évolution')
-        // Le CSV du mode Affichage contient ces 4 colonnes (Nom + Type + Image + Reference) —
-        // couvre aussi les fonds d'écran (Type = "Background") et les calques superposés à la
-        // Carte (Type = "Map Add-On"). Reference permet à plusieurs images de partager le même
-        // PNJ/lieu (Nom reste unique par image).
-        const isDisplayAssetsCsv = fields.length === 4 && fields.includes('Nom') && fields.includes('Type') && fields.includes('Image') && fields.includes('Reference')
-
-        if (isDisplayAssetsCsv) {
-          const missing = DISPLAY_ASSET_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
-          if (missing.length > 0) {
-            setStatus('error')
-            setMessage(`Colonnes manquantes : ${missing.join(', ')}`)
-            return
-          }
-
-          const rows = (results.data as unknown as DisplayAssetCsvRow[])
-            .map(mapDisplayAssetCsvRow)
-            .filter((r) => r.nom)
-
-          if (rows.length === 0) {
-            setStatus('error')
-            setMessage('Aucune ligne valide trouvée dans le CSV.')
-            return
-          }
-
-          setStatus('importing')
-          setMessage(`Import de ${rows.length} images d'affichage…`)
-
-          try {
-            const res = await fetch(IMPORT_DISPLAY_ASSETS_URL, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${ADMIN_SECRET}`,
-              },
-              body: JSON.stringify({ rows }),
-            })
-
-            const data = await res.json()
-
-            if (!res.ok) {
-              throw new Error(data.error ?? `Erreur serveur ${res.status}`)
-            }
-
-            setStatus('success')
-            setMessage(`✅ ${data.imported} images d'affichage importées avec succès !`)
-            onImportSuccess()
-          } catch (err) {
-            setStatus('error')
-            setMessage(err instanceof Error ? err.message : 'Erreur inconnue')
-          }
-          return
-        }
-
-        if (isCarteCsv) {
-          const missing = CARTE_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
-          if (missing.length > 0) {
-            setStatus('error')
-            setMessage(`Colonnes manquantes : ${missing.join(', ')}`)
-            return
-          }
-
-          const rows = (results.data as unknown as CarteCsvRow[])
-            .map(mapCarteCsvRow)
-            .filter((r) => r.couleur)
-
-          if (rows.length === 0) {
-            setStatus('error')
-            setMessage('Aucune ligne valide trouvée dans le CSV.')
-            return
-          }
-
-          setStatus('importing')
-          setMessage(`Import de ${rows.length} lieux…`)
-
-          try {
-            const res = await fetch(IMPORT_CARTE_URL, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${ADMIN_SECRET}`,
-              },
-              body: JSON.stringify({ rows }),
-            })
-
-            const data = await res.json()
-
-            if (!res.ok) {
-              throw new Error(data.error ?? `Erreur serveur ${res.status}`)
-            }
-
-            setStatus('success')
-            setMessage(`✅ ${data.imported} lieux importés avec succès !`)
-            onImportSuccess()
-          } catch (err) {
-            setStatus('error')
-            setMessage(err instanceof Error ? err.message : 'Erreur inconnue')
-          }
-          return
-        }
-
-        if (isAttacksCsv) {
-          const missing = ATTACK_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
-          if (missing.length > 0) {
-            setStatus('error')
-            setMessage(`Colonnes manquantes : ${missing.join(', ')}`)
-            return
-          }
-
-          const rows = (results.data as unknown as AttackCsvRow[])
-            .map(mapAttackCsvRow)
-            .filter((r) => r.nom)
-
-          if (rows.length === 0) {
-            setStatus('error')
-            setMessage('Aucune ligne valide trouvée dans le CSV.')
-            return
-          }
-
-          setStatus('importing')
-          setMessage(`Import de ${rows.length} attaques…`)
-
-          try {
-            const res = await fetch(IMPORT_ATTACKS_URL, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${ADMIN_SECRET}`,
-              },
-              body: JSON.stringify({ rows }),
-            })
-
-            const data = await res.json()
-
-            if (!res.ok) {
-              throw new Error(data.error ?? `Erreur serveur ${res.status}`)
-            }
-
-            setStatus('success')
-            setMessage(`✅ ${data.imported} attaques importées avec succès !`)
-            onImportSuccess()
-          } catch (err) {
-            setStatus('error')
-            setMessage(err instanceof Error ? err.message : 'Erreur inconnue')
-          }
-          return
-        }
-
-        if (isItemsCsv) {
-          const missing = ITEM_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
-          if (missing.length > 0) {
-            setStatus('error')
-            setMessage(`Colonnes manquantes : ${missing.join(', ')}`)
-            return
-          }
-
-          const rows = (results.data as unknown as ItemCsvRow[])
-            .map(mapItemCsvRow)
-            .filter((r) => r.nom)
-
-          if (rows.length === 0) {
-            setStatus('error')
-            setMessage('Aucune ligne valide trouvée dans le CSV.')
-            return
-          }
-
-          setStatus('importing')
-          setMessage(`Import de ${rows.length} objets…`)
-
-          try {
-            const res = await fetch(IMPORT_ITEMS_URL, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${ADMIN_SECRET}`,
-              },
-              body: JSON.stringify({ rows }),
-            })
-
-            const data = await res.json()
-
-            if (!res.ok) {
-              throw new Error(data.error ?? `Erreur serveur ${res.status}`)
-            }
-
-            setStatus('success')
-            setMessage(`✅ ${data.imported} objets importés avec succès !`)
-            onImportSuccess()
-          } catch (err) {
-            setStatus('error')
-            setMessage(err instanceof Error ? err.message : 'Erreur inconnue')
-          }
-          return
-        }
-
-        if (isEncountersCsv) {
-          const missing = ENCOUNTER_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
-          if (missing.length > 0) {
-            setStatus('error')
-            setMessage(`Colonnes manquantes : ${missing.join(', ')}`)
-            return
-          }
-
-          const rows = (results.data as unknown as EncounterCsvRow[])
-            .map(mapEncounterCsvRow)
-            .filter((r) => r.lieu && r.pokemon_nom)
-
-          if (rows.length === 0) {
-            setStatus('error')
-            setMessage('Aucune ligne valide trouvée dans le CSV.')
-            return
-          }
-
-          setStatus('importing')
-          setMessage(`Import de ${rows.length} rencontres…`)
-
-          try {
-            const res = await fetch(IMPORT_ENCOUNTERS_URL, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${ADMIN_SECRET}`,
-              },
-              body: JSON.stringify({ rows }),
-            })
-
-            const data = await res.json()
-
-            if (!res.ok) {
-              throw new Error(data.error ?? `Erreur serveur ${res.status}`)
-            }
-
-            setStatus('success')
-            setMessage(`✅ ${data.imported} rencontres importées avec succès !`)
-            onImportSuccess()
-          } catch (err) {
-            setStatus('error')
-            setMessage(err instanceof Error ? err.message : 'Erreur inconnue')
-          }
-          return
-        }
-
-        if (isEvolutionsCsv) {
-          const missing = POKEMON_EVOLUTION_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
-          if (missing.length > 0) {
-            setStatus('error')
-            setMessage(`Colonnes manquantes : ${missing.join(', ')}`)
-            return
-          }
-
-          const rows = (results.data as unknown as PokemonEvolutionCsvRow[])
-            .map(mapPokemonEvolutionCsvRow)
-            .filter((r) => r.pokemon_nom && r.evolution_nom)
-
-          if (rows.length === 0) {
-            setStatus('error')
-            setMessage('Aucune ligne valide trouvée dans le CSV.')
-            return
-          }
-
-          setStatus('importing')
-          setMessage(`Import de ${rows.length} évolutions…`)
-
-          try {
-            const res = await fetch(IMPORT_POKEMON_EVOLUTIONS_URL, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${ADMIN_SECRET}`,
-              },
-              body: JSON.stringify({ rows }),
-            })
-
-            const data = await res.json()
-
-            if (!res.ok) {
-              throw new Error(data.error ?? `Erreur serveur ${res.status}`)
-            }
-
-            setStatus('success')
-            setMessage(`✅ ${data.imported} évolutions importées avec succès !`)
-            onImportSuccess()
-          } catch (err) {
-            setStatus('error')
-            setMessage(err instanceof Error ? err.message : 'Erreur inconnue')
-          }
-          return
-        }
-
-        // Validation des en-têtes (CSV pokémon)
-        const missing = CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
-        if (missing.length > 0) {
-          setStatus('error')
-          setMessage(`Colonnes manquantes : ${missing.join(', ')}`)
-          return
-        }
-
-        const rows = (results.data as unknown as CsvRow[])
-          .map(mapCsvRow)
-          .filter((r) => r.nom && r.numero)
-
-        if (rows.length === 0) {
-          setStatus('error')
-          setMessage('Aucune ligne valide trouvée dans le CSV.')
-          return
-        }
-
-        setStatus('importing')
-        setMessage(`Import de ${rows.length} pokémon…`)
-
-        try {
-          const res = await fetch(IMPORT_POKEMON_URL, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${ADMIN_SECRET}`,
-            },
-            body: JSON.stringify({ rows }),
-          })
-
-          const data = await res.json()
-
-          if (!res.ok) {
-            throw new Error(data.error ?? `Erreur serveur ${res.status}`)
-          }
-
-          setStatus('success')
-          setMessage(`✅ ${data.imported} pokémon importés avec succès !`)
-          onImportSuccess()
-        } catch (err) {
-          setStatus('error')
-          setMessage(err instanceof Error ? err.message : 'Erreur inconnue')
-        }
-      },
-      error: (err) => {
-        setStatus('error')
-        setMessage(`Erreur de parsing : ${err.message}`)
-      },
+      complete: resolve,
+      error: reject,
     })
+  })
+}
 
+// Détecte le type d'un CSV depuis ses en-têtes, valide, transforme les lignes et les envoie
+// à la Netlify Function correspondante. Le type de fichier est indépendant d'un fichier à
+// l'autre : plusieurs CSV de types différents peuvent être sélectionnés en une seule fois.
+async function importOneFile(file: File): Promise<ImportResult> {
+  const name = file.name
+  const fail = (message: string): ImportResult => ({ name, ok: false, message })
+
+  let results: Papa.ParseResult<Record<string, string>>
+  try {
+    results = await parseCsv(file)
+  } catch (err) {
+    return fail(`Erreur de parsing : ${err instanceof Error ? err.message : 'inconnue'}`)
+  }
+
+  const fields = results.meta.fields ?? []
+  // Une colonne "Couleur" n'existe que dans le CSV de la carte
+  const isCarteCsv = fields.includes('Couleur')
+  // Une colonne "Attaque" (sans suffixe numérique) n'existe que dans le CSV d'attaques
+  const isAttacksCsv = fields.includes('Attaque')
+  // Une colonne "Achat" n'existe que dans le CSV d'objets
+  const isItemsCsv = fields.includes('Achat')
+  // Une colonne "Lieu" n'existe que dans le CSV de rencontres
+  const isEncountersCsv = fields.includes('Lieu')
+  // Une colonne "Évolution" n'existe que dans le CSV d'évolutions
+  const isEvolutionsCsv = fields.includes('Évolution')
+  // Le CSV du mode Affichage contient ces 4 colonnes (Nom + Type + Image + Reference) —
+  // couvre aussi les fonds d'écran (Type = "Background") et les calques superposés à la
+  // Carte (Type = "Map Add-On"). Reference permet à plusieurs images de partager le même
+  // PNJ/lieu (Nom reste unique par image).
+  const isDisplayAssetsCsv = fields.length === 4 && fields.includes('Nom') && fields.includes('Type') && fields.includes('Image') && fields.includes('Reference')
+
+  if (isDisplayAssetsCsv) {
+    const missing = DISPLAY_ASSET_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
+    if (missing.length > 0) return fail(`Colonnes manquantes : ${missing.join(', ')}`)
+
+    const rows = (results.data as unknown as DisplayAssetCsvRow[]).map(mapDisplayAssetCsvRow).filter((r) => r.nom)
+    if (rows.length === 0) return fail('Aucune ligne valide trouvée dans le CSV.')
+
+    try {
+      const imported = await postRows(IMPORT_DISPLAY_ASSETS_URL, rows)
+      return { name, ok: true, message: `✅ ${imported} images d'affichage importées avec succès !` }
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : 'Erreur inconnue')
+    }
+  }
+
+  if (isCarteCsv) {
+    const missing = CARTE_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
+    if (missing.length > 0) return fail(`Colonnes manquantes : ${missing.join(', ')}`)
+
+    const rows = (results.data as unknown as CarteCsvRow[]).map(mapCarteCsvRow).filter((r) => r.couleur)
+    if (rows.length === 0) return fail('Aucune ligne valide trouvée dans le CSV.')
+
+    try {
+      const imported = await postRows(IMPORT_CARTE_URL, rows)
+      return { name, ok: true, message: `✅ ${imported} lieux importés avec succès !` }
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : 'Erreur inconnue')
+    }
+  }
+
+  if (isAttacksCsv) {
+    const missing = ATTACK_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
+    if (missing.length > 0) return fail(`Colonnes manquantes : ${missing.join(', ')}`)
+
+    const rows = (results.data as unknown as AttackCsvRow[]).map(mapAttackCsvRow).filter((r) => r.nom)
+    if (rows.length === 0) return fail('Aucune ligne valide trouvée dans le CSV.')
+
+    try {
+      const imported = await postRows(IMPORT_ATTACKS_URL, rows)
+      return { name, ok: true, message: `✅ ${imported} attaques importées avec succès !` }
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : 'Erreur inconnue')
+    }
+  }
+
+  if (isItemsCsv) {
+    const missing = ITEM_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
+    if (missing.length > 0) return fail(`Colonnes manquantes : ${missing.join(', ')}`)
+
+    const rows = (results.data as unknown as ItemCsvRow[]).map(mapItemCsvRow).filter((r) => r.nom)
+    if (rows.length === 0) return fail('Aucune ligne valide trouvée dans le CSV.')
+
+    try {
+      const imported = await postRows(IMPORT_ITEMS_URL, rows)
+      return { name, ok: true, message: `✅ ${imported} objets importés avec succès !` }
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : 'Erreur inconnue')
+    }
+  }
+
+  if (isEncountersCsv) {
+    const missing = ENCOUNTER_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
+    if (missing.length > 0) return fail(`Colonnes manquantes : ${missing.join(', ')}`)
+
+    const rows = (results.data as unknown as EncounterCsvRow[]).map(mapEncounterCsvRow).filter((r) => r.lieu && r.pokemon_nom)
+    if (rows.length === 0) return fail('Aucune ligne valide trouvée dans le CSV.')
+
+    try {
+      const imported = await postRows(IMPORT_ENCOUNTERS_URL, rows)
+      return { name, ok: true, message: `✅ ${imported} rencontres importées avec succès !` }
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : 'Erreur inconnue')
+    }
+  }
+
+  if (isEvolutionsCsv) {
+    const missing = POKEMON_EVOLUTION_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
+    if (missing.length > 0) return fail(`Colonnes manquantes : ${missing.join(', ')}`)
+
+    const rows = (results.data as unknown as PokemonEvolutionCsvRow[]).map(mapPokemonEvolutionCsvRow).filter((r) => r.pokemon_nom && r.evolution_nom)
+    if (rows.length === 0) return fail('Aucune ligne valide trouvée dans le CSV.')
+
+    try {
+      const imported = await postRows(IMPORT_POKEMON_EVOLUTIONS_URL, rows)
+      return { name, ok: true, message: `✅ ${imported} évolutions importées avec succès !` }
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : 'Erreur inconnue')
+    }
+  }
+
+  // Validation des en-têtes (CSV pokémon)
+  const missing = CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
+  if (missing.length > 0) return fail(`Colonnes manquantes : ${missing.join(', ')}`)
+
+  const rows = (results.data as unknown as CsvRow[]).map(mapCsvRow).filter((r) => r.nom && r.numero)
+  if (rows.length === 0) return fail('Aucune ligne valide trouvée dans le CSV.')
+
+  try {
+    const imported = await postRows(IMPORT_POKEMON_URL, rows)
+    return { name, ok: true, message: `✅ ${imported} pokémon importés avec succès !` }
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : 'Erreur inconnue')
+  }
+}
+
+export function AdminPanel({ onImportSuccess }: Props) {
+  const [importing, setImporting] = useState(false)
+  const [results, setResults] = useState<ImportResult[]>([])
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const handleFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
     e.target.value = ''
+    if (files.length === 0) return
+
+    setImporting(true)
+    setResults([])
+
+    const collected: ImportResult[] = []
+    // Import séquentiel : chaque fichier remplace toute une table côté serveur, mieux vaut
+    // ne pas paralléliser au cas où deux fichiers sélectionnés toucheraient la même table.
+    for (const file of files) {
+      collected.push(await importOneFile(file))
+      setResults([...collected])
+    }
+
+    setImporting(false)
+    if (collected.some((r) => r.ok)) onImportSuccess()
   }
 
   return (
-    <div className="bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] max-w-sm w-full p-6">
+    <div className="bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] w-full p-6">
         <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-2">
             <span className="text-2xl">🛠️</span>
@@ -512,26 +338,29 @@ export function AdminPanel({ onImportSuccess }: Props) {
 
         <div className="mb-5">
           <p className="text-ink-muted-2 text-sm mb-3">
-            Importer un CSV Pokémon, Capacités, Carte, Objets, Rencontres, Évolutions ou Fonds d'écran (détecté automatiquement).<br />
+            Importer un ou plusieurs CSV Pokémon, Capacités, Carte, Objets, Rencontres, Évolutions ou Fonds d'écran (type détecté automatiquement pour chaque fichier).<br />
             <span className="text-[#a3841a] text-xs">⚠ Remplace toute la liste existante correspondante.</span>
           </p>
           <button
             onClick={() => fileRef.current?.click()}
-            disabled={status === 'importing' || status === 'parsing'}
+            disabled={importing}
             className={`w-full py-3 rounded disabled:opacity-50 disabled:cursor-not-allowed font-bold ${BUTTON_STYLE.yellow}`}
           >
-            {status === 'parsing' || status === 'importing' ? '⏳ En cours…' : '📂 Importer CSV'}
+            {importing ? '⏳ En cours…' : '📂 Importer CSV'}
           </button>
-          <input ref={fileRef} type="file" accept=".csv" onChange={handleFile} className="hidden" />
+          <input ref={fileRef} type="file" accept=".csv" multiple onChange={handleFiles} className="hidden" />
         </div>
 
-        {message && (
-          <div className={`text-sm p-3 rounded mb-4 border-2 ${
-            status === 'success' ? 'bg-green-100 text-green-900 border-green-700' :
-            status === 'error'   ? 'bg-red-100 text-red-900 border-red-700' :
-            'bg-cream-secondary text-ink-muted border-ink/40'
-          }`}>
-            {message}
+        {results.length > 0 && (
+          <div className="flex flex-col gap-2 mb-4">
+            {results.map((r, i) => (
+              <div
+                key={`${r.name}-${i}`}
+                className={`text-sm p-3 rounded border-2 ${r.ok ? 'bg-green-100 text-green-900 border-green-700' : 'bg-red-100 text-red-900 border-red-700'}`}
+              >
+                <span className="font-bold">{r.name}</span> — {r.message}
+              </div>
+            ))}
           </div>
         )}
     </div>

@@ -11,6 +11,8 @@ import {
   remainingPoints,
   clampStatValue,
   formatStatModifier,
+  statIconUrl,
+  statDescription,
   type StatKey,
 } from '../lib/statPoints'
 
@@ -19,12 +21,14 @@ interface Props {
   canEdit: boolean
   parameters: AdminParameters
   onUpdate: (id: number, data: Partial<Omit<Player, 'id' | 'created_at'>>) => void
-  /** Bouton "Paramètres" — fourni uniquement quand c'est le joueur qui consulte son propre profil */
-  onOpenSettings?: () => void
+  /** Meilleur score Magikarp (Mini-Jeux), lecture seule — absent si non chargé côté appelant */
+  magikarpHighScore?: number
+  /** Bouton "Se déconnecter" — fourni uniquement quand c'est le joueur qui consulte son propre profil */
+  onLogout?: () => void
   onClose: () => void
 }
 
-export function PlayerProfilePopup({ player, canEdit, parameters, onUpdate, onOpenSettings, onClose }: Props) {
+export function PlayerProfilePopup({ player, canEdit, parameters, onUpdate, magikarpHighScore, onLogout, onClose }: Props) {
   const config = toStatPointConfig(parameters)
   const stats = playerStats(player)
   const remaining = remainingPoints(stats, player.level, config)
@@ -134,7 +138,12 @@ export function PlayerProfilePopup({ player, canEdit, parameters, onUpdate, onOp
           <div className="flex flex-col gap-1.5">
             {(Object.keys(STAT_LABELS) as StatKey[]).map((key) => (
               <div key={key} className="flex items-center justify-between gap-2">
-                <span className="text-sm">{STAT_LABELS[key]}</span>
+                <span className="text-sm flex items-center gap-1.5" title={statDescription(parameters, key) || undefined}>
+                  {statIconUrl(parameters, key) && (
+                    <img src={statIconUrl(parameters, key)} alt="" className="w-4 h-4 object-contain shrink-0" />
+                  )}
+                  {STAT_LABELS[key]}
+                </span>
                 {canEdit ? (
                   <div className="flex items-center gap-1.5">
                     <button
@@ -161,6 +170,17 @@ export function PlayerProfilePopup({ player, canEdit, parameters, onUpdate, onOp
             ))}
           </div>
         </div>
+
+        {/* Scores Mini-Jeux (lecture seule, jamais éditable ici) */}
+        {magikarpHighScore !== undefined && (
+          <div className="border-t-2 border-[#cfc7a8] pt-3 mb-4">
+            <span className="text-ink-muted-2 text-xs tracking-widest block mb-1.5">SCORES MINI-JEUX</span>
+            <div className="flex items-center justify-between">
+              <span className="text-sm">Magikarp — meilleur score</span>
+              <span className="text-sm font-bold">{magikarpHighScore} taps</span>
+            </div>
+          </div>
+        )}
 
         {/* Histoire */}
         <div className="border-t-2 border-[#cfc7a8] pt-3 mb-4">
@@ -202,12 +222,12 @@ export function PlayerProfilePopup({ player, canEdit, parameters, onUpdate, onOp
         </div>
 
         <div className="flex gap-2">
-          {onOpenSettings && (
+          {onLogout && (
             <button
-              onClick={onOpenSettings}
+              onClick={onLogout}
               className={`flex-1 py-2 rounded-lg text-sm font-bold ${BUTTON_STYLE.gray}`}
             >
-              Paramètres
+              Se déconnecter
             </button>
           )}
           <button

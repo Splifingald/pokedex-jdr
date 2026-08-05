@@ -1,6 +1,6 @@
-import type { Player, CarteLocation, Attack, Item, Pokemon, Encounter, DisplayAsset, DisplayState } from '../../types'
+import type { Player, CarteLocation, Attack, Item, Pokemon, CampaignChapter, Encounter, DisplayAsset, DisplayState } from '../../types'
 import { POKEDOLLAR_ITEM_NAME } from '../../types'
-import type { ReferenceEntry } from '../../hooks/useReferenceIndex'
+import type { ReferenceEntry, ReferenceIndex } from '../../hooks/useReferenceIndex'
 import type { UpdateDisplayState } from '../../lib/displayActions'
 import { PlayerReferencePopup } from './PlayerReferencePopup'
 import { LocationReferencePopup } from './LocationReferencePopup'
@@ -8,6 +8,7 @@ import { AbilityReferencePopup } from './AbilityReferencePopup'
 import { ItemReferencePopup } from './ItemReferencePopup'
 import { DisplayControlBar } from './DisplayControlBar'
 import { PokemonDetailSheet } from '../PokemonDetailSheet'
+import { ChapterViewPopup } from './ChapterViewPopup'
 
 interface Props {
   activeReference: ReferenceEntry | null
@@ -17,6 +18,11 @@ interface Props {
   playersByName: Map<string, Player>
   locationsByName: Map<string, CarteLocation>
   encountersByLieu: Map<string, Encounter[]>
+  /** Requis uniquement pour ouvrir une référence de type 'chapter' */
+  chaptersByName?: Map<string, CampaignChapter>
+  referenceIndex?: ReferenceIndex
+  onToggleChapterDone?: (chapter: CampaignChapter) => void
+  onSaveChapterNotes?: (chapter: CampaignChapter, notes: CampaignChapter['notes']) => void
   displayState?: DisplayState
   displayAssets?: DisplayAsset[]
   updateDisplayState?: UpdateDisplayState
@@ -35,6 +41,10 @@ export function ReferenceDispatcher({
   playersByName,
   locationsByName,
   encountersByLieu,
+  chaptersByName,
+  referenceIndex,
+  onToggleChapterDone,
+  onSaveChapterNotes,
   displayState,
   displayAssets,
   updateDisplayState,
@@ -109,6 +119,29 @@ export function ReferenceDispatcher({
         item={item}
         pokedollarImageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
         displayBar={displayBar}
+        onClose={onClose}
+      />
+    )
+  }
+  if (activeReference.type === 'chapter') {
+    const chapter = chaptersByName?.get(activeReference.name)
+    if (!chapter || !referenceIndex || !displayState || !displayAssets || !updateDisplayState) return null
+    return (
+      <ChapterViewPopup
+        chapter={chapter}
+        referenceIndex={referenceIndex}
+        pokemonByName={pokemonByName}
+        attacksByName={attacksByName}
+        itemsByName={itemsByName}
+        playersByName={playersByName}
+        locationsByName={locationsByName}
+        encountersByLieu={encountersByLieu}
+        chaptersByName={chaptersByName}
+        displayState={displayState}
+        displayAssets={displayAssets}
+        updateDisplayState={updateDisplayState}
+        onToggleDone={() => onToggleChapterDone?.(chapter)}
+        onSaveNotes={(notes) => onSaveChapterNotes?.(chapter, notes)}
         onClose={onClose}
       />
     )

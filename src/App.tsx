@@ -9,6 +9,7 @@ import { usePokemonEvolutions } from './hooks/usePokemonEvolutions'
 import { useAdminParameters } from './hooks/useAdminParameters'
 import { useGiftLootboxes } from './hooks/useGiftLootboxes'
 import { useCasinoConfig } from './hooks/useCasinoConfig'
+import { useMinigamesPlayerState } from './hooks/useMinigamesPlayerState'
 import { useToast } from './context/ToastContext'
 import type { Pokemon } from './types'
 import { POKEDOLLAR_ITEM_NAME } from './types'
@@ -61,8 +62,9 @@ export default function App() {
   const { parameters } = useAdminParameters()
   const { lootboxes, speciesAssignments } = useGiftLootboxes()
   const { config: casinoConfig } = useCasinoConfig()
+  const { state: minigamesPlayerState } = useMinigamesPlayerState(player?.id ?? null)
   const notificationsAvailable = parameters.feature_gifting_enabled ||
-    (parameters.feature_casino_enabled && casinoConfig.ticket_full_notify_enabled)
+    ((casinoConfig.slots_enabled || casinoConfig.dice_enabled) && casinoConfig.ticket_full_notify_enabled)
   const { showToast } = useToast()
   const { enter: enterFullscreen } = useFullscreen()
   const { guardedNavigate } = useUnsavedChangesGuard()
@@ -70,7 +72,7 @@ export default function App() {
   const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(true)
   const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem('adminMode') === 'true')
   const [showSettings, setShowSettings] = useState(false)
-  const [showNestedSettings, setShowNestedSettings] = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
   const [showManualModal, setShowManualModal] = useState(false)
   const [showScannerModal, setShowScannerModal] = useState(false)
   const [showLoginModal, setShowLoginModal] = useState(false)
@@ -164,7 +166,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-app-bg">
+    <div className="relative flex flex-col h-full bg-app-bg">
       {/* En-tête persistant */}
       <header className="shrink-0 flex items-center gap-2.5 px-3.5 py-2.5 bg-shell border-b-4 border-ink shadow-[0_4px_0_rgba(0,0,0,0.35)]">
         <div className="w-5 h-5 rounded-full bg-[#7fd6ff] border-[3px] border-cream shadow-[0_0_6px_#7fd6ff] shrink-0" />
@@ -185,6 +187,20 @@ export default function App() {
           <PixelIcon src={SETTINGS_ICON} size={20} alt="Paramètres" />
         </button>
       </header>
+
+      {/* Bouton profil : avatar du joueur connecté, sous l'en-tête (accueil uniquement) */}
+      {player && activeTab === 'accueil' && (
+        <button
+          onClick={() => setShowProfile(true)}
+          title="Profil"
+          className="absolute top-16 right-3 z-20 w-10 h-10 rounded-full overflow-hidden border-[3px] border-ink shadow-[var(--shadow-pixel)]"
+          style={{ backgroundColor: player.color }}
+        >
+          {player.image_url && (
+            <img src={player.image_url} alt={player.name} className="w-full h-full object-cover" />
+          )}
+        </button>
+      )}
 
       {/* Corps : barre latérale (desktop) + contenu */}
       <div className="flex flex-1 overflow-hidden">
@@ -277,39 +293,27 @@ export default function App() {
 
       {/* Modals */}
       {showSettings && (
-        player ? (
-          <PlayerProfilePopup
-            player={player}
-            canEdit={true}
-            parameters={parameters}
-            onUpdate={updatePlayer}
-            onOpenSettings={() => setShowNestedSettings(true)}
-            onClose={() => setShowSettings(false)}
-          />
-        ) : (
-          <SettingsPopup
-            player={player}
-            isAdmin={isAdmin}
-            notificationsAvailable={notificationsAvailable}
-            onRequestLogin={() => { setShowSettings(false); setShowLoginModal(true) }}
-            onLogout={logout}
-            onAdminSuccess={() => { setIsAdmin(true); setShowSettings(false); setActiveTab('admin') }}
-            onAdminLogout={handleAdminLogout}
-            onClose={() => setShowSettings(false)}
-          />
-        )
-      )}
-
-      {showNestedSettings && (
         <SettingsPopup
           player={player}
           isAdmin={isAdmin}
           notificationsAvailable={notificationsAvailable}
-          onRequestLogin={() => { setShowNestedSettings(false); setShowSettings(false); setShowLoginModal(true) }}
-          onLogout={() => { logout(); setShowNestedSettings(false); setShowSettings(false) }}
-          onAdminSuccess={() => { setIsAdmin(true); setShowNestedSettings(false); setShowSettings(false); setActiveTab('admin') }}
+          onRequestLogin={() => { setShowSettings(false); setShowLoginModal(true) }}
+          onLogout={logout}
+          onAdminSuccess={() => { setIsAdmin(true); setShowSettings(false); setActiveTab('admin') }}
           onAdminLogout={handleAdminLogout}
-          onClose={() => setShowNestedSettings(false)}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      {showProfile && player && (
+        <PlayerProfilePopup
+          player={player}
+          canEdit={true}
+          parameters={parameters}
+          onUpdate={updatePlayer}
+          magikarpHighScore={minigamesPlayerState?.magikarp_high_score ?? 0}
+          onLogout={() => { logout(); setShowProfile(false) }}
+          onClose={() => setShowProfile(false)}
         />
       )}
 

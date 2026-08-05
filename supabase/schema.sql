@@ -58,6 +58,9 @@
 -- ALTER TABLE campaign_chapters ADD COLUMN IF NOT EXISTS notes jsonb NOT NULL DEFAULT '{"type":"doc","content":[{"type":"paragraph"}]}'::jsonb;
 -- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_casino_enabled boolean NOT NULL DEFAULT true;
 -- ALTER TABLE casino_config ADD COLUMN IF NOT EXISTS slots_pokeball_weight integer NOT NULL DEFAULT 1;
+-- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_minijeux_enabled boolean NOT NULL DEFAULT true;
+-- ALTER TABLE history_events DROP CONSTRAINT IF EXISTS history_events_category_check;
+-- ALTER TABLE history_events ADD CONSTRAINT history_events_category_check CHECK (category IN ('inventory', 'pokedex', 'team', 'combat', 'minigame'));
 -- ALTER TABLE casino_config ADD COLUMN IF NOT EXISTS slots_superball_weight integer NOT NULL DEFAULT 1;
 -- ALTER TABLE casino_config ADD COLUMN IF NOT EXISTS slots_hyperball_weight integer NOT NULL DEFAULT 1;
 -- ALTER TABLE casino_config ADD COLUMN IF NOT EXISTS slots_masterball_weight integer NOT NULL DEFAULT 1;
@@ -107,6 +110,12 @@
 -- UPDATE campaign_sessions c SET position = ranked.rn FROM ranked WHERE ranked.id = c.id;
 -- ALTER TABLE display_assets ADD COLUMN IF NOT EXISTS reference text NOT NULL DEFAULT '';
 -- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS map_addon_image_urls jsonb NOT NULL DEFAULT '[]'::jsonb;
+-- ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_mining_enabled boolean NOT NULL DEFAULT true;
+-- ALTER TABLE mining_config ADD COLUMN IF NOT EXISTS hidden_cell_image_url text NOT NULL DEFAULT '';
+-- ALTER TABLE mining_config ADD COLUMN IF NOT EXISTS fill_ratio_pct integer NOT NULL DEFAULT 20;
+-- ALTER TABLE mining_config ADD COLUMN IF NOT EXISTS empty_cell_image_url text NOT NULL DEFAULT '';
+-- ALTER TABLE mining_config DROP COLUMN IF EXISTS item_count_min;
+-- ALTER TABLE mining_config DROP COLUMN IF EXISTS item_count_max;
 -- ============================================================
 
 -- Table principale des pokémon
@@ -296,10 +305,20 @@ CREATE TABLE IF NOT EXISTS admin_parameters (
   feature_map_enabled            boolean NOT NULL DEFAULT true,
   feature_gifting_enabled        boolean NOT NULL DEFAULT true,
   feature_casino_enabled         boolean NOT NULL DEFAULT true,
+  feature_minijeux_enabled       boolean NOT NULL DEFAULT true,
+  feature_mining_enabled         boolean NOT NULL DEFAULT true,
   stat_points_base          integer NOT NULL DEFAULT 40,
   stat_min                  integer NOT NULL DEFAULT 5,
   stat_max                  integer NOT NULL DEFAULT 15,
   stat_points_per_level     integer NOT NULL DEFAULT 1,
+  stat_charisme_icon_url        text NOT NULL DEFAULT '',
+  stat_charisme_description     text NOT NULL DEFAULT '',
+  stat_intelligence_icon_url    text NOT NULL DEFAULT '',
+  stat_intelligence_description text NOT NULL DEFAULT '',
+  stat_sagesse_icon_url         text NOT NULL DEFAULT '',
+  stat_sagesse_description      text NOT NULL DEFAULT '',
+  stat_dexterite_icon_url       text NOT NULL DEFAULT '',
+  stat_dexterite_description    text NOT NULL DEFAULT '',
   CONSTRAINT single_row CHECK (id = 1)
 );
 INSERT INTO admin_parameters (id, max_moves, max_team_size)
@@ -378,7 +397,8 @@ CREATE TABLE IF NOT EXISTS items (
   nom         text NOT NULL UNIQUE,
   type        text NOT NULL DEFAULT '',
   rarete      text,
-  cout        integer NOT NULL DEFAULT 0,
+  achat       integer NOT NULL DEFAULT 0,
+  vente       integer NOT NULL DEFAULT 0,
   description text,
   image_url   text
 );
@@ -612,8 +632,8 @@ CREATE POLICY "Public delete campaign_chapters"
 -- Objet "Ticket Casino" du catalogue (le stock par joueur vit dans player_items,
 -- comme Pokédollar). RLS bloque l'écriture anon sur items — cette ligne doit
 -- être insérée une fois via le SQL Editor (contourne RLS).
-INSERT INTO items (nom, type, cout, description, image_url)
-VALUES ('Ticket Casino', 'Monnaie', 0, 'Permet de jouer au Casino.', '/website_icons/icon_casino_ticket.png')
+INSERT INTO items (nom, type, achat, vente, description, image_url)
+VALUES ('Ticket Casino', 'Monnaie', 0, 0, 'Permet de jouer au Casino.', '/website_icons/icon_casino_ticket.png')
 ON CONFLICT (nom) DO NOTHING;
 
 -- Paramètres admin du Casino (une seule ligne, id fixe = 1) — même schéma que
@@ -688,6 +708,75 @@ CREATE POLICY "Public update casino_player_state"
   ON casino_player_state FOR UPDATE TO anon USING (true) WITH CHECK (true);
 
 -- ============================================================
+-- Mini-Jeux (coexiste avec le Casino, économie de tickets séparée)
+-- ============================================================
+
+-- Objet "Ticket Trempette" du catalogue (le stock par joueur vit dans
+-- player_items, comme Ticket Casino/Pokédollar). RLS bloque l'écriture anon
+-- sur items — cette ligne doit être insérée une fois via le SQL Editor.
+INSERT INTO items (nom, type, achat, vente, description, image_url)
+VALUES ('Ticket Trempette', 'Monnaie', 0, 0, 'Permet de jouer aux Mini-Jeux.', '/website_icons/icon_magikarp_ticket.png')
+ON CONFLICT (nom) DO NOTHING;
+
+-- Paramètres admin des Mini-Jeux (une seule ligne, id fixe = 1) — même schéma
+-- que casino_config : économie des tickets (Ticket Trempette, indépendante du
+-- Casino) + config de chaque mini-jeu via ses propres colonnes préfixées.
+CREATE TABLE IF NOT EXISTS minigames_config (
+  id                          bigint PRIMARY KEY DEFAULT 1,
+  -- Économie des tickets
+  ticket_max                  integer NOT NULL DEFAULT 3,
+  ticket_regen_amount         integer NOT NULL DEFAULT 24,
+  ticket_regen_unit           text NOT NULL DEFAULT 'hours' CHECK (ticket_regen_unit IN ('hours', 'minutes')),
+  ticket_buy_cost             integer NOT NULL DEFAULT 0,
+  ticket_daily_buy_cap        integer NOT NULL DEFAULT 3,
+  ticket_full_notify_enabled  boolean NOT NULL DEFAULT false,
+  -- Jeu 1 : Magikarp (tap game)
+  magikarp_enabled            boolean NOT NULL DEFAULT true,
+  magikarp_nom                text NOT NULL DEFAULT 'Magikarp',
+  magikarp_icon_url           text NOT NULL DEFAULT '/website_icons/icon_magikarp_game.png',
+  magikarp_banner_url         text NOT NULL DEFAULT '',
+  magikarp_numero             text NOT NULL DEFAULT '129',
+  magikarp_duration_seconds   integer NOT NULL DEFAULT 10,
+  magikarp_star1_taps         integer NOT NULL DEFAULT 20,
+  magikarp_star2_taps         integer NOT NULL DEFAULT 30,
+  magikarp_star3_taps         integer NOT NULL DEFAULT 50,
+  magikarp_star1_xp           integer NOT NULL DEFAULT 5,
+  magikarp_star2_xp           integer NOT NULL DEFAULT 10,
+  magikarp_star3_xp           integer NOT NULL DEFAULT 20,
+  CONSTRAINT single_row CHECK (id = 1)
+);
+INSERT INTO minigames_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- État Mini-Jeux par joueur : minuteur du prochain ticket gratuit + suivi des
+-- achats du jour + meilleurs scores par jeu (une colonne préfixée par jeu).
+CREATE TABLE IF NOT EXISTS minigames_player_state (
+  player_id             bigint PRIMARY KEY,
+  next_ticket_at        timestamptz,
+  purchase_count        integer NOT NULL DEFAULT 0,
+  purchase_date         date,
+  ticket_full_notified  boolean NOT NULL DEFAULT false,
+  magikarp_high_score   integer NOT NULL DEFAULT 0,
+  created_at            timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE minigames_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE minigames_player_state ENABLE ROW LEVEL SECURITY;
+
+-- Lecture + écriture publiques (édité en direct depuis l'onglet Admin, comme
+-- casino_config — app sans vraie sécurité)
+CREATE POLICY "Public read minigames_config"
+  ON minigames_config FOR SELECT TO anon USING (true);
+CREATE POLICY "Public update minigames_config"
+  ON minigames_config FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "Public read minigames_player_state"
+  ON minigames_player_state FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert minigames_player_state"
+  ON minigames_player_state FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update minigames_player_state"
+  ON minigames_player_state FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+-- ============================================================
 -- Notifications Push (Web Push : tickets casino pleins, cadeau pokémon prêt)
 -- ============================================================
 
@@ -755,7 +844,7 @@ CREATE POLICY "Public read pokemon_evolutions"
 CREATE TABLE IF NOT EXISTS history_events (
   id           bigserial PRIMARY KEY,
   player_id    bigint NOT NULL,
-  category     text NOT NULL CHECK (category IN ('inventory', 'pokedex', 'team', 'combat')),
+  category     text NOT NULL CHECK (category IN ('inventory', 'pokedex', 'team', 'combat', 'minigame')),
   action_type  text NOT NULL,
   payload      jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at   timestamptz NOT NULL DEFAULT now()
@@ -771,6 +860,24 @@ CREATE POLICY "Public read history_events"
   ON history_events FOR SELECT TO anon USING (true);
 CREATE POLICY "Public insert history_events"
   ON history_events FOR INSERT TO anon WITH CHECK (true);
+
+-- Diffusion Realtime : malgré ce que suggère un commentaire plus bas dans ce
+-- fichier (au sujet des tables mining_*), history_events n'était en réalité
+-- PAS membre de la publication supabase_realtime — vérifié par un test direct
+-- (souscription à un canal INSERT jamais déclenchée après une écriture). C'est
+-- la cause d'un bug observé : le panneau Admin → Historique et le
+-- rafraîchissement live des événements (ex. objet Fouille tout juste trouvé)
+-- ne se mettaient à jour qu'au rechargement complet de la page. Bloc
+-- idempotent (sûr à ré-exécuter).
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'history_events'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE history_events;
+  END IF;
+END $$;
 
 -- ============================================================
 -- Mode Affichage (écran joueurs : fond, PNJ, Pokémon, objet)
@@ -817,3 +924,460 @@ CREATE POLICY "Public read display_state"
   ON display_state FOR SELECT TO anon USING (true);
 CREATE POLICY "Public update display_state"
   ON display_state FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+-- ============================================================
+-- Fouille (mini-jeu collaboratif de fouille sur grille partagée)
+-- ============================================================
+
+-- Objet "Ticket Fouille" du catalogue (le stock par joueur vit dans player_items,
+-- comme Ticket Casino/Ticket Trempette/Pokédollar). RLS bloque l'écriture anon
+-- sur items — cette ligne doit être insérée une fois via le SQL Editor.
+INSERT INTO items (nom, type, achat, vente, description, image_url)
+VALUES ('Ticket Fouille', 'Monnaie', 0, 0, 'Permet de creuser dans la zone de Fouille.', '/website_icons/icon_digging_ticket.png')
+ON CONFLICT (nom) DO NOTHING;
+
+-- Grilles personnalisées (créées à la main dans Admin → Fouille) : peuvent être
+-- mises en file via mining_config.next_custom_grid_id pour forcer la prochaine
+-- grille générée (consommée une fois, puis remise à NULL).
+CREATE TABLE IF NOT EXISTS mining_custom_grids (
+  id            bigserial PRIMARY KEY,
+  nom           text NOT NULL,
+  size          integer NOT NULL CHECK (size >= 2),
+  move_budget   integer NOT NULL CHECK (move_budget >= 1),
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+-- Objets placés sur une grille personnalisée. item_nom référence items.nom,
+-- pas de FK (survit aux réimports CSV, comme le reste du catalogue). Pas de
+-- contrainte de non-chevauchement en base (comme gift_lootbox_items) — l'éditeur
+-- admin l'empêche côté client.
+CREATE TABLE IF NOT EXISTS mining_custom_grid_items (
+  id               bigserial PRIMARY KEY,
+  custom_grid_id   bigint NOT NULL REFERENCES mining_custom_grids(id) ON DELETE CASCADE,
+  item_nom         text NOT NULL,
+  size             integer NOT NULL CHECK (size BETWEEN 1 AND 4),
+  origin_row       integer NOT NULL,
+  origin_col       integer NOT NULL,
+  created_at       timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_mining_custom_grid_items_grid ON mining_custom_grid_items(custom_grid_id);
+
+-- Paramètres admin de la Fouille (une seule ligne, id fixe = 1) — même schéma
+-- que casino_config/minigames_config pour l'économie des tickets (Ticket Fouille,
+-- indépendante du Casino et des Mini-Jeux) + réglages de génération procédurale.
+CREATE TABLE IF NOT EXISTS mining_config (
+  id                          bigint PRIMARY KEY DEFAULT 1,
+  -- Économie des tickets
+  ticket_max                  integer NOT NULL DEFAULT 3,
+  ticket_regen_amount         integer NOT NULL DEFAULT 24,
+  ticket_regen_unit           text NOT NULL DEFAULT 'hours' CHECK (ticket_regen_unit IN ('hours', 'minutes')),
+  ticket_buy_cost             integer NOT NULL DEFAULT 0,
+  ticket_daily_buy_cap        integer NOT NULL DEFAULT 3,
+  ticket_full_notify_enabled  boolean NOT NULL DEFAULT false,
+  -- Affichage
+  nom                         text NOT NULL DEFAULT 'Fouille',
+  icon_url                    text NOT NULL DEFAULT '/website_icons/icon_digging_game.png',
+  banner_url                  text NOT NULL DEFAULT '',
+  hidden_cell_image_url       text NOT NULL DEFAULT '',
+  empty_cell_image_url        text NOT NULL DEFAULT '',
+  -- Génération procédurale
+  grid_size_min               integer NOT NULL DEFAULT 4,
+  grid_size_max               integer NOT NULL DEFAULT 6,
+  fill_ratio_pct              integer NOT NULL DEFAULT 20, -- % de cases occupées par des objets, visé (peut être légèrement dépassé)
+  move_budget_pct             integer NOT NULL DEFAULT 50, -- % de cases de la grille consommables avant épuisement
+  -- Grille personnalisée mise en file pour la prochaine génération (consommée une fois puis NULL)
+  next_custom_grid_id         bigint REFERENCES mining_custom_grids(id) ON DELETE SET NULL,
+  CONSTRAINT single_row CHECK (id = 1)
+);
+INSERT INTO mining_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- Bibliothèque d'objets pouvant apparaître sur une grille procédurale : chaque
+-- entrée référence un objet du catalogue (item_nom), sa taille sur la grille
+-- (toujours carrée, N×N) et son poids de tirage relatif (probabilité =
+-- poids / somme des poids, même principe que casino_config/gift_lootbox_items).
+CREATE TABLE IF NOT EXISTS mining_item_defs (
+  id          bigserial PRIMARY KEY,
+  item_nom    text NOT NULL,
+  size        integer NOT NULL CHECK (size BETWEEN 1 AND 4),
+  weight      integer NOT NULL DEFAULT 1,
+  enabled     boolean NOT NULL DEFAULT true,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- État Fouille par joueur : minuteur du prochain ticket gratuit + suivi des
+-- achats du jour — même schéma que casino_player_state/minigames_player_state.
+CREATE TABLE IF NOT EXISTS mining_player_state (
+  player_id             bigint PRIMARY KEY,
+  next_ticket_at        timestamptz,
+  purchase_count        integer NOT NULL DEFAULT 0,
+  purchase_date         date,
+  ticket_full_notified  boolean NOT NULL DEFAULT false,
+  created_at            timestamptz NOT NULL DEFAULT now()
+);
+
+-- La grille en cours (une seule active à la fois, partagée par tous les joueurs).
+-- Une ligne par grille jouée (l'historique des grilles passées est conservé,
+-- is_active bascule à false + ended_at à la fin plutôt qu'une suppression).
+CREATE TABLE IF NOT EXISTS mining_grids (
+  id               bigserial PRIMARY KEY,
+  size             integer NOT NULL,
+  move_budget      integer NOT NULL,
+  moves_used       integer NOT NULL DEFAULT 0,
+  source           text NOT NULL CHECK (source IN ('procedural', 'custom')),
+  custom_grid_id   bigint REFERENCES mining_custom_grids(id) ON DELETE SET NULL,
+  is_active        boolean NOT NULL DEFAULT true,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  ended_at         timestamptz
+);
+-- Une seule grille active à la fois — même idiome que gift_lootboxes.is_default
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mining_grids_one_active
+  ON mining_grids (is_active) WHERE is_active = true;
+
+-- Instances d'objets placés sur la grille active (ou une grille passée) : suit
+-- combien de cases de l'objet restent à découvrir, et qui a creusé la dernière
+-- (celui-ci reçoit l'objet dans son inventaire).
+CREATE TABLE IF NOT EXISTS mining_grid_items (
+  id                       bigserial PRIMARY KEY,
+  grid_id                  bigint NOT NULL REFERENCES mining_grids(id) ON DELETE CASCADE,
+  item_nom                 text NOT NULL,
+  size                     integer NOT NULL CHECK (size BETWEEN 1 AND 4),
+  origin_row               integer NOT NULL,
+  origin_col               integer NOT NULL,
+  cells_total              integer NOT NULL,
+  cells_remaining          integer NOT NULL,
+  completed                boolean NOT NULL DEFAULT false,
+  completed_by_player_id   bigint,
+  completed_at             timestamptz
+);
+CREATE INDEX IF NOT EXISTS idx_mining_grid_items_grid ON mining_grid_items(grid_id);
+
+-- Une ligne par case de la grille (et non un blob JSON) : c'est ce qui rend les
+-- fouilles simultanées de plusieurs joueurs sûres. Réclamer une case est un
+-- UPDATE ... WHERE dug = false atomique sur SA PROPRE ligne — Postgres sérialise
+-- les écritures concurrentes sur une même ligne automatiquement, et deux joueurs
+-- qui creusent deux cases différentes ne se gênent jamais (lignes différentes).
+-- Un blob JSON unique aurait forcé un cycle lecture-modification-écriture côté
+-- client, réintroduisant exactement la course qu'on cherche à éviter.
+CREATE TABLE IF NOT EXISTS mining_grid_cells (
+  id                  bigserial PRIMARY KEY,
+  grid_id             bigint NOT NULL REFERENCES mining_grids(id) ON DELETE CASCADE,
+  cell_index          integer NOT NULL, -- 0-indexé, row-major : index = row*size + col
+  item_id             bigint REFERENCES mining_grid_items(id) ON DELETE SET NULL, -- NULL = case vide
+  dug                 boolean NOT NULL DEFAULT false,
+  dug_by_player_id    bigint,
+  dug_at              timestamptz,
+  UNIQUE (grid_id, cell_index)
+);
+CREATE INDEX IF NOT EXISTS idx_mining_grid_cells_grid ON mining_grid_cells(grid_id);
+
+-- Journal des coups joués sur la grille active, affiché en direct dans le popup
+-- Fouille (sous la grille) — distinct de mining_grid_cells pour rester un simple
+-- flux append-only (même philosophie que history_events), et distinct de
+-- history_events global : seuls les objets complétés sont aussi loggés dans
+-- history_events (voir mining_dig_cell ci-dessous), pas chaque case creusée.
+CREATE TABLE IF NOT EXISTS mining_moves (
+  id                bigserial PRIMARY KEY,
+  grid_id           bigint NOT NULL REFERENCES mining_grids(id) ON DELETE CASCADE,
+  player_id         bigint NOT NULL,
+  cell_index        integer NOT NULL,
+  item_id           bigint REFERENCES mining_grid_items(id) ON DELETE SET NULL,
+  item_completed    boolean NOT NULL DEFAULT false,
+  created_at        timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_mining_moves_grid_created ON mining_moves(grid_id, created_at);
+
+ALTER TABLE mining_custom_grids ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mining_custom_grid_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mining_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mining_item_defs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mining_player_state ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mining_grids ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mining_grid_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mining_grid_cells ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mining_moves ENABLE ROW LEVEL SECURITY;
+
+-- Lecture + écriture publiques partout (app sans vraie sécurité, comme le reste
+-- du schéma). Les fonctions RPC ci-dessous s'exécutent avec le rôle appelant
+-- (anon), pas en SECURITY DEFINER — elles ont donc besoin de ces mêmes policies.
+CREATE POLICY "Public read mining_custom_grids"
+  ON mining_custom_grids FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert mining_custom_grids"
+  ON mining_custom_grids FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update mining_custom_grids"
+  ON mining_custom_grids FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete mining_custom_grids"
+  ON mining_custom_grids FOR DELETE TO anon USING (true);
+
+CREATE POLICY "Public read mining_custom_grid_items"
+  ON mining_custom_grid_items FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert mining_custom_grid_items"
+  ON mining_custom_grid_items FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update mining_custom_grid_items"
+  ON mining_custom_grid_items FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete mining_custom_grid_items"
+  ON mining_custom_grid_items FOR DELETE TO anon USING (true);
+
+CREATE POLICY "Public read mining_config"
+  ON mining_config FOR SELECT TO anon USING (true);
+CREATE POLICY "Public update mining_config"
+  ON mining_config FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "Public read mining_item_defs"
+  ON mining_item_defs FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert mining_item_defs"
+  ON mining_item_defs FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update mining_item_defs"
+  ON mining_item_defs FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete mining_item_defs"
+  ON mining_item_defs FOR DELETE TO anon USING (true);
+
+CREATE POLICY "Public read mining_player_state"
+  ON mining_player_state FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert mining_player_state"
+  ON mining_player_state FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update mining_player_state"
+  ON mining_player_state FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "Public read mining_grids"
+  ON mining_grids FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert mining_grids"
+  ON mining_grids FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update mining_grids"
+  ON mining_grids FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "Public read mining_grid_items"
+  ON mining_grid_items FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert mining_grid_items"
+  ON mining_grid_items FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update mining_grid_items"
+  ON mining_grid_items FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "Public read mining_grid_cells"
+  ON mining_grid_cells FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert mining_grid_cells"
+  ON mining_grid_cells FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update mining_grid_cells"
+  ON mining_grid_cells FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "Public read mining_moves"
+  ON mining_moves FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert mining_moves"
+  ON mining_moves FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update mining_moves"
+  ON mining_moves FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+-- ── Fonctions RPC de concurrence ────────────────────────────────
+-- Première utilisation de fonctions Postgres côté serveur dans ce schéma —
+-- justifié ici uniquement : Fouille est la première fonctionnalité où deux
+-- clients indépendants et non authentifiés peuvent légitimement se disputer
+-- la même ligne en même temps (une case de grille, un compteur d'objet), et
+-- un cycle lecture-modification-écriture multi-étapes côté client ne peut pas
+-- être rendu atomique autrement. Les deux fonctions s'exécutent avec le rôle
+-- appelant (anon), pas en SECURITY DEFINER, pour rester cohérentes avec la
+-- posture "pas de vraie sécurité" du reste de l'app.
+
+-- Retourne l'id de la grille active, en la générant si besoin (aucune grille
+-- active, ou grille active épuisée). p_procedural est un layout candidat déjà
+-- calculé côté client (voir src/lib/mining.ts::generateProceduralGridLayout) —
+-- il n'est utilisé que si aucune grille personnalisée n'est en file d'attente ;
+-- sinon il est simplement ignoré (travail JS perdu, sans conséquence).
+--
+-- pg_advisory_xact_lock sérialise tous les appels concurrents à cette fonction
+-- pour la durée de la transaction : ça élimine à la fois la course au tout
+-- premier lancement (aucune grille n'existe encore) et la course au
+-- renouvellement (la grille active vient de s'épuiser) sans logique de retry —
+-- le second appelant, une fois le verrou obtenu, voit simplement la grille déjà
+-- fraîchement créée par le premier et la retourne telle quelle.
+CREATE OR REPLACE FUNCTION mining_ensure_active_grid(p_procedural jsonb)
+RETURNS bigint
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_grid_id      bigint;
+  v_moves_used   integer;
+  v_move_budget  integer;
+  v_cleared      boolean;
+  v_size         integer;
+  v_custom_id    bigint;
+  v_source       text;
+  v_items        jsonb;
+  v_item         jsonb;
+  v_item_id      bigint;
+  v_item_size    integer;
+  v_origin_row   integer;
+  v_origin_col   integer;
+  v_row          integer;
+  v_col          integer;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('mining_grid_generation'));
+
+  SELECT id, moves_used, move_budget INTO v_grid_id, v_moves_used, v_move_budget
+  FROM mining_grids WHERE is_active = true FOR UPDATE;
+
+  -- "Terminée" = coups épuisés OU (au moins un objet placé ET tous complétés)
+  -- — même condition que côté client (isGridCleared) et que la garde de
+  -- mining_dig_cell, pour rester cohérent quel que soit qui déclenche le
+  -- renouvellement (le joueur qui vide la grille vs. un tiers via Realtime).
+  SELECT EXISTS (SELECT 1 FROM mining_grid_items WHERE grid_id = v_grid_id)
+    AND NOT EXISTS (SELECT 1 FROM mining_grid_items WHERE grid_id = v_grid_id AND completed = false)
+  INTO v_cleared;
+
+  IF v_grid_id IS NOT NULL AND v_moves_used < v_move_budget AND NOT v_cleared THEN
+    RETURN v_grid_id;
+  END IF;
+
+  IF v_grid_id IS NOT NULL THEN
+    UPDATE mining_grids SET is_active = false, ended_at = now() WHERE id = v_grid_id;
+  END IF;
+
+  SELECT next_custom_grid_id INTO v_custom_id FROM mining_config WHERE id = 1;
+  IF v_custom_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM mining_custom_grids WHERE id = v_custom_id) THEN
+    v_custom_id := NULL;
+  END IF;
+
+  IF v_custom_id IS NOT NULL THEN
+    v_source := 'custom';
+    SELECT size, move_budget INTO v_size, v_move_budget FROM mining_custom_grids WHERE id = v_custom_id;
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('item_nom', item_nom, 'size', size, 'origin_row', origin_row, 'origin_col', origin_col)), '[]'::jsonb)
+      INTO v_items
+      FROM mining_custom_grid_items WHERE custom_grid_id = v_custom_id;
+    UPDATE mining_config SET next_custom_grid_id = NULL WHERE id = 1;
+  ELSE
+    v_source := 'procedural';
+    v_custom_id := NULL;
+    v_size := (p_procedural->>'size')::int;
+    v_move_budget := (p_procedural->>'move_budget')::int;
+    v_items := COALESCE(p_procedural->'items', '[]'::jsonb);
+  END IF;
+
+  INSERT INTO mining_grids (size, move_budget, source, custom_grid_id, is_active)
+  VALUES (v_size, v_move_budget, v_source, v_custom_id, true)
+  RETURNING id INTO v_grid_id;
+
+  INSERT INTO mining_grid_cells (grid_id, cell_index)
+  SELECT v_grid_id, gs FROM generate_series(0, v_size * v_size - 1) AS gs;
+
+  FOR v_item IN SELECT * FROM jsonb_array_elements(v_items)
+  LOOP
+    v_item_size := (v_item->>'size')::int;
+    v_origin_row := (v_item->>'origin_row')::int;
+    v_origin_col := (v_item->>'origin_col')::int;
+
+    INSERT INTO mining_grid_items (grid_id, item_nom, size, origin_row, origin_col, cells_total, cells_remaining)
+    VALUES (v_grid_id, v_item->>'item_nom', v_item_size, v_origin_row, v_origin_col, v_item_size * v_item_size, v_item_size * v_item_size)
+    RETURNING id INTO v_item_id;
+
+    FOR v_row IN 0..(v_item_size - 1) LOOP
+      FOR v_col IN 0..(v_item_size - 1) LOOP
+        UPDATE mining_grid_cells
+        SET item_id = v_item_id
+        WHERE grid_id = v_grid_id
+          AND cell_index = (v_origin_row + v_row) * v_size + (v_origin_col + v_col);
+      END LOOP;
+    END LOOP;
+  END LOOP;
+
+  RETURN v_grid_id;
+END;
+$$;
+
+-- Creuse une case pour un joueur : atomique de bout en bout. Consomme un coup
+-- (échoue proprement si la grille est épuisée — coups à zéro OU tous les
+-- objets déjà trouvés — ou n'est plus active), réclame la case (échoue
+-- proprement si un autre joueur vient de la creuser, et rembourse alors le
+-- coup consommé), puis si la case appartenait à un objet, décrémente
+-- son compteur de cases restantes — le seul appel qui fait passer ce compteur
+-- de 1 à 0 est, par construction (verrouillage de ligne Postgres), celui qui
+-- reçoit item_completed=true et crédite l'objet dans l'inventaire du joueur.
+-- L'historique global (history_events) n'est PAS écrit ici — c'est fait côté
+-- client (voir PLAYER_HISTORY_LOGGING.md), uniquement quand item_completed=true.
+CREATE OR REPLACE FUNCTION mining_dig_cell(p_grid_id bigint, p_player_id bigint, p_cell_index integer)
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_item_id         bigint;
+  v_move_id         bigint;
+  v_cells_remaining integer;
+  v_item_nom        text;
+BEGIN
+  UPDATE mining_grids
+  SET moves_used = moves_used + 1
+  WHERE id = p_grid_id AND is_active = true AND moves_used < move_budget
+    AND (
+      NOT EXISTS (SELECT 1 FROM mining_grid_items WHERE grid_id = p_grid_id)
+      OR EXISTS (SELECT 1 FROM mining_grid_items WHERE grid_id = p_grid_id AND completed = false)
+    );
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('status', 'grid_exhausted');
+  END IF;
+
+  UPDATE mining_grid_cells
+  SET dug = true, dug_by_player_id = p_player_id, dug_at = now()
+  WHERE grid_id = p_grid_id AND cell_index = p_cell_index AND dug = false
+  RETURNING item_id INTO v_item_id;
+
+  IF NOT FOUND THEN
+    UPDATE mining_grids SET moves_used = moves_used - 1 WHERE id = p_grid_id;
+    RETURN jsonb_build_object('status', 'already_dug');
+  END IF;
+
+  INSERT INTO mining_moves (grid_id, player_id, cell_index, item_id, item_completed)
+  VALUES (p_grid_id, p_player_id, p_cell_index, v_item_id, false)
+  RETURNING id INTO v_move_id;
+
+  IF v_item_id IS NULL THEN
+    RETURN jsonb_build_object('status', 'ok', 'item_completed', false);
+  END IF;
+
+  UPDATE mining_grid_items
+  SET cells_remaining = cells_remaining - 1
+  WHERE id = v_item_id AND cells_remaining > 0
+  RETURNING cells_remaining, item_nom INTO v_cells_remaining, v_item_nom;
+
+  IF NOT FOUND OR v_cells_remaining > 0 THEN
+    RETURN jsonb_build_object('status', 'ok', 'item_completed', false);
+  END IF;
+
+  UPDATE mining_grid_items
+  SET completed = true, completed_by_player_id = p_player_id, completed_at = now()
+  WHERE id = v_item_id;
+
+  UPDATE mining_moves SET item_completed = true WHERE id = v_move_id;
+
+  INSERT INTO player_items (player_id, item_nom, quantity)
+  VALUES (p_player_id, v_item_nom, 1)
+  ON CONFLICT (player_id, item_nom) DO UPDATE SET quantity = player_items.quantity + 1;
+
+  RETURN jsonb_build_object('status', 'ok', 'item_completed', true, 'item_nom', v_item_nom);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION mining_ensure_active_grid(jsonb) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION mining_dig_cell(bigint, bigint, integer) TO anon, authenticated;
+
+-- Diffusion Realtime : contrairement aux tables plus anciennes de ce schéma
+-- (déjà membres de la publication supabase_realtime, activées à la création via
+-- le Dashboard), ces tables neuves doivent y être ajoutées explicitement, sinon
+-- les hooks useMining*/useMiningActiveGrid ne reçoivent aucune mise à jour en
+-- direct (les écritures persistent bien côté serveur, mais un client déjà ouvert
+-- ne les voit qu'au prochain remount/refetch). Bloc idempotent (sûr à ré-exécuter).
+DO $$
+DECLARE
+  t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'mining_config', 'mining_player_state', 'mining_item_defs',
+    'mining_custom_grids', 'mining_custom_grid_items',
+    'mining_grids', 'mining_grid_items', 'mining_grid_cells', 'mining_moves'
+  ]
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = t
+    ) THEN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE %I', t);
+    END IF;
+  END LOOP;
+END $$;

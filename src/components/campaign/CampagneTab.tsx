@@ -5,6 +5,7 @@ import { useCarteLocations } from '../../hooks/useCarteLocations'
 import { useItems } from '../../hooks/useItems'
 import { useEncounters } from '../../hooks/useEncounters'
 import { useCampaignSessions } from '../../hooks/useCampaignSessions'
+import { useAllCampaignChapters } from '../../hooks/useAllCampaignChapters'
 import { useReferenceIndex } from '../../hooks/useReferenceIndex'
 import { useDisplayState } from '../../hooks/useDisplayState'
 import { useDisplayAssets } from '../../hooks/useDisplayAssets'
@@ -29,6 +30,7 @@ export function CampagneTab({ pokemonByName, attacksByName }: Props) {
   const { items, byName: itemsByName } = useItems()
   const { encounters } = useEncounters()
   const { sessions, loading, createSession, updateSession, deleteSession, reorderSessions } = useCampaignSessions()
+  const { chapters: allChapters, updateChapter: updateAnyChapter } = useAllCampaignChapters()
   const { state: displayState, updateDisplayState } = useDisplayState()
   const { assets: displayAssets } = useDisplayAssets()
 
@@ -42,6 +44,7 @@ export function CampagneTab({ pokemonByName, attacksByName }: Props) {
   const attacksList = useMemo(() => [...attacksByName.values()], [attacksByName])
   const playersByName = useMemo(() => new Map(players.map((p) => [p.name, p])), [players])
   const locationsByName = useMemo(() => new Map(locations.map((l) => [l.titre, l])), [locations])
+  const chaptersByName = useMemo(() => new Map(allChapters.map((c) => [c.title, c])), [allChapters])
   const encountersByLieu = useMemo(() => {
     const map = new Map<string, Encounter[]>()
     for (const enc of encounters) {
@@ -52,7 +55,7 @@ export function CampagneTab({ pokemonByName, attacksByName }: Props) {
     return map
   }, [encounters])
 
-  const referenceIndex = useReferenceIndex(pokemonList, players, locations, attacksList, items)
+  const referenceIndex = useReferenceIndex(pokemonList, players, locations, attacksList, items, allChapters)
 
   const selectedSession = sessions.find((s) => s.id === selectedSessionId) ?? null
 
@@ -70,6 +73,9 @@ export function CampagneTab({ pokemonByName, attacksByName }: Props) {
         playersByName={playersByName}
         locationsByName={locationsByName}
         encountersByLieu={encountersByLieu}
+        chaptersByName={chaptersByName}
+        onToggleChapterDone={(chapter) => updateAnyChapter(chapter.id, { done: !chapter.done })}
+        onSaveChapterNotes={(chapter, notes) => updateAnyChapter(chapter.id, { notes })}
         displayState={displayState}
         displayAssets={displayAssets}
         updateDisplayState={updateDisplayState}

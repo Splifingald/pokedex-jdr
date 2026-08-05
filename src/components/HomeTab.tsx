@@ -11,10 +11,15 @@ import { RoamingPokemonSprite } from './RoamingPokemonSprite'
 import { PokemonDetailSheet } from './PokemonDetailSheet'
 import { GiftPopup, type GiftReward } from './GiftPopup'
 import { CasinoPopup } from './CasinoPopup'
+import { MiniGamesPopup } from './MiniGamesPopup'
+import { MiningPopup } from './MiningPopup'
+import { useMinigamesConfig } from '../hooks/useMinigamesConfig'
+import { useCasinoConfig } from '../hooks/useCasinoConfig'
+import { hasAnyMinigameAvailable } from '../lib/magikarpGame'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { PixelIcon } from './icons/PixelIcon'
-import { PHOTO_ICON, CASINO_MASCOT_ICON } from '../lib/icons'
+import { PHOTO_ICON, CASINO_MASCOT_ICON, MINIGAMES_ICON, MINING_ICON } from '../lib/icons'
 import { isGiftReady, resolveLootboxForSpecies, drawLootboxReward, randomNextGiftAt, maybeResetGiftTimerOnEntry } from '../lib/gifting'
 import { logHistoryEvent } from '../lib/historyLog'
 
@@ -50,6 +55,8 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
   const { parameters } = useAdminParameters()
   const { backgrounds } = useDisplayAssets()
   const { lootboxes, lootboxItems, speciesAssignments } = useGiftLootboxes()
+  const { config: minigamesConfig } = useMinigamesConfig()
+  const { config: casinoConfig } = useCasinoConfig()
   const { showToast } = useToast()
 
   const sceneRef = useRef<HTMLDivElement>(null)
@@ -58,6 +65,8 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
   const [giftPokemonId, setGiftPokemonId] = useState<number | null>(null)
   const [giftReward, setGiftReward] = useState<GiftReward | null>(null)
   const [showCasino, setShowCasino] = useState(false)
+  const [showMiniGames, setShowMiniGames] = useState(false)
+  const [showMining, setShowMining] = useState(false)
 
   // Recalcul périodique de "maintenant" pour détecter les cadeaux devenus prêts
   // pendant que l'app reste ouverte — pas de compte à rebours affiché, juste
@@ -212,27 +221,49 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
         </div>
       ) : null}
 
-      {/* Bouton casino épinglé à droite, au-dessus du scanner */}
-      {player && parameters.feature_casino_enabled && (
-        <button
-          onClick={() => setShowCasino(true)}
-          title="Casino"
-          className="absolute right-3 top-1/2 -translate-y-[calc(50%+96px)] w-14 h-14 rounded-full border-[3px] border-ink bg-gradient-to-br from-[#e0293f] to-[#7a0f1f] flex items-center justify-center shadow-[var(--shadow-pixel)] z-[35] active:shadow-none active:translate-x-[2px] active:translate-y-[calc(-50%-94px)] transition-all"
-        >
-          <img src={CASINO_MASCOT_ICON} alt="Casino" className="pixelated w-9 h-9 object-contain" />
-        </button>
-      )}
+      {/* Widgets épinglés à droite : un seul conteneur invisible, toujours alignés
+          (chaque bouton se replie naturellement sur les autres s'il est masqué) */}
+      <div className="absolute right-3 top-1/2 -translate-y-1/2 z-[35] flex flex-col items-center gap-3">
+        {player && parameters.feature_minijeux_enabled && hasAnyMinigameAvailable(minigamesConfig, roster) && (
+          <button
+            onClick={() => setShowMiniGames(true)}
+            title="Mini-Jeux"
+            className="w-14 h-14 rounded-full border-[3px] border-ink bg-gradient-to-br from-[#2f8fd6] to-[#0f3f7a] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+          >
+            <img src={MINIGAMES_ICON} alt="Mini-Jeux" className="pixelated w-9 h-9 object-contain" />
+          </button>
+        )}
 
-      {/* Bouton scanner épinglé à droite */}
-      {canScan && (
-        <button
-          onClick={onScan}
-          title="Scanner un Pokémon"
-          className="absolute right-3 top-1/2 -translate-y-1/2 w-14 h-14 rounded-full border-[3px] border-ink bg-gradient-to-br from-hp-orange to-hp-red text-white flex items-center justify-center shadow-[var(--shadow-pixel)] z-[35] active:shadow-none active:translate-x-[2px] active:translate-y-[calc(-50%+2px)] transition-all"
-        >
-          <PixelIcon src={PHOTO_ICON} size={34} alt="Scanner un Pokémon" colored />
-        </button>
-      )}
+        {player && (casinoConfig.slots_enabled || casinoConfig.dice_enabled) && (
+          <button
+            onClick={() => setShowCasino(true)}
+            title="Casino"
+            className="w-14 h-14 rounded-full border-[3px] border-ink bg-gradient-to-br from-[#e0293f] to-[#7a0f1f] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+          >
+            <img src={CASINO_MASCOT_ICON} alt="Casino" className="pixelated w-9 h-9 object-contain" />
+          </button>
+        )}
+
+        {player && parameters.feature_mining_enabled && (
+          <button
+            onClick={() => setShowMining(true)}
+            title="Fouille"
+            className="w-14 h-14 rounded-full border-[3px] border-ink bg-gradient-to-br from-[#c98a3e] to-[#6b4a1f] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+          >
+            <img src={MINING_ICON} alt="Fouille" className="pixelated w-9 h-9 object-contain" />
+          </button>
+        )}
+
+        {canScan && (
+          <button
+            onClick={onScan}
+            title="Scanner un Pokémon"
+            className="w-14 h-14 rounded-full border-[3px] border-ink bg-gradient-to-br from-hp-orange to-hp-red text-white flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+          >
+            <PixelIcon src={PHOTO_ICON} size={34} alt="Scanner un Pokémon" colored />
+          </button>
+        )}
+      </div>
 
       {selected && (
         <PokemonDetailSheet
@@ -276,6 +307,31 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           playerItems={playerItems}
           pokedollarImageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
           onClose={() => setShowCasino(false)}
+        />
+      )}
+
+      {showMiniGames && player && (
+        <MiniGamesPopup
+          player={player}
+          playerItems={playerItems}
+          roster={roster}
+          updateXp={updateXp}
+          pokemonByName={pokemonByName}
+          evolutionsByPokemonNom={evolutionsByPokemonNom}
+          itemsByName={itemsByName}
+          pokedollarImageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
+          onRequestPokemonDetail={(id) => { setShowMiniGames(false); setSelectedId(id) }}
+          onClose={() => setShowMiniGames(false)}
+        />
+      )}
+
+      {showMining && player && (
+        <MiningPopup
+          player={player}
+          playerItems={playerItems}
+          itemsByName={itemsByName}
+          pokedollarImageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
+          onClose={() => setShowMining(false)}
         />
       )}
     </div>

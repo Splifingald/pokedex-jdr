@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import type { Item, Player, PlayerItem } from '../types'
-import { POKEDOLLAR_ITEM_NAME, sellValue } from '../types'
+import { POKEDOLLAR_ITEM_NAME } from '../types'
 import { usePlayerItems } from '../hooks/usePlayerItems'
 import { ItemSearchInput } from './ItemSearchInput'
 import { ItemPopup } from './ItemPopup'
@@ -126,7 +126,7 @@ export function SacTab({ player, items, itemsByName, playerItems }: Props) {
   const handleSell = (row: PlayerItem, rect: DOMRect) => {
     const item = itemsByName.get(row.item_nom)
     if (!item) return
-    const value = sellValue(item.cout)
+    const value = item.vente
     flyCoin(rect, value, pokedollarImageUrl)
     sellOne(row, value)
     void logHistoryEvent('inventory', 'item_sale', player.id, {

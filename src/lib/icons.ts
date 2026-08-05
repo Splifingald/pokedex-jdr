@@ -68,3 +68,10 @@ export const DICE_ICON: Record<number, string> = {
 }
 
 export const DICE_GENERIC_ICON = `${BASE}/icon_casino_dice.png`
+
+export const MINIGAMES_ICON = `${BASE}/icon_magikarp_game.png`
+export const MAGIKARP_JUMP_ICON = `${BASE}/icon_magikarp_jump.png`
+export const MINIGAMES_TICKET_ICON = `${BASE}/icon_magikarp_ticket.png`
+
+export const MINING_ICON = `${BASE}/icon_digging_game.png`
+export const MINING_TICKET_ICON = `${BASE}/icon_digging_ticket.png`

@@ -32,6 +32,29 @@ export function toStatPointConfig(parameters: AdminParameters): StatPointConfig 
   }
 }
 
+// Icône + description par stat, éditables dans Admin → Paramètres → Joueurs
+export const STAT_ICON_URL_KEY: Record<StatKey, keyof AdminParameters> = {
+  charisme: 'stat_charisme_icon_url',
+  intelligence: 'stat_intelligence_icon_url',
+  sagesse: 'stat_sagesse_icon_url',
+  dexterite: 'stat_dexterite_icon_url',
+}
+
+export const STAT_DESCRIPTION_KEY: Record<StatKey, keyof AdminParameters> = {
+  charisme: 'stat_charisme_description',
+  intelligence: 'stat_intelligence_description',
+  sagesse: 'stat_sagesse_description',
+  dexterite: 'stat_dexterite_description',
+}
+
+export function statIconUrl(parameters: AdminParameters, key: StatKey): string {
+  return parameters[STAT_ICON_URL_KEY[key]] as string
+}
+
+export function statDescription(parameters: AdminParameters, key: StatKey): string {
+  return parameters[STAT_DESCRIPTION_KEY[key]] as string
+}
+
 export function playerStats(player: Player): StatBlock {
   return {
     charisme: player.stat_charisme,

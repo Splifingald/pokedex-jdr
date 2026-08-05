@@ -17,6 +17,11 @@ export interface StatBreakdown {
 
 export const XP_LEVELS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100] as const
 
+// Token littéral reconnu dans le texte libre des cases xp_* (ex : "Évo. [objet]"),
+// remplacé par l'icône de l'objet requis dans la jauge XP (voir XpGauge.tsx) et
+// utilisé pour repérer les paliers d'évolution avec objet (voir lib/evolution.ts).
+export const ITEM_TOKEN = '[objet]'
+
 const BONUS_REGEX = /^\+\s*(\d+)\s*(PV|DMG)$/i
 
 function xpField(level: number): keyof Pokemon {

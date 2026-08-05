@@ -22,6 +22,7 @@ const CATEGORY_LABELS: Record<HistoryCategory, string> = {
   pokedex: 'Pokédex',
   team: 'Équipe / PC',
   combat: 'Combat',
+  minigame: 'Mini-Jeux',
 }
 
 function Avatar({ player, size = 8 }: { player?: Player; size?: 5 | 8 }) {

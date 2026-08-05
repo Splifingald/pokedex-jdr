@@ -152,6 +152,16 @@ function OwnedVitals({
     return getEvolutionOptions(playerPokemon, pokemon, evolutionsByPokemonNom, pokemonByName, itemsByName, playerItems?.inventory ?? [])
   }, [playerPokemon, pokemon, evolutionsByPokemonNom, pokemonByName, itemsByName, playerItems?.inventory])
 
+  // Objet de la première évolution avec condition (indépendant de la disponibilité
+  // actuelle) — sert à remplacer le token "[objet]" dans les libellés de la jauge XP,
+  // ex : "Évo. possible [objet]" -> texte + icône de l'objet requis.
+  const evolutionConditionItem = useMemo(() => {
+    if (!pokemon || !evolutionsByPokemonNom || !itemsByName) return null
+    const rows = evolutionsByPokemonNom.get(pokemon.nom) ?? []
+    const itemNom = rows.find((r) => r.condition_item_nom)?.condition_item_nom
+    return itemNom ? itemsByName.get(itemNom) ?? null : null
+  }, [pokemon, evolutionsByPokemonNom, itemsByName])
+
   const handleEvolveClick = (opt: EvolutionOption) => {
     if (evolving != null || !onEvolve) return
 
@@ -237,12 +247,21 @@ function OwnedVitals({
         </div>
       )}
 
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col">
         <HpGauge current={hp} max={maxHp} onChange={handleSetHp} />
         {maxXp != null ? (
-          <XpGauge xp={playerPokemon.xp} max={maxXp} milestones={milestones} onXpChange={handleXpChange} />
+          <div className="mt-3">
+            <XpGauge
+              xp={playerPokemon.xp}
+              max={maxXp}
+              milestones={milestones}
+              onXpChange={handleXpChange}
+              evolutionItemIconUrl={evolutionConditionItem?.image_url ?? null}
+              evolutionItemName={evolutionConditionItem?.nom ?? null}
+            />
+          </div>
         ) : (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 mt-3">
             <span className="text-ink-muted-2 text-xs">Expérience</span>
             <button
               onClick={() => handleXpChange(Math.max(0, playerPokemon.xp - 1))}
@@ -277,13 +296,21 @@ function OwnedVitals({
                     : 'bg-[#3a3c58] text-[#7a7c9a] border-2 border-[#6a6a6a] cursor-not-allowed'
                 }`}
               >
-                {opt.conditionItem?.image_url && (
+                {opt.conditionItem?.image_url ? (
                   <img
                     src={opt.conditionItem.image_url}
                     alt=""
                     className={`w-6 h-6 object-contain ${opt.clickable ? '' : 'grayscale opacity-60'}`}
                   />
-                )}
+                ) : opt.targetSpecies?.image_miniature ? (
+                  // Pas d'objet requis : plusieurs évolutions peuvent être proposées au choix du
+                  // joueur (ex : Évoli) — l'icône de l'espèce cible permet de les distinguer.
+                  <img
+                    src={opt.targetSpecies.image_miniature}
+                    alt=""
+                    className={`pixelated w-6 h-6 object-contain ${opt.clickable ? '' : 'grayscale opacity-60'}`}
+                  />
+                ) : null}
                 ✨ ÉVOLUTION !
               </button>
             ))}

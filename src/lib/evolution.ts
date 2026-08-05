@@ -1,5 +1,5 @@
 import type { Pokemon, PlayerPokemon, PokemonEvolution, Item, PlayerItem } from '../types'
-import { getMilestones } from './xpBonuses'
+import { getMilestones, ITEM_TOKEN } from './xpBonuses'
 
 export interface EvolutionOption {
   evolution: PokemonEvolution
@@ -18,12 +18,20 @@ function findTriggerXp(pokemon: Pokemon | undefined, matches: (label: string) =>
   return xps.length ? Math.min(...xps) : null
 }
 
+// "Évo" / "Évo." sont acceptés comme abréviation de "Évolution" (label déjà trim/lowercase ici)
+// pour permettre des libellés plus courts dans la jauge XP.
+const isEvolutionWord = (label: string) => label === 'évolution' || label === 'évo' || label === 'évo.'
+const startsWithEvolutionWord = (label: string) =>
+  label.startsWith('évolution') || label.startsWith('évo.') || label.startsWith('évo ')
+
 // Options d'évolution disponibles pour une instance possédée. Le palier XP qui
 // déclenche l'affichage n'est pas forcément le dernier de la jauge : c'est celui
-// dont le libellé vaut exactement "Évolution" (évolutions sans objet requis) ou
-// commence par "Évolution" et contient "possible" (évolutions avec objet requis,
-// ex : "Évolution possible (Pierre Feu)") — tout autre texte (ex : "Évolution
-// aléatoire") est ignoré, le MJ gère ce cas manuellement.
+// dont le libellé vaut exactement "Évolution"/"Évo"/"Évo." (évolutions sans objet
+// requis) ou commence par l'un de ces mots et contient "possible" et/ou le token
+// "[objet]" (évolutions avec objet requis — "Évolution possible (Pierre Feu)",
+// "Évo. possible [objet]", "Évolution [objet]" et "Évo [objet]" sont tous équivalents)
+// — tout autre texte (ex : "Évolution aléatoire") est ignoré, le MJ gère ce cas
+// manuellement.
 export function getEvolutionOptions(
   playerPokemon: PlayerPokemon,
   pokemon: Pokemon | undefined,
@@ -35,8 +43,8 @@ export function getEvolutionOptions(
   const rows = evolutionsByPokemonNom.get(playerPokemon.pokemon_nom) ?? []
   if (rows.length === 0) return []
 
-  const noConditionXp = findTriggerXp(pokemon, (l) => l === 'évolution')
-  const conditionXp = findTriggerXp(pokemon, (l) => l.startsWith('évolution') && l.includes('possible'))
+  const noConditionXp = findTriggerXp(pokemon, isEvolutionWord)
+  const conditionXp = findTriggerXp(pokemon, (l) => startsWithEvolutionWord(l) && (l.includes('possible') || l.includes(ITEM_TOKEN)))
   const noConditionReady = noConditionXp != null && playerPokemon.xp >= noConditionXp
   const conditionReady = conditionXp != null && playerPokemon.xp >= conditionXp
 

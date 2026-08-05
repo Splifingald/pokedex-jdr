@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { CampaignSession, Player, CarteLocation, Attack, Item, Pokemon, Encounter, DisplayAsset, DisplayState } from '../../types'
+import type { CampaignSession, CampaignChapter, Player, CarteLocation, Attack, Item, Pokemon, Encounter, DisplayAsset, DisplayState } from '../../types'
 import { EMPTY_CHAPTER_CONTENT } from '../../types'
 import type { ReferenceEntry, ReferenceIndex } from '../../hooks/useReferenceIndex'
 import type { UpdateDisplayState } from '../../lib/displayActions'
@@ -37,6 +37,9 @@ interface Props {
   playersByName: Map<string, Player>
   locationsByName: Map<string, CarteLocation>
   encountersByLieu: Map<string, Encounter[]>
+  chaptersByName: Map<string, CampaignChapter>
+  onToggleChapterDone: (chapter: CampaignChapter) => void
+  onSaveChapterNotes: (chapter: CampaignChapter, notes: CampaignChapter['notes']) => void
   displayState: DisplayState
   displayAssets: DisplayAsset[]
   updateDisplayState: UpdateDisplayState
@@ -56,6 +59,9 @@ export function SessionDetailView({
   playersByName,
   locationsByName,
   encountersByLieu,
+  chaptersByName,
+  onToggleChapterDone,
+  onSaveChapterNotes,
   displayState,
   displayAssets,
   updateDisplayState,
@@ -106,6 +112,9 @@ export function SessionDetailView({
         playersByName={playersByName}
         locationsByName={locationsByName}
         encountersByLieu={encountersByLieu}
+        chaptersByName={chaptersByName}
+        onToggleChapterDone={onToggleChapterDone}
+        onSaveChapterNotes={onSaveChapterNotes}
         displayState={displayState}
         displayAssets={displayAssets}
         updateDisplayState={updateDisplayState}
@@ -347,6 +356,9 @@ export function SessionDetailView({
           playersByName={playersByName}
           locationsByName={locationsByName}
           encountersByLieu={encountersByLieu}
+          chaptersByName={chaptersByName}
+          onToggleChapterDone={onToggleChapterDone}
+          onSaveChapterNotes={onSaveChapterNotes}
           displayState={displayState}
           displayAssets={displayAssets}
           updateDisplayState={updateDisplayState}
@@ -367,6 +379,9 @@ export function SessionDetailView({
           playersByName={playersByName}
           locationsByName={locationsByName}
           encountersByLieu={encountersByLieu}
+          chaptersByName={chaptersByName}
+          onToggleChapterDone={onToggleChapterDone}
+          onSaveChapterNotes={onSaveChapterNotes}
           displayState={displayState}
           displayAssets={displayAssets}
           updateDisplayState={updateDisplayState}
@@ -394,6 +409,10 @@ export function SessionDetailView({
         playersByName={playersByName}
         locationsByName={locationsByName}
         encountersByLieu={encountersByLieu}
+        chaptersByName={chaptersByName}
+        referenceIndex={referenceIndex}
+        onToggleChapterDone={onToggleChapterDone}
+        onSaveChapterNotes={onSaveChapterNotes}
         displayState={displayState}
         displayAssets={displayAssets}
         updateDisplayState={updateDisplayState}

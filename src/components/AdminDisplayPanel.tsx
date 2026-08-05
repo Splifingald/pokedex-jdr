@@ -60,7 +60,7 @@ export function AdminDisplayPanel() {
   }
 
   return (
-    <div className={`${PANEL} max-w-3xl w-full p-6`}>
+    <div className={`${PANEL} w-full p-6`}>
       <div className="flex items-center justify-between gap-2 mb-5">
         <div className="flex items-center gap-2">
           <PixelIcon src={DISPLAY_ICON} size={24} />
@@ -74,17 +74,8 @@ export function AdminDisplayPanel() {
         </button>
       </div>
 
-      <div className="mb-5 w-full max-w-lg aspect-video border-4 border-ink rounded-[var(--radius-pixel)] overflow-hidden shadow-[var(--shadow-pixel)]">
-        <DisplayCanvas
-          backgroundUrl={preview.backgroundUrl}
-          npcs={preview.npcs}
-          pokemons={preview.pokemons}
-          items={preview.items}
-          className="w-full h-full"
-        />
-      </div>
-
-      <div className="flex flex-col gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_22rem] gap-5 items-start">
+        <div className="order-2 lg:order-1 flex flex-col gap-5">
         <div>
           <label className="text-ink-muted-2 text-sm block mb-1">Fond d'écran</label>
           {selectedBackground && !state.background_url && (
@@ -209,6 +200,19 @@ export function AdminDisplayPanel() {
               <ItemSearchInput options={availableItems} onSelect={addItem} />
             )
           )}
+        </div>
+        </div>
+
+        <div className="order-1 lg:order-2 lg:sticky lg:top-4">
+          <div className="w-full aspect-video border-4 border-ink rounded-[var(--radius-pixel)] overflow-hidden shadow-[var(--shadow-pixel)]">
+            <DisplayCanvas
+              backgroundUrl={preview.backgroundUrl}
+              npcs={preview.npcs}
+              pokemons={preview.pokemons}
+              items={preview.items}
+              className="w-full h-full"
+            />
+          </div>
         </div>
       </div>
     </div>

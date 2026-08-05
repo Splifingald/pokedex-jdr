@@ -109,6 +109,9 @@ interface Props {
   playersByName: Map<string, Player>
   locationsByName: Map<string, CarteLocation>
   encountersByLieu: Map<string, Encounter[]>
+  chaptersByName?: Map<string, CampaignChapter>
+  onToggleChapterDone?: (chapter: CampaignChapter) => void
+  onSaveChapterNotes?: (chapter: CampaignChapter, notes: CampaignChapter['notes']) => void
   displayState: DisplayState
   displayAssets: DisplayAsset[]
   updateDisplayState: UpdateDisplayState
@@ -126,6 +129,9 @@ export function SessionViewPopup({
   playersByName,
   locationsByName,
   encountersByLieu,
+  chaptersByName,
+  onToggleChapterDone,
+  onSaveChapterNotes,
   displayState,
   displayAssets,
   updateDisplayState,
@@ -184,6 +190,10 @@ export function SessionViewPopup({
         playersByName={playersByName}
         locationsByName={locationsByName}
         encountersByLieu={encountersByLieu}
+        chaptersByName={chaptersByName}
+        referenceIndex={referenceIndex}
+        onToggleChapterDone={onToggleChapterDone}
+        onSaveChapterNotes={onSaveChapterNotes}
         displayState={displayState}
         displayAssets={displayAssets}
         updateDisplayState={updateDisplayState}

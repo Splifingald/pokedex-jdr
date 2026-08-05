@@ -1,13 +1,19 @@
 import { useState, useEffect } from 'react'
 import { useAdminParameters } from '../hooks/useAdminParameters'
+import { useCasinoConfig } from '../hooks/useCasinoConfig'
 import { useDisplayAssets } from '../hooks/useDisplayAssets'
 import { NumberInput } from './NumberInput'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
+import { STAT_LABELS, STAT_ICON_URL_KEY, STAT_DESCRIPTION_KEY, type StatKey } from '../lib/statPoints'
 
 const CUSTOM_BACKGROUND = '__custom__'
 
+const CARD = 'bg-cream-secondary border-2 border-ink rounded-[var(--radius-pixel)] p-4 mb-4 break-inside-avoid-column'
+const CARD_TITLE = 'text-[#a3841a] text-base font-bold mb-3'
+
 export function AdminParametersPanel() {
   const { parameters, loading, updateParameters } = useAdminParameters()
+  const { config: casinoConfig, updateConfig: updateCasinoConfig } = useCasinoConfig()
   const { backgrounds, mapAddOns, loading: backgroundsLoading } = useDisplayAssets()
   const [maxMoves, setMaxMoves] = useState(parameters.max_moves)
   const [maxTeamSize, setMaxTeamSize] = useState(parameters.max_team_size)
@@ -120,7 +126,7 @@ export function AdminParametersPanel() {
   }
 
   return (
-    <div className="bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] max-w-sm w-full p-6">
+    <div className="bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] w-full p-6">
       <div className="flex items-center gap-2 mb-5">
         <span className="text-2xl">⚙️</span>
         <h3 className="text-[#a3841a] text-lg font-bold">Paramètres</h3>
@@ -129,32 +135,40 @@ export function AdminParametersPanel() {
       {loading ? (
         <p className="text-ink-muted-2 text-sm">Chargement…</p>
       ) : (
-        <div className="flex flex-col gap-4">
-          <div>
-            <label className="text-ink-muted-2 text-sm block mb-1">Nombre max de capacités par pokémon</label>
-            <NumberInput
-              min={1}
-              fallback={1}
-              value={maxMoves}
-              onCommit={commitMaxMoves}
-              className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="text-ink-muted-2 text-sm block mb-1">Taille max de l'équipe</label>
-            <NumberInput
-              min={1}
-              fallback={1}
-              value={maxTeamSize}
-              onCommit={commitMaxTeamSize}
-              className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
-            />
-          </div>
-
-          <div className="border-t-2 border-[#cfc7a8] pt-4">
-            <p className="text-ink-muted-2 text-sm mb-2">Règles de stats des joueurs</p>
+        <div className="columns-1 md:columns-3 gap-4">
+          {/* Pokémon */}
+          <div className={CARD}>
+            <p className={CARD_TITLE}>Pokémon</p>
             <div className="flex flex-col gap-3">
+              <div>
+                <label className="text-ink-muted-2 text-sm block mb-1">Nombre max de capacités par pokémon</label>
+                <NumberInput
+                  min={1}
+                  fallback={1}
+                  value={maxMoves}
+                  onCommit={commitMaxMoves}
+                  className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-ink-muted-2 text-sm block mb-1">Taille max de l'équipe</label>
+                <NumberInput
+                  min={1}
+                  fallback={1}
+                  value={maxTeamSize}
+                  onCommit={commitMaxTeamSize}
+                  className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Joueurs */}
+          <div className={CARD}>
+            <p className={CARD_TITLE}>Joueurs</p>
+            <div className="flex flex-col gap-3">
+              <p className="text-ink-muted-2 text-xs -mt-1">Règles de stats des joueurs</p>
               <div>
                 <label className="text-ink-muted-2 text-sm block mb-1">Points de stats de base (niveau 1)</label>
                 <NumberInput
@@ -195,98 +209,128 @@ export function AdminParametersPanel() {
                   className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
                 />
               </div>
+
+              <div className="border-t-2 border-[#cfc7a8] pt-3 flex flex-col gap-3">
+                <p className="text-ink-muted-2 text-xs -mt-1">Icône et description par stat</p>
+                {(Object.keys(STAT_LABELS) as StatKey[]).map((key) => (
+                  <div key={key} className="flex flex-col gap-1.5">
+                    <span className="text-ink text-sm font-bold">{STAT_LABELS[key]}</span>
+                    <input
+                      type="text"
+                      defaultValue={parameters[STAT_ICON_URL_KEY[key]] as string}
+                      onBlur={(e) => updateParameters({ [STAT_ICON_URL_KEY[key]]: e.target.value })}
+                      placeholder="Lien de l'icône"
+                      className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+                    />
+                    <textarea
+                      defaultValue={parameters[STAT_DESCRIPTION_KEY[key]] as string}
+                      onBlur={(e) => updateParameters({ [STAT_DESCRIPTION_KEY[key]]: e.target.value })}
+                      placeholder="Description"
+                      rows={2}
+                      className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none resize-y"
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 
-          <div className="border-t-2 border-[#cfc7a8] pt-4">
-            <label className="text-ink-muted-2 text-sm block mb-1">Lien de l'image de la carte</label>
-            <input
-              type="text"
-              value={carteImageUrl}
-              onChange={(e) => setCarteImageUrl(e.target.value)}
-              onBlur={saveCarte}
-              placeholder="https://…"
-              className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="text-ink-muted-2 text-sm block mb-1">Lien de l'image des couleurs</label>
-            <input
-              type="text"
-              value={carteCouleursImageUrl}
-              onChange={(e) => setCarteCouleursImageUrl(e.target.value)}
-              onBlur={saveCarte}
-              placeholder="https://…"
-              className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
-            />
-          </div>
-
-          <div className="border-t-2 border-[#cfc7a8] pt-4">
-            <label className="text-ink-muted-2 text-sm block mb-1">Éléments superposés à la carte</label>
-            {backgroundsLoading ? (
-              <p className="text-ink-muted-2 text-sm">Chargement…</p>
-            ) : (
-              <>
-                {parameters.map_addon_image_urls.length > 0 && (
-                  <div className="flex flex-col gap-2 mb-2">
-                    {parameters.map_addon_image_urls.map((url, i) => {
-                      const asset = mapAddOns.find((a) => a.image_url === url)
-                      return (
-                        <div key={`${url}-${i}`} className="flex items-center gap-2 bg-white border-2 border-ink rounded px-2 py-1.5">
-                          <img src={url} alt="" className="w-10 h-10 object-contain rounded shrink-0 bg-[#00000010]" />
-                          <span className="text-ink text-sm flex-1 truncate">{asset?.nom ?? url}</span>
-                          <button
-                            onClick={() => moveMapAddon(i, -1)}
-                            disabled={i === 0}
-                            title="Monter"
-                            className={`w-6 h-6 shrink-0 rounded text-xs font-bold disabled:opacity-30 ${BUTTON_STYLE.gray}`}
-                          >
-                            ▲
-                          </button>
-                          <button
-                            onClick={() => moveMapAddon(i, 1)}
-                            disabled={i === parameters.map_addon_image_urls.length - 1}
-                            title="Descendre"
-                            className={`w-6 h-6 shrink-0 rounded text-xs font-bold disabled:opacity-30 ${BUTTON_STYLE.gray}`}
-                          >
-                            ▼
-                          </button>
-                          <button
-                            onClick={() => removeMapAddon(i)}
-                            title="Retirer"
-                            className={`w-6 h-6 shrink-0 rounded text-xs font-bold ${BUTTON_STYLE.gray}`}
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-
-                <select
-                  value=""
-                  onChange={(e) => { if (e.target.value) addMapAddon(e.target.value) }}
+          {/* Carte */}
+          <div className={CARD}>
+            <p className={CARD_TITLE}>Carte</p>
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="text-ink-muted-2 text-sm block mb-1">Lien de l'image de la carte</label>
+                <input
+                  type="text"
+                  value={carteImageUrl}
+                  onChange={(e) => setCarteImageUrl(e.target.value)}
+                  onBlur={saveCarte}
+                  placeholder="https://…"
                   className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
-                >
-                  <option value="">+ Ajouter un élément…</option>
-                  {mapAddOns
-                    .filter((a) => !parameters.map_addon_image_urls.includes(a.image_url))
-                    .map((a) => (
-                      <option key={a.id} value={a.image_url}>{a.nom}</option>
-                    ))}
-                </select>
+                />
+              </div>
 
-                <p className="text-ink-muted-2 text-xs mt-1">
-                  Gérés via Import CSV (colonnes « Nom » / « Type » = Map Add-On / « Image »). Le premier élément de la liste est superposé en dessous, le dernier au-dessus.
-                </p>
-              </>
-            )}
+              <div>
+                <label className="text-ink-muted-2 text-sm block mb-1">Lien de l'image des couleurs</label>
+                <input
+                  type="text"
+                  value={carteCouleursImageUrl}
+                  onChange={(e) => setCarteCouleursImageUrl(e.target.value)}
+                  onBlur={saveCarte}
+                  placeholder="https://…"
+                  className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+                />
+              </div>
+
+              <div className="border-t-2 border-[#cfc7a8] pt-3">
+                <label className="text-ink-muted-2 text-sm block mb-1">Éléments superposés à la carte</label>
+                {backgroundsLoading ? (
+                  <p className="text-ink-muted-2 text-sm">Chargement…</p>
+                ) : (
+                  <>
+                    {parameters.map_addon_image_urls.length > 0 && (
+                      <div className="flex flex-col gap-2 mb-2">
+                        {parameters.map_addon_image_urls.map((url, i) => {
+                          const asset = mapAddOns.find((a) => a.image_url === url)
+                          return (
+                            <div key={`${url}-${i}`} className="flex items-center gap-2 bg-white border-2 border-ink rounded px-2 py-1.5">
+                              <img src={url} alt="" className="w-10 h-10 object-contain rounded shrink-0 bg-[#00000010]" />
+                              <span className="text-ink text-sm flex-1 truncate">{asset?.nom ?? url}</span>
+                              <button
+                                onClick={() => moveMapAddon(i, -1)}
+                                disabled={i === 0}
+                                title="Monter"
+                                className={`w-6 h-6 shrink-0 rounded text-xs font-bold disabled:opacity-30 ${BUTTON_STYLE.gray}`}
+                              >
+                                ▲
+                              </button>
+                              <button
+                                onClick={() => moveMapAddon(i, 1)}
+                                disabled={i === parameters.map_addon_image_urls.length - 1}
+                                title="Descendre"
+                                className={`w-6 h-6 shrink-0 rounded text-xs font-bold disabled:opacity-30 ${BUTTON_STYLE.gray}`}
+                              >
+                                ▼
+                              </button>
+                              <button
+                                onClick={() => removeMapAddon(i)}
+                                title="Retirer"
+                                className={`w-6 h-6 shrink-0 rounded text-xs font-bold ${BUTTON_STYLE.gray}`}
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+
+                    <select
+                      value=""
+                      onChange={(e) => { if (e.target.value) addMapAddon(e.target.value) }}
+                      className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+                    >
+                      <option value="">+ Ajouter un élément…</option>
+                      {mapAddOns
+                        .filter((a) => !parameters.map_addon_image_urls.includes(a.image_url))
+                        .map((a) => (
+                          <option key={a.id} value={a.image_url}>{a.nom}</option>
+                        ))}
+                    </select>
+
+                    <p className="text-ink-muted-2 text-xs mt-1">
+                      Gérés via Import CSV (colonnes « Nom » / « Type » = Map Add-On / « Image »). Le premier élément de la liste est superposé en dessous, le dernier au-dessus.
+                    </p>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
 
-          <div className="border-t-2 border-[#cfc7a8] pt-4">
-            <label className="text-ink-muted-2 text-sm block mb-1">Fond d'écran de l'accueil</label>
+          {/* Fond d'écran d'accueil */}
+          <div className={CARD}>
+            <p className={CARD_TITLE}>Fond d'écran d'accueil</p>
             {backgroundsLoading ? (
               <p className="text-ink-muted-2 text-sm">Chargement…</p>
             ) : (
@@ -330,8 +374,9 @@ export function AdminParametersPanel() {
             )}
           </div>
 
-          <div className="border-t-2 border-[#cfc7a8] pt-4">
-            <p className="text-ink-muted-2 text-sm mb-2">Fonctionnalités</p>
+          {/* Features */}
+          <div className={CARD}>
+            <p className={CARD_TITLE}>Features</p>
             <div className="flex flex-col gap-2">
               <label className="flex items-center gap-2 text-sm text-ink-muted">
                 <input
@@ -390,11 +435,38 @@ export function AdminParametersPanel() {
               <label className="flex items-center gap-2 text-sm text-ink-muted">
                 <input
                   type="checkbox"
-                  checked={parameters.feature_casino_enabled}
-                  onChange={(e) => updateParameters({ feature_casino_enabled: e.target.checked })}
+                  checked={casinoConfig.slots_enabled}
+                  onChange={(e) => updateCasinoConfig({ slots_enabled: e.target.checked })}
                   className="w-4 h-4"
                 />
-                Casino
+                Casino — {casinoConfig.slots_nom}
+              </label>
+              <label className="flex items-center gap-2 text-sm text-ink-muted">
+                <input
+                  type="checkbox"
+                  checked={casinoConfig.dice_enabled}
+                  onChange={(e) => updateCasinoConfig({ dice_enabled: e.target.checked })}
+                  className="w-4 h-4"
+                />
+                Casino — {casinoConfig.dice_nom}
+              </label>
+              <label className="flex items-center gap-2 text-sm text-ink-muted">
+                <input
+                  type="checkbox"
+                  checked={parameters.feature_minijeux_enabled}
+                  onChange={(e) => updateParameters({ feature_minijeux_enabled: e.target.checked })}
+                  className="w-4 h-4"
+                />
+                Pêche Magicarpe
+              </label>
+              <label className="flex items-center gap-2 text-sm text-ink-muted">
+                <input
+                  type="checkbox"
+                  checked={parameters.feature_mining_enabled}
+                  onChange={(e) => updateParameters({ feature_mining_enabled: e.target.checked })}
+                  className="w-4 h-4"
+                />
+                Fouille
               </label>
             </div>
           </div>

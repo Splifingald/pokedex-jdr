@@ -14,7 +14,12 @@ export function useHistoryEvents() {
     setLoading(true)
     setError(null)
     try {
-      const { data, error } = await supabase.from('history_events').select('*').order('created_at')
+      // Tri décroissant + limite explicite : sans ça, PostgREST plafonne
+      // silencieusement à 1000 lignes par défaut, et un tri croissant sans
+      // limite renvoie alors les 1000 PLUS ANCIENNES lignes — les événements
+      // récents (comme un objet Fouille tout juste trouvé) n'apparaissent
+      // alors jamais, même après un rechargement complet de la page.
+      const { data, error } = await supabase.from('history_events').select('*').order('created_at', { ascending: false }).limit(2000)
       if (error) throw error
       setEvents((data as HistoryEvent[]) ?? [])
     } catch (err) {

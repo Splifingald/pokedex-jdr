@@ -1,5 +1,5 @@
-import type { Player, Pokemon, Item, HistoryInventoryPayload, HistoryPokedexPayload, HistoryTeamPayload, HistoryCombatPayload } from '../types'
-import { POKEDOLLAR_ITEM_NAME, TICKET_CASINO_ITEM_NAME } from '../types'
+import type { Player, Pokemon, Item, HistoryInventoryPayload, HistoryPokedexPayload, HistoryTeamPayload, HistoryCombatPayload, HistoryMinigamePayload, HistoryMiningPayload } from '../types'
+import { POKEDOLLAR_ITEM_NAME, TICKET_CASINO_ITEM_NAME, TICKET_TREMPETTE_ITEM_NAME, TICKET_MINING_ITEM_NAME } from '../types'
 import type { ReferenceEntry } from '../hooks/useReferenceIndex'
 import { getStatusInfo } from './status'
 import type { DisplayHistoryEntry } from './historyGrouping'
@@ -42,6 +42,8 @@ function pluralItemLabel(itemNom: string, n: number): string {
   if (n === 1) return itemNom
   if (itemNom === POKEDOLLAR_ITEM_NAME) return 'Pokédollars'
   if (itemNom === TICKET_CASINO_ITEM_NAME) return 'Tickets Casino'
+  if (itemNom === TICKET_TREMPETTE_ITEM_NAME) return 'Tickets Trempette'
+  if (itemNom === TICKET_MINING_ITEM_NAME) return 'Tickets Fouille'
   return itemNom
 }
 
@@ -71,6 +73,10 @@ function inventorySentence(entry: DisplayHistoryEntry, ctx: SentenceContext): Se
       return [player, { text: ' a gagné ' }, { text: `${payload.delta} ` }, itemPart(ctx, payload.item_nom, payload.delta), { text: ' au jeu de Casino ' }, { text: payload.source }, totalSuffix]
     case 'item_casino_spend':
       return [player, { text: ' a dépensé ' }, { text: `${payload.delta} ` }, itemPart(ctx, payload.item_nom, payload.delta), { text: ' au jeu de Casino ' }, { text: payload.source }, totalSuffix]
+    case 'item_minigame_spend':
+      return [player, { text: ' a dépensé ' }, { text: `${payload.delta} ` }, itemPart(ctx, payload.item_nom, payload.delta), { text: ' au jeu ' }, { text: payload.source }, totalSuffix]
+    case 'item_mining_spend':
+      return [player, { text: ' a dépensé ' }, { text: `${payload.delta} ` }, itemPart(ctx, payload.item_nom, payload.delta), { text: ' au jeu ' }, { text: payload.source }, totalSuffix]
     default:
       return [player, { text: ' a modifié son inventaire' }, totalSuffix]
   }
@@ -117,6 +123,23 @@ function combatSentence(entry: DisplayHistoryEntry, ctx: SentenceContext): Sente
   return [player, { text: ' : ' }, pokemon, { text: payload.status_gained ? ` est ${lowered}` : ` n'est plus ${lowered}` }]
 }
 
+function minigameSentence(entry: DisplayHistoryEntry, ctx: SentenceContext): SentencePart[] {
+  const player = playerPart(ctx, entry.player_id)
+
+  if (entry.action_type === 'mining_item_found') {
+    const payload = entry.payload as HistoryMiningPayload
+    return [player, { text: ' a déterré ' }, itemPart(ctx, payload.item_nom, 1), { text: ' !' }]
+  }
+
+  const payload = entry.payload as HistoryMinigamePayload
+  const pokemon = pokemonPart(ctx, payload.pokemon_nom)
+  const starsLabel = `${payload.stars} étoile${payload.stars > 1 ? 's' : ''}`
+  return [
+    player, { text: ' : ' }, pokemon, { text: ' a gagné ' }, { text: `${payload.xp_delta} XP` },
+    { text: ` au jeu ${payload.game_nom} (score : ${payload.score}, ${starsLabel})` },
+  ]
+}
+
 export function buildSentenceParts(entry: DisplayHistoryEntry, ctx: SentenceContext): SentencePart[] {
   switch (entry.category) {
     case 'inventory':
@@ -127,6 +150,8 @@ export function buildSentenceParts(entry: DisplayHistoryEntry, ctx: SentenceCont
       return teamSentence(entry, ctx)
     case 'combat':
       return combatSentence(entry, ctx)
+    case 'minigame':
+      return minigameSentence(entry, ctx)
     default:
       return [{ text: '' }]
   }

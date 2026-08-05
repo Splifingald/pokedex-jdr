@@ -29,9 +29,11 @@ export function ItemReferencePopup({ item, pokedollarImageUrl, displayBar, onClo
               {item.rarete}
             </span>
           )}
-          <span className="text-[#a3841a] text-sm font-bold flex items-center gap-1">
-            <PokedollarIcon imageUrl={pokedollarImageUrl} size={16} /> {item.cout}
-          </span>
+          {item.achat > 0 && (
+            <span className="text-[#a3841a] text-sm font-bold flex items-center gap-1">
+              <PokedollarIcon imageUrl={pokedollarImageUrl} size={16} /> {item.achat}
+            </span>
+          )}
         </div>
         {item.description && (
           <p className="text-ink-muted text-sm">{item.description}</p>

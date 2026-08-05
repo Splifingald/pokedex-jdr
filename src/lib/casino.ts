@@ -46,6 +46,26 @@ export function computeTicketRegen(
   }
 }
 
+// Formate un delta en millisecondes en "Xh YYm ZZs" (ou "Ym ZZs" sous l'heure) —
+// utilisé par tout compte à rebours de ticket (Casino, Mini-Jeux).
+export function formatCountdown(ms: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000))
+  const h = Math.floor(totalSeconds / 3600)
+  const m = Math.floor((totalSeconds % 3600) / 60)
+  const s = totalSeconds % 60
+  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`
+  return `${m}m ${String(s).padStart(2, '0')}s`
+}
+
+// Variante compacte "XXhXXm" (heures+minutes uniquement, zéro-paddées, sans
+// secondes) — utilisée par l'en-tête compact de Fouille ("+1 dans XXhXXm").
+export function formatCountdownHM(ms: number): string {
+  const totalMinutes = Math.max(0, Math.ceil(ms / 60000))
+  const h = Math.floor(totalMinutes / 60)
+  const m = totalMinutes % 60
+  return `${String(h).padStart(2, '0')}h${String(m).padStart(2, '0')}m`
+}
+
 const SLOT_SYMBOLS: SlotSymbol[] = ['pokeball', 'superball', 'hyperball', 'masterball']
 
 const SLOT_WEIGHT_KEY: Record<SlotSymbol, keyof CasinoConfig> = {
@@ -146,16 +166,17 @@ export function rollDicePair(): [number, number] {
   return [1 + Math.floor(Math.random() * 6), 1 + Math.floor(Math.random() * 6)]
 }
 
-// L'IA continue de lancer tant qu'elle n'a pas atteint sa cible secrète — et,
-// comme le joueur joue toujours en premier et que son total final est donc déjà
-// connu, elle continue aussi tant qu'elle reste derrière lui même après avoir
+// Utilisé quand l'IA joue en second (elle connaît déjà le total du joueur) :
+// elle continue de lancer tant qu'elle n'a pas atteint sa cible secrète, et
+// continue aussi tant qu'elle reste derrière le joueur même après avoir
 // atteint sa cible (elle ne s'arrête que si elle a atteint sa cible ET égalé/dépassé le joueur).
 export function shouldAiHit(aiTotal: number, target: number, playerTotal: number): boolean {
   return aiTotal < target || aiTotal < playerTotal
 }
 
-// Utilisé uniquement pour éviter une égalité : force un lancer qui fait dépasser 21
-// à l'IA (elle "triche" en perdant), garantissant que le joueur gagne les égalités.
+// Utilisé quand l'IA joue en second, uniquement pour éviter une égalité : force un
+// lancer qui fait dépasser 21 à l'IA (elle "triche" en perdant), garantissant que
+// le joueur gagne les égalités.
 export function forceAiBustRoll(aiTotal: number): [number, number] {
   const needed = Math.max(2, 22 - aiTotal)
   const die1 = Math.min(6, needed - 1)
@@ -174,10 +195,11 @@ export interface AiTurnResult {
   outcome: 'win' | 'lose'
 }
 
-// Simule tout le tour de l'IA d'un coup (elle relance tant qu'elle n'a pas
-// atteint sa cible secrète), puis compare au total du joueur. Une égalité est
-// impossible par conception : l'IA "triche" avec un lancer forcé qui la fait
-// dépasser 21, garantissant la victoire du joueur.
+// Utilisé quand l'IA joue en second (le total du joueur est déjà connu). Simule
+// tout le tour de l'IA d'un coup (elle relance tant qu'elle n'a pas atteint sa
+// cible secrète), puis compare au total du joueur. Une égalité est impossible
+// par conception : l'IA "triche" avec un lancer forcé qui la fait dépasser 21,
+// garantissant la victoire du joueur.
 export function simulateAiTurn(startAiTotal: number, target: number, playerTotal: number): AiTurnResult {
   let total = startAiTotal
   const steps: AiRollStep[] = []
@@ -204,6 +226,28 @@ export function simulateAiTurn(startAiTotal: number, target: number, playerTotal
   return { steps, outcome: 'win' }
 }
 
+export interface AiSoloTurnResult {
+  steps: AiRollStep[]
+  busted: boolean
+}
+
+// Utilisé quand l'IA joue en premier (le total du joueur n'existe pas encore) :
+// elle relance à l'aveugle tant qu'elle n'a pas atteint sa cible secrète, sans
+// pouvoir réagir à un total adverse. Contrairement à simulateAiTurn, pas de
+// triche anti-égalité ici — l'issue de la manche se décide ensuite, au tour du joueur.
+export function simulateAiSoloTurn(startAiTotal: number, target: number): AiSoloTurnResult {
+  let total = startAiTotal
+  const steps: AiRollStep[] = []
+
+  while (total <= 21 && total < target) {
+    const dice = rollDicePair()
+    total += dice[0] + dice[1]
+    steps.push({ dice, totalAfter: total })
+  }
+
+  return { steps, busted: total > 21 }
+}
+
 // Compare la date d'achat stockée (jour local "YYYY-MM-DD") au jour courant :
 // un jour différent réinitialise implicitement le plafond quotidien.
 export function isPurchaseCapReached(
@@ -228,6 +272,12 @@ export function localDateString(now: Date = new Date()): string {
 // supposent le même scénario fixe pour rester comparables entre elles : le joueur
 // joue "prudent" (il tire tant que son total n'atteint pas la cible max possible de
 // l'IA, puis reste) et pousse jusqu'à la dernière manche sans jamais encaisser avant.
+//
+// Ce modèle ne couvre que les manches où le joueur joue en premier (round 1, 3, 5…).
+// Depuis l'alternance du premier joueur par manche, les manches où l'IA joue en
+// premier (round 2, 4, 6…) sont strictement plus favorables au joueur (il voit le
+// total de l'IA avant de décider, et les égalités le favorisent) : le winProb/EV
+// ci-dessous sous-estiment donc légèrement la réalité sur une partie multi-manches.
 
 // Distribution du total final (ou bust) en lançant 2d6 répétés jusqu'à atteindre `target`
 // — même logique que l'IA (simulateAiTurn), réutilisée ici pour modéliser le joueur.

@@ -209,11 +209,20 @@ export interface AdminParameters {
   feature_inventory_enabled: boolean
   feature_map_enabled: boolean
   feature_gifting_enabled: boolean
-  feature_casino_enabled: boolean
+  feature_minijeux_enabled: boolean
+  feature_mining_enabled: boolean
   stat_points_base: number
   stat_min: number
   stat_max: number
   stat_points_per_level: number
+  stat_charisme_icon_url: string
+  stat_charisme_description: string
+  stat_intelligence_icon_url: string
+  stat_intelligence_description: string
+  stat_sagesse_icon_url: string
+  stat_sagesse_description: string
+  stat_dexterite_icon_url: string
+  stat_dexterite_description: string
 }
 
 // Fond par défaut de l'écran d'accueil (modifiable dans Admin → Paramètres)
@@ -226,7 +235,8 @@ export interface Item {
   nom: string
   type: string
   rarete: string | null
-  cout: number
+  achat: number
+  vente: number
   description: string | null
   image_url: string | null
 }
@@ -235,12 +245,13 @@ export interface ItemCsvRow {
   'Nom': string
   'Type': string
   'Rareté': string
-  'Coût': string
+  'Achat': string
+  'Vente': string
   'Description': string
   'Image': string
 }
 
-export const ITEM_CSV_REQUIRED_HEADERS: (keyof ItemCsvRow)[] = ['Nom', 'Type', 'Coût']
+export const ITEM_CSV_REQUIRED_HEADERS: (keyof ItemCsvRow)[] = ['Nom', 'Type', 'Achat']
 
 export interface PlayerItem {
   id: number
@@ -251,7 +262,6 @@ export interface PlayerItem {
 }
 
 export const POKEDOLLAR_ITEM_NAME = 'Pokédollar'
-export const sellValue = (cout: number) => Math.floor(cout / 2)
 
 // ── Évolutions ────────────────────────────────────────────────
 export interface PokemonEvolution {
@@ -353,6 +363,164 @@ export interface CasinoPlayerState {
   created_at: string
 }
 
+// ── Mini-Jeux ──────────────────────────────────────────────────
+export const TICKET_TREMPETTE_ITEM_NAME = 'Ticket Trempette'
+
+export interface MinigamesConfig {
+  id: number
+  // Économie des tickets
+  ticket_max: number
+  ticket_regen_amount: number
+  ticket_regen_unit: GiftTimerUnit
+  ticket_buy_cost: number
+  ticket_daily_buy_cap: number
+  ticket_full_notify_enabled: boolean
+  // Jeu 1 : Magikarp (tap game)
+  magikarp_enabled: boolean
+  magikarp_nom: string
+  magikarp_icon_url: string
+  magikarp_banner_url: string
+  magikarp_numero: string
+  magikarp_duration_seconds: number
+  magikarp_star1_taps: number
+  magikarp_star2_taps: number
+  magikarp_star3_taps: number
+  magikarp_star1_xp: number
+  magikarp_star2_xp: number
+  magikarp_star3_xp: number
+}
+
+export interface MinigamesPlayerState {
+  player_id: number
+  next_ticket_at: string | null
+  purchase_count: number
+  purchase_date: string | null
+  ticket_full_notified: boolean
+  magikarp_high_score: number
+  created_at: string
+}
+
+// ── Fouille (mini-jeu collaboratif de fouille sur grille partagée) ─────
+export const TICKET_MINING_ITEM_NAME = 'Ticket Fouille'
+
+export interface MiningConfig {
+  id: number
+  // Économie des tickets
+  ticket_max: number
+  ticket_regen_amount: number
+  ticket_regen_unit: GiftTimerUnit
+  ticket_buy_cost: number
+  ticket_daily_buy_cap: number
+  ticket_full_notify_enabled: boolean
+  // Affichage
+  nom: string
+  icon_url: string
+  banner_url: string
+  hidden_cell_image_url: string
+  empty_cell_image_url: string
+  // Génération procédurale
+  grid_size_min: number
+  grid_size_max: number
+  fill_ratio_pct: number
+  move_budget_pct: number
+  // Grille personnalisée mise en file pour la prochaine génération (consommée une fois puis NULL)
+  next_custom_grid_id: number | null
+}
+
+export interface MiningPlayerState {
+  player_id: number
+  next_ticket_at: string | null
+  purchase_count: number
+  purchase_date: string | null
+  ticket_full_notified: boolean
+  created_at: string
+}
+
+// Bibliothèque d'objets pouvant apparaître sur une grille procédurale.
+export interface MiningItemDef {
+  id: number
+  item_nom: string
+  size: 1 | 2 | 3 | 4
+  weight: number
+  enabled: boolean
+  created_at: string
+}
+
+export interface MiningCustomGrid {
+  id: number
+  nom: string
+  size: number
+  move_budget: number
+  created_at: string
+}
+
+export interface MiningCustomGridItem {
+  id: number
+  custom_grid_id: number
+  item_nom: string
+  size: 1 | 2 | 3 | 4
+  origin_row: number
+  origin_col: number
+  created_at: string
+}
+
+export type MiningGridSource = 'procedural' | 'custom'
+
+// La grille en cours (une seule active à la fois, partagée par tous les joueurs).
+export interface MiningGrid {
+  id: number
+  size: number
+  move_budget: number
+  moves_used: number
+  source: MiningGridSource
+  custom_grid_id: number | null
+  is_active: boolean
+  created_at: string
+  ended_at: string | null
+}
+
+// Instance d'objet placé sur une grille (procédurale ou personnalisée) — suit
+// combien de cases il reste à découvrir avant d'être attribué au joueur qui
+// creuse la dernière.
+export interface MiningGridItem {
+  id: number
+  grid_id: number
+  item_nom: string
+  size: 1 | 2 | 3 | 4
+  origin_row: number
+  origin_col: number
+  cells_total: number
+  cells_remaining: number
+  completed: boolean
+  completed_by_player_id: number | null
+  completed_at: string | null
+}
+
+// Une ligne par case de la grille — voir supabase/schema.sql pour pourquoi
+// (fouilles simultanées sûres via UPDATE ... WHERE dug=false atomique).
+export interface MiningGridCell {
+  id: number
+  grid_id: number
+  cell_index: number // 0-indexé, row-major : index = row*size + col
+  item_id: number | null // null = case vide
+  dug: boolean
+  dug_by_player_id: number | null
+  dug_at: string | null
+}
+
+// Journal des coups joués sur la grille active, affiché en direct dans le
+// popup Fouille (distinct de history_events : seuls les objets complétés sont
+// aussi loggés globalement, pas chaque case creusée).
+export interface MiningMove {
+  id: number
+  grid_id: number
+  player_id: number
+  cell_index: number
+  item_id: number | null
+  item_completed: boolean
+  created_at: string
+}
+
 // ── Notifications Push ───────────────────────────────────────
 export interface PushSubscriptionRow {
   id: number
@@ -445,7 +613,7 @@ export const EMPTY_CHAPTER_CONTENT: import('@tiptap/core').JSONContent = {
 }
 
 // ── Historique (journal des actions joueurs) ──────────────────
-export type HistoryCategory = 'inventory' | 'pokedex' | 'team' | 'combat'
+export type HistoryCategory = 'inventory' | 'pokedex' | 'team' | 'combat' | 'minigame'
 
 export type HistoryActionType =
   | 'item_add'          // ajout générique (Sac, achat de ticket, recharge de tickets)
@@ -454,6 +622,10 @@ export type HistoryActionType =
   | 'item_gift'         // cadeau reçu d'un Pokémon
   | 'item_casino_win'   // gains au Casino
   | 'item_casino_spend' // ticket dépensé au Casino
+  | 'item_minigame_spend' // ticket Mini-Jeux dépensé
+  | 'item_mining_spend' // ticket Fouille dépensé
+  | 'minigame_xp_gain'  // XP crédité à un Pokémon via un Mini-Jeu
+  | 'mining_item_found' // objet entièrement déterré sur la grille de Fouille
   | 'pokedex_add'       // espèce découverte
   | 'pokemon_new'       // nouveau Pokémon obtenu (équipe ou PC)
   | 'pokemon_move'      // Pokémon existant déplacé équipe <-> PC
@@ -496,11 +668,30 @@ export interface HistoryCombatPayload {
   status_gained?: boolean  // true = statut appliqué, false = statut retiré
 }
 
+export interface HistoryMinigamePayload {
+  game_nom: string        // ex: config.magikarp_nom
+  pokemon_nom: string     // espèce créditée (ex: 'Magicarpe')
+  player_pokemon_id: number
+  nickname: string | null
+  xp_delta: number
+  xp_total: number
+  score: number            // score brut de la partie (nb de taps)
+  stars: number             // étoiles obtenues sur cette partie
+}
+
+export interface HistoryMiningPayload {
+  item_nom: string
+  grid_id: number
+  grid_size: number
+}
+
 export type HistoryPayload =
   | HistoryInventoryPayload
   | HistoryPokedexPayload
   | HistoryTeamPayload
   | HistoryCombatPayload
+  | HistoryMinigamePayload
+  | HistoryMiningPayload
 
 export interface HistoryEvent {
   id: number
