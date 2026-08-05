@@ -187,6 +187,12 @@ export interface PlayerPokemon {
   next_gift_at: string | null
   gift_notified: boolean
   gift_notified_at: string | null
+  in_daycare: boolean
+  daycare_placed_at: string | null
+  daycare_last_tick_at: string | null
+  daycare_lifetime_xp: number
+  daycare_capped: boolean
+  daycare_capped_notified: boolean
   created_at: string
 }
 
@@ -211,6 +217,7 @@ export interface AdminParameters {
   feature_gifting_enabled: boolean
   feature_minijeux_enabled: boolean
   feature_mining_enabled: boolean
+  feature_pension_enabled: boolean
   stat_points_base: number
   stat_min: number
   stat_max: number
@@ -521,6 +528,98 @@ export interface MiningMove {
   created_at: string
 }
 
+// ── Pension Pokémon (garderie collaborative) ────────────────────
+export interface PensionConfig {
+  id: number
+  nom: string
+  icon_url: string
+  banner_url: string
+  capacity_total: number
+  tick_xp_amount: number
+  tick_interval_amount: number
+  tick_interval_unit: GiftTimerUnit
+  default_lifetime_xp_cap: number
+  default_hatch_timer_min: number
+  default_hatch_timer_max: number
+  default_hatch_timer_unit: GiftTimerUnit
+}
+
+// 'default' = hérite de la réserve d'œufs par défaut (groupe sentinelle
+// DEFAULT_EGG_POOL_GROUP dans pension_egg_pool) ; 'custom' = utilise la propre
+// réserve du groupe (pension_egg_pool.groupe = ce groupe) ; 'none' = ce groupe
+// ne produit jamais d'œuf, même si la réserve par défaut n'est pas vide.
+export type PensionEggPoolMode = 'default' | 'custom' | 'none'
+
+// groupe = clé primaire (texte libre venu du CSV pokemon_egg_groups). Purement
+// dédié à l'éclosion (fourchette + réserve d'œufs) — les réglages XP (intervalle
+// de tick, plafond à vie) sont un concept entièrement séparé, voir PensionXpGroup.
+// Les champs nullable héritent de PensionConfig quand non renseignés.
+export interface PensionGroupConfig {
+  groupe: string
+  hatch_timer_min: number | null
+  hatch_timer_max: number | null
+  hatch_timer_unit: GiftTimerUnit | null
+  egg_pool_mode: PensionEggPoolMode
+  created_at: string
+}
+
+// Groupe XP — créé manuellement par l'admin (pas de CSV), entièrement
+// indépendant des groupes d'œufs. Une espèce appartient à au plus un groupe XP
+// (voir PensionXpGroupSpecies) ; toute espèce non assignée utilise les valeurs
+// par défaut de PensionConfig (tick_interval_amount/unit, default_lifetime_xp_cap).
+export interface PensionXpGroup {
+  id: number
+  nom: string
+  tick_interval_amount: number
+  tick_interval_unit: GiftTimerUnit
+  lifetime_xp_cap: number
+  created_at: string
+}
+
+// pokemon_nom = clé primaire : une espèce n'appartient qu'à un seul groupe XP à la fois.
+export interface PensionXpGroupSpecies {
+  pokemon_nom: string
+  xp_group_id: number
+  created_at: string
+}
+
+export interface PokemonEggGroup {
+  id: number
+  pokemon_nom: string
+  groupe: string
+  created_at: string
+}
+
+export interface PensionEggPoolEntry {
+  id: number
+  groupe: string
+  pokemon_nom: string
+  weight: number
+  created_at: string
+}
+
+// fixed_recipient_pokemon_id non-null uniquement pour un appariement ALL/TOUS
+// (l'œuf va toujours au propriétaire de CE pokémon, jamais un tirage 50/50)
+export interface PensionPair {
+  id: number
+  pokemon_a_id: number
+  pokemon_b_id: number
+  groupe: string
+  fixed_recipient_pokemon_id: number | null
+  paired_since: string
+  target_duration_seconds: number
+  created_at: string
+}
+
+export interface PokemonEggGroupCsvRow {
+  'Pokémon': string
+  'Groupe 1': string
+  'Groupe 2': string
+  'Groupe 3': string
+}
+
+export const POKEMON_EGG_GROUP_CSV_REQUIRED_HEADERS: (keyof PokemonEggGroupCsvRow)[] = ['Pokémon']
+
 // ── Notifications Push ───────────────────────────────────────
 export interface PushSubscriptionRow {
   id: number
@@ -613,7 +712,7 @@ export const EMPTY_CHAPTER_CONTENT: import('@tiptap/core').JSONContent = {
 }
 
 // ── Historique (journal des actions joueurs) ──────────────────
-export type HistoryCategory = 'inventory' | 'pokedex' | 'team' | 'combat' | 'minigame'
+export type HistoryCategory = 'inventory' | 'pokedex' | 'team' | 'combat' | 'minigame' | 'daycare'
 
 export type HistoryActionType =
   | 'item_add'          // ajout générique (Sac, achat de ticket, recharge de tickets)
@@ -626,6 +725,9 @@ export type HistoryActionType =
   | 'item_mining_spend' // ticket Fouille dépensé
   | 'minigame_xp_gain'  // XP crédité à un Pokémon via un Mini-Jeu
   | 'mining_item_found' // objet entièrement déterré sur la grille de Fouille
+  | 'daycare_drop_off'  // pokémon déposé à la Pension
+  | 'daycare_pickup'    // pokémon récupéré à la Pension
+  | 'daycare_egg_received' // œuf reçu à la Pension
   | 'pokedex_add'       // espèce découverte
   | 'pokemon_new'       // nouveau Pokémon obtenu (équipe ou PC)
   | 'pokemon_move'      // Pokémon existant déplacé équipe <-> PC
@@ -685,6 +787,14 @@ export interface HistoryMiningPayload {
   grid_size: number
 }
 
+export interface HistoryDaycarePayload {
+  pokemon_nom: string
+  player_pokemon_id: number
+  nickname: string | null
+  parent_a_nom?: string   // action_type === 'daycare_egg_received' uniquement
+  parent_b_nom?: string   // action_type === 'daycare_egg_received' uniquement
+}
+
 export type HistoryPayload =
   | HistoryInventoryPayload
   | HistoryPokedexPayload
@@ -692,6 +802,7 @@ export type HistoryPayload =
   | HistoryCombatPayload
   | HistoryMinigamePayload
   | HistoryMiningPayload
+  | HistoryDaycarePayload
 
 export interface HistoryEvent {
   id: number

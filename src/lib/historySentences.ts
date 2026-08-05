@@ -1,4 +1,4 @@
-import type { Player, Pokemon, Item, HistoryInventoryPayload, HistoryPokedexPayload, HistoryTeamPayload, HistoryCombatPayload, HistoryMinigamePayload, HistoryMiningPayload } from '../types'
+import type { Player, Pokemon, Item, HistoryInventoryPayload, HistoryPokedexPayload, HistoryTeamPayload, HistoryCombatPayload, HistoryMinigamePayload, HistoryMiningPayload, HistoryDaycarePayload } from '../types'
 import { POKEDOLLAR_ITEM_NAME, TICKET_CASINO_ITEM_NAME, TICKET_TREMPETTE_ITEM_NAME, TICKET_MINING_ITEM_NAME } from '../types'
 import type { ReferenceEntry } from '../hooks/useReferenceIndex'
 import { getStatusInfo } from './status'
@@ -140,6 +140,23 @@ function minigameSentence(entry: DisplayHistoryEntry, ctx: SentenceContext): Sen
   ]
 }
 
+function daycareSentence(entry: DisplayHistoryEntry, ctx: SentenceContext): SentencePart[] {
+  const payload = entry.payload as HistoryDaycarePayload
+  const player = playerPart(ctx, entry.player_id)
+  const pokemonRef = pokemonPart(ctx, payload.pokemon_nom)
+
+  if (entry.action_type === 'daycare_drop_off') {
+    return [player, { text: ' a déposé ' }, pokemonRef, { text: ' à la Pension Pokémon' }]
+  }
+  if (entry.action_type === 'daycare_pickup') {
+    return [player, { text: ' a récupéré ' }, pokemonRef, { text: ' à la Pension Pokémon' }]
+  }
+  // daycare_egg_received
+  const parentA = payload.parent_a_nom ? pokemonPart(ctx, payload.parent_a_nom) : { text: '???' }
+  const parentB = payload.parent_b_nom ? pokemonPart(ctx, payload.parent_b_nom) : { text: '???' }
+  return [player, { text: ' a reçu un œuf (' }, pokemonRef, { text: ') de ' }, parentA, { text: ' et ' }, parentB, { text: ' à la Pension Pokémon' }]
+}
+
 export function buildSentenceParts(entry: DisplayHistoryEntry, ctx: SentenceContext): SentencePart[] {
   switch (entry.category) {
     case 'inventory':
@@ -152,6 +169,8 @@ export function buildSentenceParts(entry: DisplayHistoryEntry, ctx: SentenceCont
       return combatSentence(entry, ctx)
     case 'minigame':
       return minigameSentence(entry, ctx)
+    case 'daycare':
+      return daycareSentence(entry, ctx)
     default:
       return [{ text: '' }]
   }

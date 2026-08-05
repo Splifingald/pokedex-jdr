@@ -13,13 +13,14 @@ import { GiftPopup, type GiftReward } from './GiftPopup'
 import { CasinoPopup } from './CasinoPopup'
 import { MiniGamesPopup } from './MiniGamesPopup'
 import { MiningPopup } from './MiningPopup'
+import { PensionPopup } from './PensionPopup'
 import { useMinigamesConfig } from '../hooks/useMinigamesConfig'
 import { useCasinoConfig } from '../hooks/useCasinoConfig'
 import { hasAnyMinigameAvailable } from '../lib/magikarpGame'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { PixelIcon } from './icons/PixelIcon'
-import { PHOTO_ICON, CASINO_MASCOT_ICON, MINIGAMES_ICON, MINING_ICON } from '../lib/icons'
+import { PHOTO_ICON, CASINO_MASCOT_ICON, MINIGAMES_ICON, MINING_ICON, PENSION_ICON } from '../lib/icons'
 import { isGiftReady, resolveLootboxForSpecies, drawLootboxReward, randomNextGiftAt, maybeResetGiftTimerOnEntry } from '../lib/gifting'
 import { logHistoryEvent } from '../lib/historyLog'
 
@@ -67,6 +68,7 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
   const [showCasino, setShowCasino] = useState(false)
   const [showMiniGames, setShowMiniGames] = useState(false)
   const [showMining, setShowMining] = useState(false)
+  const [showPension, setShowPension] = useState(false)
 
   // Recalcul périodique de "maintenant" pour détecter les cadeaux devenus prêts
   // pendant que l'app reste ouverte — pas de compte à rebours affiché, juste
@@ -254,6 +256,16 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           </button>
         )}
 
+        {player && parameters.feature_pension_enabled && (
+          <button
+            onClick={() => setShowPension(true)}
+            title="Pension Pokémon"
+            className="w-14 h-14 rounded-full border-[3px] border-ink bg-gradient-to-br from-[#7ec98f] to-[#2f6b3f] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+          >
+            <img src={PENSION_ICON} alt="Pension Pokémon" className="pixelated w-9 h-9 object-contain" />
+          </button>
+        )}
+
         {canScan && (
           <button
             onClick={onScan}
@@ -332,6 +344,18 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           itemsByName={itemsByName}
           pokedollarImageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
           onClose={() => setShowMining(false)}
+        />
+      )}
+
+      {showPension && player && (
+        <PensionPopup
+          player={player}
+          roster={roster}
+          pokemonByName={pokemonByName}
+          itemsByName={itemsByName}
+          evolutionsByPokemonNom={evolutionsByPokemonNom}
+          onRequestPokemonDetail={(id) => { setShowPension(false); setSelectedId(id) }}
+          onClose={() => setShowPension(false)}
         />
       )}
     </div>

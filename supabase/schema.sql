@@ -1381,3 +1381,412 @@ BEGIN
     END IF;
   END LOOP;
 END $$;
+
+-- ============================================================
+-- Pension Pokémon (garderie) — chaque joueur peut y placer 1 pokémon de son PC
+-- (jamais de l'équipe), qui gagne de l'XP dans le temps (même compteur
+-- player_pokemon.xp que partout ailleurs, donc compatible avec les paliers
+-- d'évolution existants) jusqu'à un plafond cumulatif À VIE par instance.
+-- Deux pokémon d'un même "groupe d'œufs" (importé par CSV, voir
+-- pokemon_egg_groups) présents en même temps produisent un œuf après une
+-- durée aléatoire — voir pension_recompute_pairs()/pension_pairs plus bas.
+-- ============================================================
+
+ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS in_daycare boolean NOT NULL DEFAULT false;
+ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS daycare_placed_at timestamptz;
+ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS daycare_last_tick_at timestamptz;
+ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS daycare_lifetime_xp integer NOT NULL DEFAULT 0;
+ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS daycare_capped boolean NOT NULL DEFAULT false;
+ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS daycare_capped_notified boolean NOT NULL DEFAULT false;
+
+ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_pension_enabled boolean NOT NULL DEFAULT true;
+
+-- Paramètres admin de la Pension (une seule ligne, id fixe = 1) — même schéma
+-- que mining_config/casino_config. Pas d'économie de tickets ici (accès
+-- gratuit, contrôlé uniquement par admin_parameters.feature_pension_enabled).
+-- default_hatch_timer_* sert de repli pour tout groupe sans ligne
+-- pension_group_config dédiée (voir pension_recompute_pairs).
+CREATE TABLE IF NOT EXISTS pension_config (
+  id                        bigint PRIMARY KEY DEFAULT 1,
+  nom                       text NOT NULL DEFAULT 'Pension Pokémon',
+  icon_url                  text NOT NULL DEFAULT '/website_icons/icon_daycare_game.png',
+  banner_url                text NOT NULL DEFAULT '',
+  capacity_total            integer NOT NULL DEFAULT 3,
+  tick_xp_amount            integer NOT NULL DEFAULT 1,
+  tick_interval_amount      integer NOT NULL DEFAULT 2,
+  tick_interval_unit        text NOT NULL DEFAULT 'hours' CHECK (tick_interval_unit IN ('hours', 'minutes')),
+  default_lifetime_xp_cap   integer NOT NULL DEFAULT 50,
+  default_hatch_timer_min   integer NOT NULL DEFAULT 24,
+  default_hatch_timer_max   integer NOT NULL DEFAULT 48,
+  default_hatch_timer_unit  text NOT NULL DEFAULT 'hours' CHECK (default_hatch_timer_unit IN ('hours', 'minutes')),
+  CONSTRAINT single_row CHECK (id = 1)
+);
+INSERT INTO pension_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- Groupes d'œufs par espèce — importé par CSV (colonnes Pokémon/Groupe 1/Groupe
+-- 2/Groupe 3), jusqu'à 3 lignes par espèce. Référence par nom, pas de FK (survit
+-- aux réimports, comme pokemon_evolutions). Les valeurs "ALL"/"TOUS"
+-- (insensible à la casse) désignent un groupe spécial "universel" (ex : Métamorph)
+-- qui peut se reproduire avec n'importe quel autre pokémon ayant un groupe réel —
+-- voir pension_recompute_pairs.
+CREATE TABLE IF NOT EXISTS pokemon_egg_groups (
+  id           bigserial PRIMARY KEY,
+  pokemon_nom  text NOT NULL,
+  groupe       text NOT NULL,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_pokemon_egg_groups_pokemon_nom ON pokemon_egg_groups(pokemon_nom);
+CREATE INDEX IF NOT EXISTS idx_pokemon_egg_groups_groupe ON pokemon_egg_groups(groupe);
+
+-- Réglages admin par groupe d'œufs — clé primaire = nom du groupe (texte libre
+-- venu du CSV). Purement dédié à l'éclosion : hatch_timer_* (NULL = hérite des
+-- valeurs par défaut de pension_config) + egg_pool_mode. Les réglages XP
+-- (intervalle de tick, plafond à vie) sont un concept séparé, voir
+-- pension_xp_groups plus bas — pas de rapport avec les groupes d'œufs. Créée à
+-- la volée côté client (usePensionGroups) au premier groupe découvert dans
+-- pokemon_egg_groups.
+CREATE TABLE IF NOT EXISTS pension_group_config (
+  groupe                text PRIMARY KEY,
+  hatch_timer_min        integer,
+  hatch_timer_max        integer,
+  hatch_timer_unit       text CHECK (hatch_timer_unit IN ('hours', 'minutes')),
+  created_at             timestamptz NOT NULL DEFAULT now()
+);
+-- Migration si la table existait déjà avec l'ancien schéma (groupes XP fusionnés
+-- avec les groupes d'œufs) :
+ALTER TABLE pension_group_config DROP COLUMN IF EXISTS tick_interval_amount;
+ALTER TABLE pension_group_config DROP COLUMN IF EXISTS tick_interval_unit;
+ALTER TABLE pension_group_config DROP COLUMN IF EXISTS lifetime_xp_cap;
+
+-- Groupes XP — entièrement indépendants des groupes d'œufs : créés et peuplés
+-- à la main par l'admin (pas de CSV), une espèce appartient à au plus un
+-- groupe XP (pension_xp_group_species, clé primaire = pokemon_nom). Toute
+-- espèce non assignée utilise les valeurs par défaut de pension_config
+-- (tick_interval_amount/unit, default_lifetime_xp_cap).
+CREATE TABLE IF NOT EXISTS pension_xp_groups (
+  id                    bigserial PRIMARY KEY,
+  nom                   text NOT NULL UNIQUE,
+  tick_interval_amount  integer NOT NULL DEFAULT 2,
+  tick_interval_unit    text NOT NULL DEFAULT 'hours' CHECK (tick_interval_unit IN ('hours', 'minutes')),
+  lifetime_xp_cap       integer NOT NULL DEFAULT 50,
+  created_at            timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS pension_xp_group_species (
+  pokemon_nom  text PRIMARY KEY,
+  xp_group_id  bigint NOT NULL REFERENCES pension_xp_groups(id) ON DELETE CASCADE,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_pension_xp_group_species_group ON pension_xp_group_species(xp_group_id);
+
+ALTER TABLE pension_xp_groups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pension_xp_group_species ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read pension_xp_groups"
+  ON pension_xp_groups FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert pension_xp_groups"
+  ON pension_xp_groups FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update pension_xp_groups"
+  ON pension_xp_groups FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete pension_xp_groups"
+  ON pension_xp_groups FOR DELETE TO anon USING (true);
+
+CREATE POLICY "Public read pension_xp_group_species"
+  ON pension_xp_group_species FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert pension_xp_group_species"
+  ON pension_xp_group_species FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update pension_xp_group_species"
+  ON pension_xp_group_species FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete pension_xp_group_species"
+  ON pension_xp_group_species FOR DELETE TO anon USING (true);
+
+-- Réserve pondérée d'espèces "œuf" par groupe (même principe que
+-- gift_lootbox_items : probabilité = poids / somme des poids). Une espèce n'est
+-- "un œuf" que par le fait d'être listée ici — pas de colonne booléenne dédiée
+-- sur `pokemon`.
+CREATE TABLE IF NOT EXISTS pension_egg_pool (
+  id           bigserial PRIMARY KEY,
+  groupe       text NOT NULL,
+  pokemon_nom  text NOT NULL,
+  weight       integer NOT NULL DEFAULT 1,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_pension_egg_pool_groupe ON pension_egg_pool(groupe);
+
+-- Appariements en cours pour la production d'œufs. Une paire = 2 pokémon en
+-- pension partageant un groupe (ou l'un des deux ayant le groupe spécial
+-- ALL/TOUS), avec une durée cible tirée aléatoirement une seule fois à la
+-- création de la paire (voir pension_recompute_pairs). pokemon_a_id < pokemon_b_id
+-- donne un ordre canonique (pas de doublon A-B/B-A). L'index unique inclut
+-- `groupe` : deux instances partageant plusieurs groupes ont une paire (et donc
+-- un minuteur d'œuf) indépendante par groupe partagé.
+-- fixed_recipient_pokemon_id : non-NULL uniquement pour un appariement
+-- impliquant ALL/TOUS — l'œuf va alors toujours au propriétaire de CE pokémon
+-- (l'autre, non-ALL), jamais un tirage 50/50.
+CREATE TABLE IF NOT EXISTS pension_pairs (
+  id                          bigserial PRIMARY KEY,
+  pokemon_a_id                bigint NOT NULL REFERENCES player_pokemon(id) ON DELETE CASCADE,
+  pokemon_b_id                bigint NOT NULL REFERENCES player_pokemon(id) ON DELETE CASCADE,
+  groupe                      text NOT NULL,
+  fixed_recipient_pokemon_id  bigint REFERENCES player_pokemon(id) ON DELETE CASCADE,
+  paired_since                timestamptz NOT NULL DEFAULT now(),
+  target_duration_seconds     integer NOT NULL,
+  created_at                  timestamptz NOT NULL DEFAULT now(),
+  CHECK (pokemon_a_id < pokemon_b_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pension_pairs_unique ON pension_pairs(pokemon_a_id, pokemon_b_id, groupe);
+
+ALTER TABLE pension_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pokemon_egg_groups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pension_group_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pension_egg_pool ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pension_pairs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read pension_config"
+  ON pension_config FOR SELECT TO anon USING (true);
+CREATE POLICY "Public update pension_config"
+  ON pension_config FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+-- pokemon_egg_groups : lecture publique, écriture bloquée pour anon (import CSV
+-- via Netlify Function seulement, comme pokemon_evolutions/encounters)
+CREATE POLICY "Public read pokemon_egg_groups"
+  ON pokemon_egg_groups FOR SELECT TO anon USING (true);
+
+CREATE POLICY "Public read pension_group_config"
+  ON pension_group_config FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert pension_group_config"
+  ON pension_group_config FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update pension_group_config"
+  ON pension_group_config FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "Public read pension_egg_pool"
+  ON pension_egg_pool FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert pension_egg_pool"
+  ON pension_egg_pool FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update pension_egg_pool"
+  ON pension_egg_pool FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete pension_egg_pool"
+  ON pension_egg_pool FOR DELETE TO anon USING (true);
+
+CREATE POLICY "Public read pension_pairs"
+  ON pension_pairs FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert pension_pairs"
+  ON pension_pairs FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update pension_pairs"
+  ON pension_pairs FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete pension_pairs"
+  ON pension_pairs FOR DELETE TO anon USING (true);
+
+-- ── Fonctions RPC de concurrence ────────────────────────────────
+-- Même justification que mining_ensure_active_grid/mining_dig_cell : plusieurs
+-- clients anon peuvent se disputer les dernières places de la pension en même
+-- temps. Rôle appelant (anon), pas SECURITY DEFINER, cohérent avec le reste du schéma.
+
+-- Recalcule les appariements actifs après chaque place/retrait. Supprime les
+-- paires dont un membre est parti, puis recrée les paires manquantes pour
+-- chaque combinaison de 2 pokémon en pension : un groupe partagé (hors
+-- ALL/TOUS) = une paire par groupe partagé ; un pokémon ALL/TOUS face à un
+-- pokémon ayant ≥1 groupe réel = une paire dont le groupe résolu est tiré au
+-- hasard une seule fois parmi les groupes réels de l'autre, avec un
+-- destinataire d'œuf fixé sur ce dernier ; deux ALL/TOUS ensemble ne
+-- s'apparient jamais.
+CREATE OR REPLACE FUNCTION pension_recompute_pairs() RETURNS void
+LANGUAGE plpgsql AS $$
+DECLARE
+  rec RECORD;
+  v_a_groups text[];
+  v_b_groups text[];
+  v_a_is_all boolean;
+  v_b_is_all boolean;
+  v_shared text[];
+  g text;
+  v_resolved_groupe text;
+  v_fixed_recipient bigint;
+  v_hatch_min integer;
+  v_hatch_max integer;
+  v_hatch_unit text;
+  v_target_seconds integer;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('pension_pairs'));
+
+  DELETE FROM pension_pairs pp
+  WHERE NOT EXISTS (SELECT 1 FROM player_pokemon a WHERE a.id = pp.pokemon_a_id AND a.in_daycare = true)
+     OR NOT EXISTS (SELECT 1 FROM player_pokemon b WHERE b.id = pp.pokemon_b_id AND b.in_daycare = true);
+
+  FOR rec IN
+    SELECT a.id AS a_id, a.pokemon_nom AS a_nom, b.id AS b_id, b.pokemon_nom AS b_nom
+    FROM player_pokemon a
+    JOIN player_pokemon b ON b.id > a.id AND b.in_daycare = true
+    WHERE a.in_daycare = true
+  LOOP
+    SELECT COALESCE(array_agg(groupe), '{}') INTO v_a_groups FROM pokemon_egg_groups WHERE pokemon_nom = rec.a_nom;
+    SELECT COALESCE(array_agg(groupe), '{}') INTO v_b_groups FROM pokemon_egg_groups WHERE pokemon_nom = rec.b_nom;
+    v_a_is_all := EXISTS (SELECT 1 FROM unnest(v_a_groups) x WHERE lower(trim(x)) IN ('all', 'tous'));
+    v_b_is_all := EXISTS (SELECT 1 FROM unnest(v_b_groups) x WHERE lower(trim(x)) IN ('all', 'tous'));
+
+    IF v_a_is_all AND v_b_is_all THEN
+      CONTINUE;
+    ELSIF v_a_is_all OR v_b_is_all THEN
+      IF v_a_is_all THEN
+        SELECT x INTO v_resolved_groupe FROM unnest(v_b_groups) x
+          WHERE lower(trim(x)) NOT IN ('all', 'tous') ORDER BY random() LIMIT 1;
+        v_fixed_recipient := rec.b_id;
+      ELSE
+        SELECT x INTO v_resolved_groupe FROM unnest(v_a_groups) x
+          WHERE lower(trim(x)) NOT IN ('all', 'tous') ORDER BY random() LIMIT 1;
+        v_fixed_recipient := rec.a_id;
+      END IF;
+
+      IF v_resolved_groupe IS NULL THEN
+        CONTINUE;
+      END IF;
+
+      IF EXISTS (SELECT 1 FROM pension_pairs WHERE pokemon_a_id = rec.a_id AND pokemon_b_id = rec.b_id AND groupe = v_resolved_groupe) THEN
+        CONTINUE;
+      END IF;
+
+      SELECT hatch_timer_min, hatch_timer_max, hatch_timer_unit INTO v_hatch_min, v_hatch_max, v_hatch_unit
+        FROM pension_group_config WHERE groupe = v_resolved_groupe;
+      IF v_hatch_min IS NULL THEN
+        SELECT default_hatch_timer_min, default_hatch_timer_max, default_hatch_timer_unit
+          INTO v_hatch_min, v_hatch_max, v_hatch_unit FROM pension_config WHERE id = 1;
+      END IF;
+      v_target_seconds := GREATEST(1, (v_hatch_min + random() * GREATEST(0, v_hatch_max - v_hatch_min)) * (CASE WHEN v_hatch_unit = 'minutes' THEN 60 ELSE 3600 END))::int;
+
+      INSERT INTO pension_pairs (pokemon_a_id, pokemon_b_id, groupe, fixed_recipient_pokemon_id, paired_since, target_duration_seconds)
+      VALUES (rec.a_id, rec.b_id, v_resolved_groupe, v_fixed_recipient, now(), v_target_seconds);
+    ELSE
+      SELECT array_agg(x) INTO v_shared
+      FROM (
+        SELECT unnest(v_a_groups) AS x
+        INTERSECT
+        SELECT unnest(v_b_groups)
+      ) s
+      WHERE lower(trim(x)) NOT IN ('all', 'tous');
+
+      IF v_shared IS NOT NULL THEN
+        FOREACH g IN ARRAY v_shared LOOP
+          IF EXISTS (SELECT 1 FROM pension_pairs WHERE pokemon_a_id = rec.a_id AND pokemon_b_id = rec.b_id AND groupe = g) THEN
+            CONTINUE;
+          END IF;
+
+          SELECT hatch_timer_min, hatch_timer_max, hatch_timer_unit INTO v_hatch_min, v_hatch_max, v_hatch_unit
+            FROM pension_group_config WHERE groupe = g;
+          IF v_hatch_min IS NULL THEN
+            SELECT default_hatch_timer_min, default_hatch_timer_max, default_hatch_timer_unit
+              INTO v_hatch_min, v_hatch_max, v_hatch_unit FROM pension_config WHERE id = 1;
+          END IF;
+          v_target_seconds := GREATEST(1, (v_hatch_min + random() * GREATEST(0, v_hatch_max - v_hatch_min)) * (CASE WHEN v_hatch_unit = 'minutes' THEN 60 ELSE 3600 END))::int;
+
+          INSERT INTO pension_pairs (pokemon_a_id, pokemon_b_id, groupe, fixed_recipient_pokemon_id, paired_since, target_duration_seconds)
+          VALUES (rec.a_id, rec.b_id, g, NULL, now(), v_target_seconds);
+        END LOOP;
+      END IF;
+    END IF;
+  END LOOP;
+END;
+$$;
+
+-- Place un pokémon du PC d'un joueur en pension : valide propriété / pas déjà en
+-- équipe / pas déjà en pension / jamais atteint son plafond XP à vie / le joueur
+-- n'a pas déjà un pokémon en pension / la pension n'est pas pleine, puis
+-- recalcule les appariements. pg_advisory_xact_lock sérialise la course à la
+-- dernière place disponible entre clients anon concurrents.
+CREATE OR REPLACE FUNCTION pension_place(p_player_pokemon_id bigint, p_player_id bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_owner bigint;
+  v_in_team boolean;
+  v_in_daycare boolean;
+  v_capped boolean;
+  v_capacity integer;
+  v_current_count integer;
+  v_player_has_slot integer;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('pension_slots'));
+
+  SELECT player_id, in_team, in_daycare, daycare_capped
+    INTO v_owner, v_in_team, v_in_daycare, v_capped
+    FROM player_pokemon WHERE id = p_player_pokemon_id FOR UPDATE;
+
+  IF v_owner IS NULL OR v_owner <> p_player_id THEN RETURN jsonb_build_object('status', 'not_owner'); END IF;
+  IF v_in_team THEN RETURN jsonb_build_object('status', 'must_be_in_pc'); END IF;
+  IF v_in_daycare THEN RETURN jsonb_build_object('status', 'already_placed'); END IF;
+  IF v_capped THEN RETURN jsonb_build_object('status', 'permanently_capped'); END IF;
+
+  SELECT count(*) INTO v_player_has_slot FROM player_pokemon WHERE player_id = p_player_id AND in_daycare = true;
+  IF v_player_has_slot > 0 THEN RETURN jsonb_build_object('status', 'player_slot_taken'); END IF;
+
+  SELECT capacity_total INTO v_capacity FROM pension_config WHERE id = 1;
+  SELECT count(*) INTO v_current_count FROM player_pokemon WHERE in_daycare = true;
+  IF v_current_count >= v_capacity THEN RETURN jsonb_build_object('status', 'daycare_full'); END IF;
+
+  UPDATE player_pokemon
+  SET in_daycare = true, daycare_placed_at = now(), daycare_last_tick_at = now()
+  WHERE id = p_player_pokemon_id;
+
+  PERFORM pension_recompute_pairs();
+  RETURN jsonb_build_object('status', 'ok');
+END;
+$$;
+
+-- Retire un pokémon de la pension : valide propriété / actuellement en pension,
+-- puis recalcule les appariements (toute paire impliquant ce pokémon perd sa
+-- progression, conformément à la règle "retrait = remise à zéro de la paire").
+CREATE OR REPLACE FUNCTION pension_retrieve(p_player_pokemon_id bigint, p_player_id bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_owner bigint;
+  v_in_daycare boolean;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('pension_slots'));
+
+  SELECT player_id, in_daycare INTO v_owner, v_in_daycare
+    FROM player_pokemon WHERE id = p_player_pokemon_id FOR UPDATE;
+
+  IF v_owner IS NULL OR v_owner <> p_player_id THEN RETURN jsonb_build_object('status', 'not_owner'); END IF;
+  IF NOT v_in_daycare THEN RETURN jsonb_build_object('status', 'not_placed'); END IF;
+
+  UPDATE player_pokemon
+  SET in_daycare = false, daycare_placed_at = NULL, daycare_last_tick_at = NULL
+  WHERE id = p_player_pokemon_id;
+
+  PERFORM pension_recompute_pairs();
+  RETURN jsonb_build_object('status', 'ok');
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION pension_recompute_pairs() TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION pension_place(bigint, bigint) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION pension_retrieve(bigint, bigint) TO anon, authenticated;
+
+-- history_events.category doit accepter la nouvelle catégorie 'daycare'
+-- (événements dépôt/retrait/œuf reçu à la Pension)
+ALTER TABLE history_events DROP CONSTRAINT IF EXISTS history_events_category_check;
+ALTER TABLE history_events ADD CONSTRAINT history_events_category_check
+  CHECK (category IN ('inventory', 'pokedex', 'team', 'combat', 'minigame', 'daycare'));
+
+-- Diffusion Realtime — mêmes raisons que le bloc Fouille ci-dessus
+DO $$
+DECLARE
+  t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'pension_config', 'pokemon_egg_groups', 'pension_group_config',
+    'pension_egg_pool', 'pension_pairs', 'pension_xp_groups', 'pension_xp_group_species'
+  ]
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = t
+    ) THEN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE %I', t);
+    END IF;
+  END LOOP;
+END $$;
+
+-- Mode de réserve d'œufs par groupe : 'default' (hérite de la réserve par
+-- défaut, groupe sentinelle '__default__' dans pension_egg_pool), 'custom'
+-- (réserve propre à ce groupe) ou 'none' (ce groupe ne produit jamais d'œuf,
+-- même si la réserve par défaut n'est pas vide) — voir pension-tick.js::resolveEggPool.
+ALTER TABLE pension_group_config ADD COLUMN IF NOT EXISTS egg_pool_mode text NOT NULL DEFAULT 'default' CHECK (egg_pool_mode IN ('default', 'custom', 'none'));

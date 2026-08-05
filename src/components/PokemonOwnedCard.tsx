@@ -16,10 +16,12 @@ interface Props {
   variant: 'grid' | 'list'
   /** Affiche le badge "au PC" (Pokémon hors équipe active) */
   showPcBadge?: boolean
+  /** Affiche le badge "en pension" — prime sur showPcBadge dans le même coin (en pension implique déjà au PC) */
+  showDaycareBadge?: boolean
   onClick: () => void
 }
 
-export function PokemonOwnedCard({ playerPokemon, pokemon, variant, showPcBadge = false, onClick }: Props) {
+export function PokemonOwnedCard({ playerPokemon, pokemon, variant, showPcBadge = false, showDaycareBadge = false, onClick }: Props) {
   const maxHp = getMaxHp(playerPokemon, pokemon)
   const [hp] = useLocalHp(playerPokemon.id, maxHp)
   const [status] = useLocalStatus(playerPokemon.id)
@@ -71,7 +73,11 @@ export function PokemonOwnedCard({ playerPokemon, pokemon, variant, showPcBadge 
           <span className="text-ink text-sm font-bold truncate block">{displayName}</span>
           <HpGauge current={hp} max={maxHp} />
         </div>
-        {showPcBadge && <span className="text-ink shrink-0" title="Au PC"><PixelIcon src={PC_ICON} size={16} colored /></span>}
+        {showDaycareBadge ? (
+          <span className="shrink-0 text-base" title="En pension">🏡</span>
+        ) : (
+          showPcBadge && <span className="text-ink shrink-0" title="Au PC"><PixelIcon src={PC_ICON} size={16} colored /></span>
+        )}
         {pokemon && <TypeBadge type={pokemon.type} small />}
       </button>
     )
@@ -92,13 +98,22 @@ export function PokemonOwnedCard({ playerPokemon, pokemon, variant, showPcBadge 
         </span>
       )}
 
-      {showPcBadge && (
+      {showDaycareBadge ? (
         <span
-          className="absolute top-1.5 right-1.5 z-[1] w-7 h-7 flex items-center justify-center bg-cream/95 border-2 border-ink rounded-md"
-          title="Au PC"
+          className="absolute top-1.5 right-1.5 z-[1] w-7 h-7 flex items-center justify-center bg-cream/95 border-2 border-ink rounded-md text-lg"
+          title="En pension"
         >
-          <PixelIcon src={PC_ICON} size={22} />
+          🏡
         </span>
+      ) : (
+        showPcBadge && (
+          <span
+            className="absolute top-1.5 right-1.5 z-[1] w-7 h-7 flex items-center justify-center bg-cream/95 border-2 border-ink rounded-md"
+            title="Au PC"
+          >
+            <PixelIcon src={PC_ICON} size={22} />
+          </span>
+        )
       )}
 
       <div className="w-full aspect-square rounded-md border-2 border-ink bg-cream-secondary flex items-center justify-center overflow-hidden">

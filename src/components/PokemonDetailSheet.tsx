@@ -27,7 +27,10 @@ import { useLocalStatus } from '../hooks/useLocalStatus'
 import { useHoldRepeat } from '../hooks/useHoldRepeat'
 import { getMaxHp } from '../lib/maxHp'
 import { getHpBreakdown, getDamageBreakdown, getMilestones, getMaxXp } from '../lib/xpBonuses'
-import { getEvolutionOptions, type EvolutionOption } from '../lib/evolution'
+import { getEvolutionOptions, isRandomEvolutionReady, pickRandomEvolution, type EvolutionOption } from '../lib/evolution'
+import { usePensionConfig } from '../hooks/usePensionConfig'
+import { usePensionXpGroups } from '../hooks/usePensionXpGroups'
+import { computeProjectedDaycareXp, resolveApplicableXpGroup } from '../lib/pension'
 import { getStatusInfo } from '../lib/status'
 import { StatusSelect } from './StatusSelect'
 import { getSuperEfficace, getLocalisations, getAttaques } from '../lib/pokemonFacts'
@@ -145,12 +148,45 @@ function OwnedVitals({
   const incrementHold = useHoldRepeat(() => handleSetHp(hpRef.current + 1))
   const milestones = useMemo(() => getMilestones(pokemon), [pokemon])
   const maxXp = useMemo(() => getMaxXp(pokemon), [pokemon])
-  const handleXpChange = (xp: number) => onUpdateXp?.(playerPokemon.id, xp)
+
+  const { config: pensionConfig } = usePensionConfig()
+  const { xpGroupByPokemonNom } = usePensionXpGroups()
+
+  const [liveNow, setLiveNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!playerPokemon.in_daycare) return
+    const interval = window.setInterval(() => setLiveNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [playerPokemon.in_daycare])
+
+  // Tant que ce pokémon est en Pension, l'XP réellement "gagnée" avance en
+  // direct (même calcul que dans le popup Pension) mais n'est committée en base
+  // que par le cron horaire (pension-tick.js) — on l'affiche quand même ici
+  // pour que la jauge ne semble pas figée, sans permettre de l'éditer
+  // manuellement (voir `disabled` plus bas) pour ne pas interférer avec le
+  // suivi de plafond de la Pension. maxXp (déjà calculé plus haut) plafonne
+  // aussi la projection : l'XP de pension ne doit jamais dépasser le max
+  // naturel de la jauge de l'espèce.
+  const displayXp = useMemo(() => {
+    if (!playerPokemon.in_daycare) return playerPokemon.xp
+    const applicable = resolveApplicableXpGroup(playerPokemon.pokemon_nom, xpGroupByPokemonNom, pensionConfig)
+    const { committedXp, projectedExtraXp } = computeProjectedDaycareXp(playerPokemon, applicable, pensionConfig.tick_xp_amount, new Date(liveNow), maxXp)
+    return committedXp + projectedExtraXp
+  }, [playerPokemon, xpGroupByPokemonNom, pensionConfig, liveNow, maxXp])
+
+  // Copie avec l'XP en direct, utilisée uniquement pour évaluer si une
+  // évolution est prête (paliers atteints) — les mutations réelles restent sur playerPokemon.
+  const effectiveForEvolution = useMemo(() => ({ ...playerPokemon, xp: displayXp }), [playerPokemon, displayXp])
+
+  const handleXpChange = (xp: number) => {
+    if (playerPokemon.in_daycare) return
+    onUpdateXp?.(playerPokemon.id, xp)
+  }
 
   const evolutionOptions = useMemo(() => {
     if (!pokemonByName || !itemsByName || !evolutionsByPokemonNom) return []
-    return getEvolutionOptions(playerPokemon, pokemon, evolutionsByPokemonNom, pokemonByName, itemsByName, playerItems?.inventory ?? [])
-  }, [playerPokemon, pokemon, evolutionsByPokemonNom, pokemonByName, itemsByName, playerItems?.inventory])
+    return getEvolutionOptions(effectiveForEvolution, pokemon, evolutionsByPokemonNom, pokemonByName, itemsByName, playerItems?.inventory ?? [])
+  }, [effectiveForEvolution, pokemon, evolutionsByPokemonNom, pokemonByName, itemsByName, playerItems?.inventory])
 
   // Objet de la première évolution avec condition (indépendant de la disponibilité
   // actuelle) — sert à remplacer le token "[objet]" dans les libellés de la jauge XP,
@@ -162,8 +198,49 @@ function OwnedVitals({
     return itemNom ? itemsByName.get(itemNom) ?? null : null
   }, [pokemon, evolutionsByPokemonNom, itemsByName])
 
+  const randomEvolutionReady = useMemo(() => isRandomEvolutionReady(effectiveForEvolution, pokemon), [effectiveForEvolution, pokemon])
+
+  // Parallèle à handleEvolveClick, mais la cible n'est résolue qu'au clic (tirage
+  // aléatoire parmi pokemon_evolutions) — toujours sans condition d'objet, donc
+  // pas de branche de consommation d'objet ici.
+  const handleRandomEvolveClick = () => {
+    if (evolving != null || !onEvolve || !evolutionsByPokemonNom) return
+    if (playerPokemon.in_daycare) {
+      showToast("Votre pokémon ne peut pas évoluer tant qu'il est à la pension")
+      return
+    }
+    const picked = pickRandomEvolution(playerPokemon.pokemon_nom, evolutionsByPokemonNom)
+    if (!picked) return
+
+    const fromDisplayName = ownedPokemonName(playerPokemon)
+    const toDisplayName = picked.evolution_nom
+    const fromSpecies = pokemon
+    const toSpecies = pokemonByName?.get(picked.evolution_nom)
+
+    setEvolving({ fromSpecies, toSpecies, fromDisplayName, toDisplayName })
+
+    void (async () => {
+      await onEvolve(playerPokemon.id, picked.evolution_nom, toSpecies?.numero ?? null)
+
+      if (toSpecies) restoreLocalHp(playerPokemon.id, getMaxHp({ ...playerPokemon, xp: 0 }, toSpecies))
+      setStatus('aucun')
+
+      void logHistoryEvent('team', 'pokemon_evolve', playerPokemon.player_id, {
+        pokemon_nom: playerPokemon.pokemon_nom,
+        player_pokemon_id: playerPokemon.id,
+        nickname: playerPokemon.nickname,
+        to_pokemon_nom: picked.evolution_nom,
+      })
+    })()
+  }
+
   const handleEvolveClick = (opt: EvolutionOption) => {
     if (evolving != null || !onEvolve) return
+
+    if (playerPokemon.in_daycare) {
+      showToast("Votre pokémon ne peut pas évoluer tant qu'il est à la pension")
+      return
+    }
 
     if (!opt.clickable) {
       const itemName = opt.conditionItem?.nom ?? opt.evolution.condition_item_nom
@@ -252,31 +329,35 @@ function OwnedVitals({
         {maxXp != null ? (
           <div className="mt-3">
             <XpGauge
-              xp={playerPokemon.xp}
+              xp={displayXp}
               max={maxXp}
               milestones={milestones}
               onXpChange={handleXpChange}
               evolutionItemIconUrl={evolutionConditionItem?.image_url ?? null}
               evolutionItemName={evolutionConditionItem?.nom ?? null}
+              disabled={playerPokemon.in_daycare}
             />
           </div>
         ) : (
           <div className="flex items-center gap-2 mt-3">
             <span className="text-ink-muted-2 text-xs">Expérience</span>
             <button
-              onClick={() => handleXpChange(Math.max(0, playerPokemon.xp - 1))}
-              className={`w-6 h-6 rounded ${PIXEL_BORDER_SM} bg-cream-button text-ink hover:brightness-105`}
+              disabled={playerPokemon.in_daycare}
+              onClick={() => handleXpChange(Math.max(0, displayXp - 1))}
+              className={`w-6 h-6 rounded ${PIXEL_BORDER_SM} bg-cream-button text-ink hover:brightness-105 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:brightness-100`}
             >
               −
             </button>
             <NumberInput
-              value={playerPokemon.xp}
+              value={displayXp}
+              disabled={playerPokemon.in_daycare}
               onCommit={(v) => handleXpChange(Math.max(0, v))}
               className="w-16 bg-white border-2 border-ink rounded px-1 py-0.5 text-xp-blue font-bold text-sm text-center outline-none"
             />
             <button
-              onClick={() => handleXpChange(playerPokemon.xp + 1)}
-              className={`w-6 h-6 rounded ${PIXEL_BORDER_SM} bg-cream-button text-ink hover:brightness-105`}
+              disabled={playerPokemon.in_daycare}
+              onClick={() => handleXpChange(displayXp + 1)}
+              className={`w-6 h-6 rounded ${PIXEL_BORDER_SM} bg-cream-button text-ink hover:brightness-105 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:brightness-100`}
             >
               +
             </button>
@@ -290,8 +371,9 @@ function OwnedVitals({
                 key={opt.evolution.id}
                 disabled={evolving != null}
                 onClick={() => handleEvolveClick(opt)}
+                title={playerPokemon.in_daycare ? "Ne peut pas évoluer tant qu'il est à la pension" : undefined}
                 className={`py-3 rounded-lg text-sm font-bold inline-flex items-center justify-center gap-2 ${
-                  opt.clickable
+                  opt.clickable && !playerPokemon.in_daycare
                     ? BUTTON_STYLE.yellow
                     : 'bg-[#3a3c58] text-[#7a7c9a] border-2 border-[#6a6a6a] cursor-not-allowed'
                 }`}
@@ -300,7 +382,7 @@ function OwnedVitals({
                   <img
                     src={opt.conditionItem.image_url}
                     alt=""
-                    className={`w-6 h-6 object-contain ${opt.clickable ? '' : 'grayscale opacity-60'}`}
+                    className={`w-6 h-6 object-contain ${opt.clickable && !playerPokemon.in_daycare ? '' : 'grayscale opacity-60'}`}
                   />
                 ) : opt.targetSpecies?.image_miniature ? (
                   // Pas d'objet requis : plusieurs évolutions peuvent être proposées au choix du
@@ -308,13 +390,26 @@ function OwnedVitals({
                   <img
                     src={opt.targetSpecies.image_miniature}
                     alt=""
-                    className={`pixelated w-6 h-6 object-contain ${opt.clickable ? '' : 'grayscale opacity-60'}`}
+                    className={`pixelated w-6 h-6 object-contain ${opt.clickable && !playerPokemon.in_daycare ? '' : 'grayscale opacity-60'}`}
                   />
                 ) : null}
                 ✨ ÉVOLUTION !
               </button>
             ))}
           </div>
+        )}
+
+        {randomEvolutionReady && (
+          <button
+            disabled={evolving != null}
+            onClick={handleRandomEvolveClick}
+            title={playerPokemon.in_daycare ? "Ne peut pas évoluer tant qu'il est à la pension" : undefined}
+            className={`mt-1 py-3 rounded-lg text-sm font-bold ${
+              playerPokemon.in_daycare ? 'bg-[#3a3c58] text-[#7a7c9a] border-2 border-[#6a6a6a] cursor-not-allowed' : BUTTON_STYLE.yellow
+            }`}
+          >
+            ✨ ÉCLOSION !
+          </button>
         )}
       </div>
 
@@ -604,7 +699,11 @@ export function PokemonDetailSheet({
         <div className="mt-4 mb-1">
           {isOwnedContext && playerPokemon && (
             <div className="flex gap-2">
-              {!isNpc && (
+              {!isNpc && playerPokemon.in_daycare ? (
+                <div className="flex-1 py-2.5 rounded-lg text-sm font-bold text-center bg-[#3a3c58] text-[#7a7c9a] border-2 border-[#6a6a6a]">
+                  🏡 En pension — récupérez-le depuis la Pension Pokémon
+                </div>
+              ) : !isNpc && (
                 playerPokemon.in_team ? (
                   <button
                     onClick={() => onToggleInTeam?.(playerPokemon.id, false)}

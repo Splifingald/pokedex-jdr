@@ -189,7 +189,8 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
               playerPokemon={pp}
               pokemon={pokemonByName.get(pp.pokemon_nom)}
               variant="grid"
-              showPcBadge={!player.is_npc && !pp.in_team}
+              showPcBadge={!player.is_npc && !pp.in_team && !pp.in_daycare}
+              showDaycareBadge={pp.in_daycare}
               onClick={() => setSelectedId(pp.id)}
             />
           ))}

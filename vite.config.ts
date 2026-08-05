@@ -38,9 +38,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        // Les sprites Pokémon (public/pokemon/) sont trop lourds pour le précache
-        // → mis en cache à la volée au premier affichage (runtimeCaching ci-dessous)
-        globIgnores: ['pokemon/**'],
+        // Les sprites Pokémon (public/pokemon/) et les icônes uploadées (public/website_icons/)
+        // peuvent être trop lourds pour le précache → mis en cache à la volée (runtimeCaching ci-dessous)
+        globIgnores: ['pokemon/**', 'website_icons/**'],
         // Ajoute la gestion des notifications Web Push au service worker généré,
         // sans migrer vers injectManifest (voir public/push-sw.js).
         importScripts: ['/push-sw.js'],
@@ -59,6 +59,14 @@ export default defineConfig({
             options: {
               cacheName: 'pokemon-sprites',
               expiration: { maxEntries: 300, maxAgeSeconds: 60 * 60 * 24 * 30 },
+            },
+          },
+          {
+            urlPattern: /\/website_icons\/.*\.png$/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'website-icons',
+              expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 },
             },
           },
         ],

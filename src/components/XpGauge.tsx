@@ -12,6 +12,8 @@ interface Props {
   /** Icône de l'objet requis pour l'évolution — remplace le token "[objet]" dans les libellés */
   evolutionItemIconUrl?: string | null
   evolutionItemName?: string | null
+  /** Lecture seule (ex : pokémon actuellement en Pension) — masque le curseur/le drag et désactive les contrôles +/-/saisie */
+  disabled?: boolean
 }
 
 // Version texte brut du libellé pour le title="" (tooltip) : remplace le token par le
@@ -58,7 +60,7 @@ function markerAlign(value: number, max: number): keyof typeof ALIGN_CLASS {
   return 'center'
 }
 
-export function XpGauge({ xp, max, milestones, onXpChange, evolutionItemIconUrl, evolutionItemName }: Props) {
+export function XpGauge({ xp, max, milestones, onXpChange, evolutionItemIconUrl, evolutionItemName, disabled = false }: Props) {
   const dragging = useRef(false)
   const pct = max > 0 ? Math.max(0, Math.min(100, (xp / max) * 100)) : 0
 
@@ -88,15 +90,16 @@ export function XpGauge({ xp, max, milestones, onXpChange, evolutionItemIconUrl,
       </div>
 
       <div
-        className="h-2.5 rounded-full bg-[#cfc7a8] border border-ink overflow-hidden cursor-pointer touch-none select-none"
-        title="Cliquer ou glisser pour régler l'XP"
+        className={`h-2.5 rounded-full bg-[#cfc7a8] border border-ink overflow-hidden touch-none select-none ${disabled ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
+        title={disabled ? 'En pension — récupérez-le pour modifier son XP' : "Cliquer ou glisser pour régler l'XP"}
         onPointerDown={(e) => {
+          if (disabled) return
           e.currentTarget.setPointerCapture(e.pointerId)
           dragging.current = true
           onXpChange(valueFromPointer(e.clientX, e.currentTarget.getBoundingClientRect()))
         }}
         onPointerMove={(e) => {
-          if (!dragging.current) return
+          if (disabled || !dragging.current) return
           onXpChange(valueFromPointer(e.clientX, e.currentTarget.getBoundingClientRect()))
         }}
         onPointerUp={() => { dragging.current = false }}
@@ -122,19 +125,22 @@ export function XpGauge({ xp, max, milestones, onXpChange, evolutionItemIconUrl,
           <div className="w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-b-[5px] border-b-xp-blue" />
           <div className="flex items-center gap-1 bg-cream-secondary border border-xp-blue rounded px-1 py-0.5">
             <button
+              disabled={disabled}
               onClick={() => onXpChange(clampXp(xp - 1, max))}
-              className="text-xp-blue font-bold w-5 h-5 shrink-0 flex items-center justify-center hover:bg-cream-button rounded"
+              className="text-xp-blue font-bold w-5 h-5 shrink-0 flex items-center justify-center hover:bg-cream-button rounded disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
             >
               −
             </button>
             <NumberInput
               value={xp}
+              disabled={disabled}
               onCommit={(v) => onXpChange(clampXp(v, max))}
               className="w-10 bg-transparent text-xp-blue font-bold text-sm text-center outline-none"
             />
             <button
+              disabled={disabled}
               onClick={() => onXpChange(clampXp(xp + 1, max))}
-              className="text-xp-blue font-bold w-5 h-5 shrink-0 flex items-center justify-center hover:bg-cream-button rounded"
+              className="text-xp-blue font-bold w-5 h-5 shrink-0 flex items-center justify-center hover:bg-cream-button rounded disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
             >
               +
             </button>

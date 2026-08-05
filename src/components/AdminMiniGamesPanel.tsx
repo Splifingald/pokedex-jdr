@@ -3,14 +3,16 @@ import { AdminCasinoPanel } from './AdminCasinoPanel'
 import { AdminMinigamesEconomyPanel } from './AdminMinigamesEconomyPanel'
 import { AdminMagikarpPanel } from './AdminMagikarpPanel'
 import { AdminMiningPanel } from './AdminMiningPanel'
+import { AdminPensionPanel } from './AdminPensionPanel'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 
-type SubSection = 'casino' | 'magikarp' | 'mining'
+type SubSection = 'casino' | 'magikarp' | 'mining' | 'pension'
 
 const SUB_SECTIONS: { id: SubSection; label: string }[] = [
   { id: 'casino', label: '🎰 Casino' },
   { id: 'magikarp', label: '🐟 Magikarp' },
   { id: 'mining', label: '⛏️ Fouille' },
+  { id: 'pension', label: '🏡 Pension' },
 ]
 
 export function AdminMiniGamesPanel() {
@@ -40,6 +42,8 @@ export function AdminMiniGamesPanel() {
       )}
 
       {sub === 'mining' && <AdminMiningPanel />}
+
+      {sub === 'pension' && <AdminPensionPanel />}
     </div>
   )
 }

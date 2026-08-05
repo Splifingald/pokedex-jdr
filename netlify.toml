@@ -15,3 +15,8 @@
 # et envoie les notifications Web Push correspondantes.
 [functions."send-notifications"]
   schedule = "@hourly"
+
+# Fait avancer la Pension Pokémon toutes les heures : XP des pokémon placés,
+# notification de plafond atteint, production d'œufs.
+[functions."pension-tick"]
+  schedule = "@hourly"

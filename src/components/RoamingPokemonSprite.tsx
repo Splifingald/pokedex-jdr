@@ -1,4 +1,4 @@
-import { useMemo, useRef, useLayoutEffect, useEffect, type RefObject } from 'react'
+import { useRef, useLayoutEffect, useEffect, type RefObject } from 'react'
 import type { Pokemon, PlayerPokemon } from '../types'
 import { useRoamPosition, setGlobalDragActive, subscribeGlobalDrag } from '../hooks/useRoamPosition'
 import { useLocalHp } from '../hooks/useLocalHp'
@@ -18,14 +18,6 @@ interface Props {
   onClick: () => void
 }
 
-// Pseudo-vitesse stable (1–5) dérivée du nom : le modèle de données n'a pas
-// de stat de vitesse, mais on veut des allures de déambulation variées.
-function speedBucket(nom: string): number {
-  let h = 0
-  for (let i = 0; i < nom.length; i++) h = (h * 31 + nom.charCodeAt(i)) | 0
-  return (Math.abs(h) % 5) + 1
-}
-
 const CENTER = 'translateX(-50%)'
 
 const DRAG_THRESHOLD_PX = 5
@@ -39,8 +31,7 @@ function pointInRect(clientX: number, clientY: number, rect: DOMRect): boolean {
 }
 
 export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping, hasGift = false, containerRef, onClick }: Props) {
-  const speed = useMemo(() => speedBucket(playerPokemon.pokemon_nom), [playerPokemon.pokemon_nom])
-  const { pos, duration, setPos } = useRoamPosition(playerPokemon.id, speed, containerRef)
+  const { pos, duration, setPos, consumeInstant } = useRoamPosition(playerPokemon.id, pokemon?.distance_deplacement ?? 0, containerRef)
   const maxHp = getMaxHp(playerPokemon, pokemon)
   const [hp] = useLocalHp(playerPokemon.id, maxHp)
   const isKo = hp <= 0
@@ -94,7 +85,7 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
     const prevRect = prevRectRef.current
     prevRectRef.current = newRect
 
-    const wasDragMove = dragMoveRef.current
+    const wasDragMove = dragMoveRef.current || consumeInstant()
     dragMoveRef.current = false
 
     if (wasDragMove || !prevRect) {
@@ -112,7 +103,7 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
     void el.offsetHeight // force le reflow avant de relancer la transition
     el.style.transition = `transform ${duration}s linear`
     el.style.transform = CENTER
-  }, [pos.left, pos.bottom, duration])
+  }, [pos.left, pos.bottom, duration, consumeInstant])
 
   // Dès qu'un drag (ou un redimensionnement en cours de stabilisation)
   // démarre n'importe où sur la scène, on fige ce sprite à sa position
@@ -195,7 +186,7 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
     // avec ce qui est réellement affiché.
     draggingRef.current = true
     movedRef.current = false
-    setGlobalDragActive(true)
+    setGlobalDragActive(true, playerPokemon.id)
     dragStartRef.current = {
       x: e.clientX,
       y: e.clientY,

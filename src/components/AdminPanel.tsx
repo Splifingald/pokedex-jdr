@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import Papa from 'papaparse'
-import type { CsvRow, AttackCsvRow, CarteCsvRow, ItemCsvRow, EncounterCsvRow, DisplayAssetCsvRow, PokemonEvolutionCsvRow } from '../types'
-import { CSV_REQUIRED_HEADERS, ATTACK_CSV_REQUIRED_HEADERS, CARTE_CSV_REQUIRED_HEADERS, ITEM_CSV_REQUIRED_HEADERS, ENCOUNTER_CSV_REQUIRED_HEADERS, DISPLAY_ASSET_CSV_REQUIRED_HEADERS, POKEMON_EVOLUTION_CSV_REQUIRED_HEADERS } from '../types'
+import type { CsvRow, AttackCsvRow, CarteCsvRow, ItemCsvRow, EncounterCsvRow, DisplayAssetCsvRow, PokemonEvolutionCsvRow, PokemonEggGroupCsvRow } from '../types'
+import { CSV_REQUIRED_HEADERS, ATTACK_CSV_REQUIRED_HEADERS, CARTE_CSV_REQUIRED_HEADERS, ITEM_CSV_REQUIRED_HEADERS, ENCOUNTER_CSV_REQUIRED_HEADERS, DISPLAY_ASSET_CSV_REQUIRED_HEADERS, POKEMON_EVOLUTION_CSV_REQUIRED_HEADERS, POKEMON_EGG_GROUP_CSV_REQUIRED_HEADERS } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 
 // L'import CSV passe par une Netlify Function côté serveur
@@ -13,6 +13,7 @@ const IMPORT_ITEMS_URL = '/.netlify/functions/import-items'
 const IMPORT_ENCOUNTERS_URL = '/.netlify/functions/import-encounters'
 const IMPORT_DISPLAY_ASSETS_URL = '/.netlify/functions/import-display-assets'
 const IMPORT_POKEMON_EVOLUTIONS_URL = '/.netlify/functions/import-pokemon-evolutions'
+const IMPORT_POKEMON_EGG_GROUPS_URL = '/.netlify/functions/import-pokemon-egg-groups'
 const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET as string
 
 interface Props {
@@ -130,6 +131,16 @@ function mapPokemonEvolutionCsvRow(row: PokemonEvolutionCsvRow) {
   }
 }
 
+// Une ligne CSV (1 espèce, jusqu'à 3 groupes) devient 0 à 3 lignes en base —
+// une par colonne Groupe non vide.
+function mapPokemonEggGroupCsvRow(row: PokemonEggGroupCsvRow) {
+  const pokemon_nom = row['Pokémon']?.trim() ?? ''
+  return (['Groupe 1', 'Groupe 2', 'Groupe 3'] as const)
+    .map((k) => row[k]?.trim())
+    .filter((groupe): groupe is string => !!groupe)
+    .map((groupe) => ({ pokemon_nom, groupe }))
+}
+
 interface ImportResult {
   name: string
   ok: boolean
@@ -191,6 +202,8 @@ async function importOneFile(file: File): Promise<ImportResult> {
   const isEncountersCsv = fields.includes('Lieu')
   // Une colonne "Évolution" n'existe que dans le CSV d'évolutions
   const isEvolutionsCsv = fields.includes('Évolution')
+  // Une colonne "Groupe 1" n'existe que dans le CSV de groupes d'œufs (Pension Pokémon)
+  const isEggGroupsCsv = fields.includes('Groupe 1')
   // Le CSV du mode Affichage contient ces 4 colonnes (Nom + Type + Image + Reference) —
   // couvre aussi les fonds d'écran (Type = "Background") et les calques superposés à la
   // Carte (Type = "Map Add-On"). Reference permet à plusieurs images de partager le même
@@ -287,6 +300,21 @@ async function importOneFile(file: File): Promise<ImportResult> {
     }
   }
 
+  if (isEggGroupsCsv) {
+    const missing = POKEMON_EGG_GROUP_CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
+    if (missing.length > 0) return fail(`Colonnes manquantes : ${missing.join(', ')}`)
+
+    const rows = (results.data as unknown as PokemonEggGroupCsvRow[]).flatMap(mapPokemonEggGroupCsvRow).filter((r) => r.pokemon_nom && r.groupe)
+    if (rows.length === 0) return fail('Aucune ligne valide trouvée dans le CSV.')
+
+    try {
+      const imported = await postRows(IMPORT_POKEMON_EGG_GROUPS_URL, rows)
+      return { name, ok: true, message: `✅ ${imported} groupes d'œufs importés avec succès !` }
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : 'Erreur inconnue')
+    }
+  }
+
   // Validation des en-têtes (CSV pokémon)
   const missing = CSV_REQUIRED_HEADERS.filter((h) => !fields.includes(h))
   if (missing.length > 0) return fail(`Colonnes manquantes : ${missing.join(', ')}`)
@@ -338,7 +366,7 @@ export function AdminPanel({ onImportSuccess }: Props) {
 
         <div className="mb-5">
           <p className="text-ink-muted-2 text-sm mb-3">
-            Importer un ou plusieurs CSV Pokémon, Capacités, Carte, Objets, Rencontres, Évolutions ou Fonds d'écran (type détecté automatiquement pour chaque fichier).<br />
+            Importer un ou plusieurs CSV Pokémon, Capacités, Carte, Objets, Rencontres, Évolutions, Groupes d'œufs (Pension) ou Fonds d'écran (type détecté automatiquement pour chaque fichier).<br />
             <span className="text-[#a3841a] text-xs">⚠ Remplace toute la liste existante correspondante.</span>
           </p>
           <button

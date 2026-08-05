@@ -75,3 +75,5 @@ export const MINIGAMES_TICKET_ICON = `${BASE}/icon_magikarp_ticket.png`
 
 export const MINING_ICON = `${BASE}/icon_digging_game.png`
 export const MINING_TICKET_ICON = `${BASE}/icon_digging_ticket.png`
+
+export const PENSION_ICON = `${BASE}/icon_daycare_game.png`

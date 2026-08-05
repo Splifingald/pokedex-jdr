@@ -24,6 +24,14 @@ const isEvolutionWord = (label: string) => label === 'évolution' || label === '
 const startsWithEvolutionWord = (label: string) =>
   label.startsWith('évolution') || label.startsWith('évo.') || label.startsWith('évo ')
 
+// Palier distinct de isEvolutionWord/startsWithEvolutionWord (aucune collision :
+// ces libellés ne commencent ni par "évolution" ni par "évo") — déclenche une
+// évolution vers une cible tirée au hasard parmi pokemon_evolutions plutôt
+// qu'un choix précis. Toujours sans objet requis (pas de variante "possible"),
+// utilisé pour les œufs de la Pension Pokémon mais applicable à n'importe
+// quelle espèce.
+const isRandomEvolutionWord = (label: string) => label === 'éclosion' || label === 'évo. aléatoire' || label === 'évolution aléatoire'
+
 // Options d'évolution disponibles pour une instance possédée. Le palier XP qui
 // déclenche l'affichage n'est pas forcément le dernier de la jauge : c'est celui
 // dont le libellé vaut exactement "Évolution"/"Évo"/"Évo." (évolutions sans objet
@@ -64,4 +72,23 @@ export function getEvolutionOptions(
         clickable: playerHasItem,
       }
     })
+}
+
+// XP du palier "Éclosion"/"Évo. aléatoire" le plus bas, ou null si l'espèce n'en a pas.
+export function getRandomEvolutionTrigger(pokemon: Pokemon | undefined): number | null {
+  return findTriggerXp(pokemon, isRandomEvolutionWord)
+}
+
+export function isRandomEvolutionReady(playerPokemon: PlayerPokemon, pokemon: Pokemon | undefined): boolean {
+  const xp = getRandomEvolutionTrigger(pokemon)
+  return xp != null && playerPokemon.xp >= xp
+}
+
+// Cible tirée uniformément au hasard parmi les options d'évolution configurées
+// pour cette espèce (pokemon_evolutions) — toujours sans condition d'objet,
+// contrairement aux évolutions normales qui peuvent en avoir une.
+export function pickRandomEvolution(pokemonNom: string, evolutionsByPokemonNom: Map<string, PokemonEvolution[]>): PokemonEvolution | null {
+  const rows = evolutionsByPokemonNom.get(pokemonNom) ?? []
+  if (rows.length === 0) return null
+  return rows[Math.floor(Math.random() * rows.length)]
 }
