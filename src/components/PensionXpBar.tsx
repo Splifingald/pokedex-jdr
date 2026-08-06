@@ -9,13 +9,15 @@ interface Props {
   milestones?: Milestone[]
   /** Grille de pension (cartes compactes) : masque les drapeaux de palier, garde juste la barre */
   compact?: boolean
+  /** Masque aussi la ligne "XP x/y" sous la barre (cartes très compactes, ex. PensionSelectionPopup) */
+  hideText?: boolean
 }
 
 // Variante en lecture seule de XpGauge (pas de drag/clic) : la barre affiche,
 // dans une même piste, la position XP en direct (bleu, plein) puis un second
 // segment (orange, translucide) montrant jusqu'où la pension pourrait encore
 // faire progresser ce pokémon à partir d'ici.
-export function PensionXpBar({ xp, remainingCap, maxXp, milestones = [], compact = false }: Props) {
+export function PensionXpBar({ xp, remainingCap, maxXp, milestones = [], compact = false, hideText = false }: Props) {
   const trackMax = maxXp ?? xp + remainingCap
   const pct = (v: number) => (trackMax > 0 ? Math.max(0, Math.min(100, (v / trackMax) * 100)) : 0)
   const livePct = pct(xp)
@@ -47,10 +49,12 @@ export function PensionXpBar({ xp, remainingCap, maxXp, milestones = [], compact
         />
       </div>
 
-      <div className="flex items-center justify-between mt-1 text-sm">
-        <span className="text-ink-muted-2">XP</span>
-        <span className="text-xp-blue font-bold">{xp}{maxXp != null ? ` / ${maxXp}` : ''}</span>
-      </div>
+      {!hideText && (
+        <div className="flex items-center justify-between mt-1 text-sm">
+          <span className="text-ink-muted-2">XP</span>
+          <span className="text-xp-blue font-bold">{xp}{maxXp != null ? ` / ${maxXp}` : ''}</span>
+        </div>
+      )}
     </div>
   )
 }

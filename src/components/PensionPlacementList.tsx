@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react'
 import type { Pokemon, PlayerPokemon, PensionConfig, PensionXpGroup } from '../types'
 import { ownedPokemonName } from '../types'
 import { getMaxXp } from '../lib/xpBonuses'
-import { resolveApplicableXpGroup, formatXpCapTimeframe, canPair, type ApplicablePensionSettings } from '../lib/pension'
+import { resolveApplicableXpGroup, canPair } from '../lib/pension'
 import { PANEL } from '../lib/panelStyles'
+import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PensionXpBar } from './PensionXpBar'
 
 interface Props {
@@ -30,12 +31,15 @@ interface Row {
   pp: PlayerPokemon
   species: Pokemon | undefined
   maxXp: number | null
-  applicable: ApplicablePensionSettings
   remaining: number
   hasCompatibleMate: boolean
   ratioPerHour: number
 }
 
+// Grille compacte affichée dans PensionSelectionPopup (ouverte depuis le
+// bouton "Ajouter un pokémon" d'un emplacement vide de la grille de
+// pension) — chaque carte a son propre bouton "Ajouter", contrairement à
+// l'ancienne liste où toute la ligne était cliquable.
 export function PensionPlacementList({
   pcRoster, daycareRoster, pokemonByName, pensionConfig, xpGroupByPokemonNom, eggGroupsByPokemonNom, daycareFull, onPlace,
 }: Props) {
@@ -52,7 +56,7 @@ export function PensionPlacementList({
     ))
     const hasCompatibleMate = daycareRoster.some((d) => canPair(groups, eggGroupsByPokemonNom.get(d.pokemon_nom) ?? []))
     const ratioPerHour = applicable.tickIntervalMs > 0 ? (pensionConfig.tick_xp_amount / applicable.tickIntervalMs) * 3_600_000 : 0
-    return { pp, species, maxXp, applicable, remaining, hasCompatibleMate, ratioPerHour }
+    return { pp, species, maxXp, remaining, hasCompatibleMate, ratioPerHour }
   }), [pcRoster, pokemonByName, eggGroupsByPokemonNom, xpGroupByPokemonNom, pensionConfig, daycareRoster])
 
   const sorted = useMemo(() => {
@@ -77,10 +81,6 @@ export function PensionPlacementList({
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-ink text-base font-bold text-center">
-        Sélectionne le Pokémon à déposer à la pension depuis ton PC
-      </p>
-
       {daycareFull && (
         <p className="text-hp-orange text-sm font-bold text-center bg-hp-orange/10 border-2 border-hp-orange rounded-lg py-2 px-3">
           Pension complète — réessayez plus tard.
@@ -100,40 +100,38 @@ export function PensionPlacementList({
         </select>
       </div>
 
-      <div className="flex flex-col gap-2">
-        {sorted.map(({ pp, species, maxXp, applicable, remaining, hasCompatibleMate }) => (
-          <button
-            key={pp.id}
-            onClick={() => onPlace(pp.id)}
-            disabled={daycareFull || remaining <= 0}
-            className={`${PANEL} relative flex items-center gap-3 p-2.5 text-left disabled:opacity-50 disabled:cursor-not-allowed`}
-          >
-            <div className="w-16 h-16 shrink-0 rounded-md border-2 border-ink bg-cream-secondary flex items-center justify-center overflow-hidden">
-              {species?.image_miniature ? (
-                <img src={species.image_miniature} alt="" className="pixelated w-full h-full object-contain" />
-              ) : (
-                <span className="text-ink-muted-2 text-2xl">?</span>
-              )}
-            </div>
-
-            <div className="flex-1 min-w-0">
-              <span className="text-ink text-base font-bold truncate block mb-1">{ownedPokemonName(pp)}</span>
-              <PensionXpBar xp={pp.xp} remainingCap={remaining} maxXp={maxXp} compact />
-              <div className="flex items-center justify-between gap-2 mt-0.5">
-                <span className={`text-sm font-bold ${remaining > 0 ? 'text-[#2f6b3f]' : 'text-ink-muted-2'}`}>
-                  {remaining > 0
-                    ? formatXpCapTimeframe(remaining, pensionConfig.tick_xp_amount, applicable.tickIntervalMs)
-                    : 'Plafond de la pension déjà atteint pour ce pokémon'}
+      <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5">
+        {sorted.map(({ pp, species, maxXp, remaining, hasCompatibleMate }) => {
+          const disabled = daycareFull || remaining <= 0
+          return (
+            <div key={pp.id} className={`${PANEL} relative flex flex-col items-center gap-1 p-1.5`}>
+              {hasCompatibleMate && (
+                <span
+                  className="absolute top-0.5 right-0.5 text-sm [filter:drop-shadow(1px_1px_0_rgba(0,0,0,0.4))]"
+                  title="Compatible avec un pokémon déjà en pension"
+                >
+                  ❤️
                 </span>
-                {hasCompatibleMate && (
-                  <span className="flex items-center gap-1 text-sm font-bold shrink-0" title="Compatible avec un pokémon déjà en pension">
-                    ❤️ Compatible reproduction
-                  </span>
+              )}
+              <div className="w-10 h-10 shrink-0 rounded-md border-2 border-ink bg-cream-secondary flex items-center justify-center overflow-hidden">
+                {species?.image_miniature ? (
+                  <img src={species.image_miniature} alt="" className="pixelated w-full h-full object-contain" />
+                ) : (
+                  <span className="text-ink-muted-2 text-base">?</span>
                 )}
               </div>
+              <span className="text-ink text-xs font-bold truncate w-full text-center">{ownedPokemonName(pp)}</span>
+              <PensionXpBar xp={pp.xp} remainingCap={remaining} maxXp={maxXp} compact hideText />
+              <button
+                onClick={() => onPlace(pp.id)}
+                disabled={disabled}
+                className={`w-full py-1 rounded text-xs font-bold ${BUTTON_STYLE.yellow} disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                {remaining > 0 ? 'Ajouter' : 'Plafond'}
+              </button>
             </div>
-          </button>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

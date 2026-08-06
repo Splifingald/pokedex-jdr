@@ -7,7 +7,7 @@ import { usePensionXpGroups } from '../hooks/usePensionXpGroups'
 import { usePensionDaycare } from '../hooks/usePensionDaycare'
 import { useToast } from '../context/ToastContext'
 import { GameBanner } from './CasinoGameCard'
-import { PensionPlacementList } from './PensionPlacementList'
+import { PensionSelectionPopup } from './PensionSelectionPopup'
 import { PensionDaycareGrid } from './PensionDaycareGrid'
 import { PensionDaycareInfoPopup } from './PensionDaycareInfoPopup'
 import { PensionInfoPopup } from './PensionInfoPopup'
@@ -54,11 +54,12 @@ export function PensionPopup({
   const { config, loading: configLoading } = usePensionConfig()
   const { eggGroupsByPokemonNom, loading: groupsLoading } = usePensionGroups()
   const { xpGroupByPokemonNom, loading: xpGroupsLoading } = usePensionXpGroups()
-  const { daycareRoster, pairsByPokemonId, myDaycarePokemon, placeInDaycare, retrieveFromDaycare } = usePensionDaycare(player.id)
+  const { daycareRoster, pairsByPokemonId, placeInDaycare, retrieveFromDaycare } = usePensionDaycare(player.id)
   const { showToast } = useToast()
   const [now, setNow] = useState(() => Date.now())
   const [selectedDaycareId, setSelectedDaycareId] = useState<number | null>(null)
   const [showInfo, setShowInfo] = useState(false)
+  const [showSelection, setShowSelection] = useState(false)
   const [retrievedInfo, setRetrievedInfo] = useState<RetrievedInfo | null>(null)
 
   useEffect(() => {
@@ -73,7 +74,7 @@ export function PensionPopup({
   // sa place automatiquement au prochain rendu (roster mis à jour en temps réel).
   const unseenEgg = roster.find((r) => !r.egg_reveal_seen) ?? null
 
-  const handlePlace = async (id: number) => {
+  const handlePlace = async (id: number): Promise<boolean> => {
     const pp = pcRoster.find((r) => r.id === id)
     const result = await placeInDaycare(id)
     if (result.status === 'ok') {
@@ -88,9 +89,16 @@ export function PensionPopup({
           })
         }
       }
-    } else {
-      showToast(PLACE_ERROR_MESSAGES[result.status] ?? "Impossible de placer ce pokémon en pension pour l'instant.")
+      return true
     }
+    showToast(PLACE_ERROR_MESSAGES[result.status] ?? "Impossible de placer ce pokémon en pension pour l'instant.")
+    return false
+  }
+
+  // Ferme le popup de sélection uniquement si le placement a réussi — sinon
+  // le joueur reste dessus pour voir le toast d'erreur et réessayer.
+  const handlePlaceFromSelection = async (id: number) => {
+    if (await handlePlace(id)) setShowSelection(false)
   }
 
   const handleRetrieve = async (id: number) => {
@@ -117,8 +125,7 @@ export function PensionPopup({
 
   // On ne rebascule vers la fiche complète (avec animation d'évolution) que si
   // le séjour en pension a effectivement fait franchir un palier d'évolution —
-  // sinon on reste simplement sur ce popup, qui affichera à nouveau la liste
-  // de placement (myDaycarePokemon redevient null).
+  // sinon on reste simplement sur ce popup.
   const handleContinueAfterRetrieve = () => {
     if (!retrievedInfo) return
     const { id, canEvolve } = retrievedInfo
@@ -177,6 +184,7 @@ export function PensionPopup({
                   now={now}
                   onSelectCard={setSelectedDaycareId}
                   onRetrieve={handleRetrieve}
+                  onOpenSelection={() => setShowSelection(true)}
                 />
               </div>
 
@@ -184,21 +192,6 @@ export function PensionPopup({
                 <p className="text-ink text-sm font-bold mb-1.5">Activité récente</p>
                 <PensionHistoryFeed pokemonByName={pokemonByName} itemsByName={itemsByName} />
               </div>
-
-              {!myDaycarePokemon && (
-                <div className="border-t-2 border-[#cfc7a8] pt-4">
-                  <PensionPlacementList
-                    pcRoster={pcRoster}
-                    daycareRoster={daycareRoster}
-                    pokemonByName={pokemonByName}
-                    pensionConfig={config}
-                    xpGroupByPokemonNom={xpGroupByPokemonNom}
-                    eggGroupsByPokemonNom={eggGroupsByPokemonNom}
-                    daycareFull={daycareFull}
-                    onPlace={handlePlace}
-                  />
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -228,6 +221,20 @@ export function PensionPopup({
       )}
 
       {showInfo && <PensionInfoPopup infoText={config.info_text} onClose={() => setShowInfo(false)} />}
+
+      {showSelection && (
+        <PensionSelectionPopup
+          pcRoster={pcRoster}
+          daycareRoster={daycareRoster}
+          pokemonByName={pokemonByName}
+          pensionConfig={config}
+          xpGroupByPokemonNom={xpGroupByPokemonNom}
+          eggGroupsByPokemonNom={eggGroupsByPokemonNom}
+          daycareFull={daycareFull}
+          onPlace={handlePlaceFromSelection}
+          onClose={() => setShowSelection(false)}
+        />
+      )}
 
       {!loading && unseenEgg && (
         <PensionEggRevealPopup
