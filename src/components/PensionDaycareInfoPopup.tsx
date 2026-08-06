@@ -12,6 +12,7 @@ interface Props {
   isMine: boolean
   pensionConfig: PensionConfig
   applicable: ApplicablePensionSettings
+  eggGroups: string[]
   now: number
   onRetrieve?: () => void
   onClose: () => void
@@ -21,7 +22,7 @@ interface Props {
 // vue dédiée et volontairement plus légère que la fiche générique
 // PokemonDetailSheet, centrée sur ce qui compte ici : XP en cours, potentiel
 // restant, minuteur, et récupérer.
-export function PensionDaycareInfoPopup({ playerPokemon, pokemon, isMine, pensionConfig, applicable, now, onRetrieve, onClose }: Props) {
+export function PensionDaycareInfoPopup({ playerPokemon, pokemon, isMine, pensionConfig, applicable, eggGroups, now, onRetrieve, onClose }: Props) {
   const milestones = getMilestones(pokemon)
   const maxXp = getMaxXp(pokemon)
   const { committedXp, projectedExtraXp, nextTickInMs } = computeProjectedDaycareXp(playerPokemon, applicable, pensionConfig.tick_xp_amount, new Date(now), maxXp)
@@ -50,6 +51,9 @@ export function PensionDaycareInfoPopup({ playerPokemon, pokemon, isMine, pensio
             )}
           </div>
           <h3 className="text-ink text-xl font-bold">{ownedPokemonName(playerPokemon)}</h3>
+          <p className="text-ink-muted-2 text-sm mt-0.5">
+            {eggGroups.length > 0 ? `Groupe(s) : ${eggGroups.join(', ')}` : "Aucun groupe d'œufs"}
+          </p>
         </div>
 
         <PensionXpBar xp={liveXp} remainingCap={remainingCap} maxXp={maxXp} milestones={milestones} />

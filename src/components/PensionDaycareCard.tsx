@@ -19,13 +19,12 @@ interface Props {
   onRetrieve: () => void
 }
 
-// Rendu volontairement "en liberté" (pas en grille façon inventaire) : sprite
-// bien plus gros que le reste de l'app (repère visuel fort dans le popup) +
-// jauge XP en direct en dessous, qui se change en bouton "Récupérer" (le sien)
-// ou en badge "Prêt" (celui d'un autre) une fois le pokémon au taquet — plus
-// besoin de cliquer pour agir une fois prêt. Le clic sur le sprite (ou la
-// jauge tant qu'elle est affichée) ouvre PensionDaycareInfoPopup pour le détail
-// complet (nom, palier exact, minuteur, récupération manuelle anticipée).
+// Case carrée d'un emplacement occupé de la grille de pension (voir
+// PensionDaycareGrid, capacity_total colonnes fixes). Le sprite remplit
+// (quasiment) toute la case ; propriétaire et cœur d'appariement sont de
+// petits badges nichés dans les coins (jamais à cheval sur la bordure) ; nom
+// + jauge XP (remplacée par "Récupérer"/"Prêt" une fois au taquet) sont
+// superposés en bandeau semi-opaque tout en bas.
 export function PensionDaycareCard({
   playerPokemon, pokemon, owner, isMine, pensionConfig, applicable, hasPair, now, onSelect, onRetrieve,
 }: Props) {
@@ -70,45 +69,10 @@ export function PensionDaycareCard({
   ))
 
   return (
-    <div className="flex flex-col items-center gap-2 w-72">
-      <button onClick={onSelect} className="relative w-72 h-72 flex items-center justify-center" title={ownedPokemonName(playerPokemon)}>
-        {hasPair && (
-          <span className="absolute top-2 left-2 text-3xl z-10 [filter:drop-shadow(1px_2px_1px_rgba(0,0,0,0.4))]" title="Appariement en cours pour un œuf">
-            ❤️
-          </span>
-        )}
-        <div style={jumping ? { animation: 'jump-pop 0.6s ease-out 1' } : undefined}>
-          <div style={{ animation: `idle-bob ${bobDuration}s ease-in-out ${bobDelay}s infinite` }}>
-            {pokemon?.image_miniature ? (
-              <img
-                src={pokemon.image_miniature}
-                alt=""
-                className="pixelated w-60 h-60 object-contain [filter:drop-shadow(3px_6px_3px_rgba(0,0,0,0.3))]"
-              />
-            ) : (
-              <span className="text-ink-muted-2 text-6xl">?</span>
-            )}
-          </div>
-        </div>
-      </button>
-
-      {isMaxed ? (
-        isMine ? (
-          <button onClick={onRetrieve} className={`w-full py-2.5 rounded-lg text-base font-bold ${BUTTON_STYLE.blue}`}>
-            Récupérer
-          </button>
-        ) : (
-          <span className="text-base font-bold text-[#2f6b3f]">✅ Prêt</span>
-        )
-      ) : (
-        <button onClick={onSelect} className="w-full">
-          <PensionXpBar xp={liveXp} remainingCap={remainingCap} maxXp={maxXp} compact />
-        </button>
-      )}
-
+    <div className="relative aspect-square min-w-0 border-2 border-ink rounded-lg bg-cream-secondary overflow-hidden">
       {owner && (
         <span
-          className="w-14 h-14 rounded-full border-2 shrink-0 overflow-hidden"
+          className="absolute top-1 left-1 z-10 w-6 h-6 rounded-full border-2 shrink-0 overflow-hidden bg-cream"
           style={{ borderColor: owner.color }}
           title={owner.name}
         >
@@ -119,6 +83,46 @@ export function PensionDaycareCard({
           )}
         </span>
       )}
+
+      {hasPair && (
+        <span className="absolute top-1 right-1 z-10 text-lg [filter:drop-shadow(1px_1px_0_rgba(0,0,0,0.4))]" title="Appariement en cours pour un œuf">
+          ❤️
+        </span>
+      )}
+
+      <button onClick={onSelect} className="absolute inset-0 flex items-center justify-center p-1" title={ownedPokemonName(playerPokemon)}>
+        <div className="w-full h-full flex items-center justify-center" style={jumping ? { animation: 'jump-pop 0.6s ease-out 1' } : undefined}>
+          <div className="w-full h-full flex items-center justify-center" style={{ animation: `idle-bob ${bobDuration}s ease-in-out ${bobDelay}s infinite` }}>
+            {pokemon?.image_miniature ? (
+              <img
+                src={pokemon.image_miniature}
+                alt=""
+                className="pixelated max-w-full max-h-full object-contain [filter:drop-shadow(1px_2px_1px_rgba(0,0,0,0.3))]"
+              />
+            ) : (
+              <span className="text-ink-muted-2 text-6xl">?</span>
+            )}
+          </div>
+        </div>
+      </button>
+
+      <div className="absolute bottom-0 inset-x-0 z-10 flex flex-col gap-0.5 px-1.5 pt-1 pb-1.5 bg-cream/90 border-t-2 border-ink/20">
+        <span className="text-ink text-xs font-bold truncate w-full text-center">{ownedPokemonName(playerPokemon)}</span>
+
+        {isMaxed ? (
+          isMine ? (
+            <button onClick={onRetrieve} className={`w-full py-1 rounded text-xs font-bold ${BUTTON_STYLE.blue}`}>
+              Récupérer
+            </button>
+          ) : (
+            <p className="text-xs font-bold text-center text-[#2f6b3f]">✅ Prêt</p>
+          )
+        ) : (
+          <button onClick={onSelect} className="w-full">
+            <PensionXpBar xp={liveXp} remainingCap={remainingCap} maxXp={maxXp} compact />
+          </button>
+        )}
+      </div>
     </div>
   )
 }

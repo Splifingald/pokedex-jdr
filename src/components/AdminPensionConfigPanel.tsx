@@ -138,6 +138,16 @@ export function AdminPensionConfigPanel() {
             </div>
           </div>
         </div>
+
+        <div className="border-t-2 border-[#cfc7a8] pt-3">
+          <label className="text-ink-muted-2 text-sm block mb-1">Texte du popup "Comment fonctionne la Pension ?" (une ligne = une puce)</label>
+          <textarea
+            defaultValue={config.info_text}
+            onBlur={(e) => { const v = e.target.value; if (v.trim() && v !== config.info_text) updateConfig({ info_text: v }) }}
+            rows={5}
+            className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none resize-y"
+          />
+        </div>
       </div>
     </div>
   )

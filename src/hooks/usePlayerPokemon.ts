@@ -152,6 +152,14 @@ export function usePlayerPokemon(playerId: number | null) {
     return setMoves(id, current.moves.filter((m) => m !== moveName))
   }, [roster, setMoves])
 
+  const markEggRevealSeen = useCallback(async (id: number) => {
+    setRoster((prev) => prev.map((r) => (r.id === id ? { ...r, egg_reveal_seen: true } : r)))
+    const { error } = await supabase.from('player_pokemon').update({ egg_reveal_seen: true }).eq('id', id)
+    if (error) {
+      console.error("Erreur lors du marquage de l'œuf comme vu :", error)
+    }
+  }, [])
+
   const deleteOwnedPokemon = useCallback(async (id: number) => {
     setRoster((prev) => prev.filter((r) => r.id !== id))
     const { error } = await supabase.from('player_pokemon').delete().eq('id', id)
@@ -174,6 +182,7 @@ export function usePlayerPokemon(playerId: number | null) {
     addMove,
     removeMove,
     deleteOwnedPokemon,
+    markEggRevealSeen,
     refetch: fetchAll,
   }
 }

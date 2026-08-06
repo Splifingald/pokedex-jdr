@@ -226,7 +226,7 @@ exports.handler = async () => {
 
           const { data: newRow, error: insertError } = await supabase
             .from('player_pokemon')
-            .insert({ player_id: recipientPlayerId, pokemon_nom: eggSpeciesNom, pokemon_numero: eggPokemonRow?.numero ?? null, in_team: false, xp: 0 })
+            .insert({ player_id: recipientPlayerId, pokemon_nom: eggSpeciesNom, pokemon_numero: eggPokemonRow?.numero ?? null, in_team: false, xp: 0, egg_reveal_seen: false })
             .select()
             .single()
 

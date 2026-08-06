@@ -16,21 +16,39 @@ interface Props {
   onRetrieve: (id: number) => void
 }
 
-// "En liberté" plutôt qu'en grille façon inventaire : une simple rangée qui
-// s'enroule si besoin (capacité par défaut = 3 ; les sprites étant volontairement
-// très grands, ça s'enroule vite sur petit écran, ce qui est normal).
+// Case vide : une simple ombre vectorielle à l'endroit où un pokémon se
+// tiendrait, plus une explication — pour bien montrer qu'une place est
+// libre sans avoir l'air d'une case "cassée" ou vide de sens.
+function PensionEmptySlot() {
+  return (
+    <div className="aspect-square min-w-0 rounded-lg border-2 border-dashed border-ink/25 bg-cream-secondary/30 flex flex-col items-center justify-center gap-2 p-2">
+      <svg viewBox="0 0 48 16" className="w-2/5 text-ink" aria-hidden="true">
+        <ellipse cx="24" cy="8" rx="22" ry="7" fill="currentColor" opacity="0.15" />
+      </svg>
+      <p className="text-ink-muted-2 text-xs text-center leading-snug">
+        Un pokémon supplémentaire peut être ajouté par un autre dresseur ici
+      </p>
+    </div>
+  )
+}
+
+// Grille à emplacements fixes : toujours capacity_total colonnes égales sur une
+// seule ligne (minmax(0, 1fr) laisse les cases rétrécir plutôt que déborder ou
+// passer à la ligne), places vacantes affichées comme des cases vides plutôt
+// que masquées — pour bien montrer combien de place il reste d'un coup d'œil.
 export function PensionDaycareGrid({
   daycareRoster, pokemonByName, pensionConfig, xpGroupByPokemonNom, pairsByPokemonId, currentPlayerId, now, onSelectCard, onRetrieve,
 }: Props) {
   const { players } = usePlayers()
   const playersById = useMemo(() => new Map(players.map((p) => [p.id, p])), [players])
 
-  if (daycareRoster.length === 0) {
-    return <p className="text-ink-muted-2 text-sm text-center py-6">Personne en pension pour l'instant.</p>
-  }
+  const emptySlots = Math.max(0, pensionConfig.capacity_total - daycareRoster.length)
 
   return (
-    <div className="flex flex-wrap items-start justify-center gap-8 py-2">
+    <div
+      className="grid gap-2"
+      style={{ gridTemplateColumns: `repeat(${Math.max(1, pensionConfig.capacity_total)}, minmax(0, 1fr))` }}
+    >
       {daycareRoster.map((pp) => (
         <PensionDaycareCard
           key={pp.id}
@@ -45,6 +63,9 @@ export function PensionDaycareGrid({
           onSelect={() => onSelectCard(pp.id)}
           onRetrieve={() => onRetrieve(pp.id)}
         />
+      ))}
+      {Array.from({ length: emptySlots }, (_, i) => (
+        <PensionEmptySlot key={`empty-${i}`} />
       ))}
     </div>
   )

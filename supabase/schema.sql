@@ -1398,6 +1398,16 @@ ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS daycare_last_tick_at timesta
 ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS daycare_lifetime_xp integer NOT NULL DEFAULT 0;
 ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS daycare_capped boolean NOT NULL DEFAULT false;
 ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS daycare_capped_notified boolean NOT NULL DEFAULT false;
+-- Instantané de xp au moment du placement (rempli par pension_place) — sert à
+-- calculer combien d'XP a été gagnée PENDANT ce séjour précis (xp - ce champ),
+-- affiché au joueur à la récupération (voir PensionRetrievedPopup).
+ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS daycare_xp_at_placement integer;
+-- false uniquement pour un œuf fraîchement produit par pension-tick.js ; le
+-- joueur voit alors PensionEggRevealPopup à la prochaine ouverture de la
+-- pension, qui remet ce champ à true (voir PensionPopup::unseenEgg). true
+-- par défaut pour tout le reste (achats normaux, imports, etc.) — pas de
+-- popup à afficher rétroactivement pour les lignes existantes.
+ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS egg_reveal_seen boolean NOT NULL DEFAULT true;
 
 ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_pension_enabled boolean NOT NULL DEFAULT true;
 
@@ -1419,9 +1429,20 @@ CREATE TABLE IF NOT EXISTS pension_config (
   default_hatch_timer_min   integer NOT NULL DEFAULT 24,
   default_hatch_timer_max   integer NOT NULL DEFAULT 48,
   default_hatch_timer_unit  text NOT NULL DEFAULT 'hours' CHECK (default_hatch_timer_unit IN ('hours', 'minutes')),
+  info_text                 text NOT NULL DEFAULT $def$Chaque dresseur ne peut avoir qu'un pokémon en pension.
+Il y a des limites d'expérience cumulable en pension.
+Les pokémon de dresseurs différents peuvent produire des œufs s'ils sont compatibles — dans ce cas, l'œuf est donné à l'un des deux dresseurs, au hasard.
+Les œufs reçus peuvent contenir tout type de pokémon, la dame de la pension s'amuse à les mélanger pour faire des surprises aux dresseurs !$def$,
   CONSTRAINT single_row CHECK (id = 1)
 );
 INSERT INTO pension_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+-- Texte du popup "Comment fonctionne la Pension ?", désormais paramétrable
+-- en admin (voir AdminPensionConfigPanel) plutôt que codé en dur dans
+-- PensionInfoPopup. Une ligne = une puce.
+ALTER TABLE pension_config ADD COLUMN IF NOT EXISTS info_text text NOT NULL DEFAULT $def$Chaque dresseur ne peut avoir qu'un pokémon en pension.
+Il y a des limites d'expérience cumulable en pension.
+Les pokémon de dresseurs différents peuvent produire des œufs s'ils sont compatibles — dans ce cas, l'œuf est donné à l'un des deux dresseurs, au hasard.
+Les œufs reçus peuvent contenir tout type de pokémon, la dame de la pension s'amuse à les mélanger pour faire des surprises aux dresseurs !$def$;
 
 -- Groupes d'œufs par espèce — importé par CSV (colonnes Pokémon/Groupe 1/Groupe
 -- 2/Groupe 3), jusqu'à 3 lignes par espèce. Référence par nom, pas de FK (survit
@@ -1699,14 +1720,15 @@ DECLARE
   v_in_team boolean;
   v_in_daycare boolean;
   v_capped boolean;
+  v_xp integer;
   v_capacity integer;
   v_current_count integer;
   v_player_has_slot integer;
 BEGIN
   PERFORM pg_advisory_xact_lock(hashtext('pension_slots'));
 
-  SELECT player_id, in_team, in_daycare, daycare_capped
-    INTO v_owner, v_in_team, v_in_daycare, v_capped
+  SELECT player_id, in_team, in_daycare, daycare_capped, xp
+    INTO v_owner, v_in_team, v_in_daycare, v_capped, v_xp
     FROM player_pokemon WHERE id = p_player_pokemon_id FOR UPDATE;
 
   IF v_owner IS NULL OR v_owner <> p_player_id THEN RETURN jsonb_build_object('status', 'not_owner'); END IF;
@@ -1722,7 +1744,7 @@ BEGIN
   IF v_current_count >= v_capacity THEN RETURN jsonb_build_object('status', 'daycare_full'); END IF;
 
   UPDATE player_pokemon
-  SET in_daycare = true, daycare_placed_at = now(), daycare_last_tick_at = now()
+  SET in_daycare = true, daycare_placed_at = now(), daycare_last_tick_at = now(), daycare_xp_at_placement = v_xp
   WHERE id = p_player_pokemon_id;
 
   PERFORM pension_recompute_pairs();

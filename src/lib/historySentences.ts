@@ -151,6 +151,10 @@ function daycareSentence(entry: DisplayHistoryEntry, ctx: SentenceContext): Sent
   if (entry.action_type === 'daycare_pickup') {
     return [player, { text: ' a récupéré ' }, pokemonRef, { text: ' à la Pension Pokémon' }]
   }
+  if (entry.action_type === 'daycare_pair_formed') {
+    const partner = payload.partner_pokemon_nom ? pokemonPart(ctx, payload.partner_pokemon_nom) : { text: '???' }
+    return [player, { text: ' : ' }, pokemonRef, { text: ' est compatible avec ' }, partner, { text: ' à la Pension Pokémon' }]
+  }
   // daycare_egg_received
   const parentA = payload.parent_a_nom ? pokemonPart(ctx, payload.parent_a_nom) : { text: '???' }
   const parentB = payload.parent_b_nom ? pokemonPart(ctx, payload.parent_b_nom) : { text: '???' }

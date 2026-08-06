@@ -51,7 +51,7 @@ const homeBgStyle = (url: string): React.CSSProperties => ({
 })
 
 export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsByName, playerItems, evolutionsByPokemonNom, canScan, onScan, onRequestLogin }: Props) {
-  const { roster, updateXp, updateNickname, evolvePokemon, toggleInTeam, setNextGiftAt, addMove, removeMove, deleteOwnedPokemon } = usePlayerPokemon(player?.id ?? null)
+  const { roster, updateXp, updateNickname, evolvePokemon, toggleInTeam, setNextGiftAt, addMove, removeMove, deleteOwnedPokemon, markEggRevealSeen } = usePlayerPokemon(player?.id ?? null)
   const { pokedollars, addItems, setPokedollars } = playerItems
   const { parameters } = useAdminParameters()
   const { backgrounds } = useDisplayAssets()
@@ -355,6 +355,7 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           itemsByName={itemsByName}
           evolutionsByPokemonNom={evolutionsByPokemonNom}
           onRequestPokemonDetail={(id) => { setShowPension(false); setSelectedId(id) }}
+          onMarkEggSeen={markEggRevealSeen}
           onClose={() => setShowPension(false)}
         />
       )}

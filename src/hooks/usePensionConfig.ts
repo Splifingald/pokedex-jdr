@@ -15,6 +15,11 @@ const DEFAULTS: PensionConfig = {
   default_hatch_timer_min: 24,
   default_hatch_timer_max: 48,
   default_hatch_timer_unit: 'hours',
+  info_text:
+    "Chaque dresseur ne peut avoir qu'un pokémon en pension.\n" +
+    "Il y a des limites d'expérience cumulable en pension.\n" +
+    "Les pokémon de dresseurs différents peuvent produire des œufs s'ils sont compatibles — dans ce cas, l'œuf est donné à l'un des deux dresseurs, au hasard.\n" +
+    "Les œufs reçus peuvent contenir tout type de pokémon, la dame de la pension s'amuse à les mélanger pour faire des surprises aux dresseurs !",
 }
 
 export function usePensionConfig() {

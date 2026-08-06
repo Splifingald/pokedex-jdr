@@ -13,6 +13,14 @@ export type PensionActionStatus =
   | 'not_placed'
   | 'error'
 
+export interface PensionPlaceResult {
+  status: PensionActionStatus
+  // Paires fraîchement formées impliquant le pokémon qu'on vient de placer
+  // (vide si aucune, ou si status !== 'ok') — sert à journaliser
+  // 'daycare_pair_formed' côté appelant.
+  formedPairs: { partnerId: number; partnerPokemonNom: string }[]
+}
+
 // État global de la Pension (tous joueurs confondus) : qui y est actuellement
 // placé + les appariements en cours pour la production d'œufs. Distinct
 // d'usePlayerPokemon (qui ne charge que le roster d'UN joueur) — cette table
@@ -24,7 +32,11 @@ export function usePensionDaycare(playerId: number | null) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const fetchAll = useCallback(async () => {
+  // Renvoie le roster/les paires fraîchement récupérés (pas seulement un effet
+  // de bord sur le state) : placeInDaycare s'en sert pour détecter les paires
+  // nouvellement formées sans dépendre d'un state React pas encore re-rendu
+  // (fermeture obsolète) juste après l'appel RPC.
+  const fetchAll = useCallback(async (): Promise<{ roster: PlayerPokemon[]; pairs: PensionPair[] }> => {
     setLoading(true)
     setError(null)
     try {
@@ -34,10 +46,14 @@ export function usePensionDaycare(playerId: number | null) {
       ])
       if (rosterRes.error) throw rosterRes.error
       if (pairsRes.error) throw pairsRes.error
-      setDaycareRoster(rosterRes.data ?? [])
-      setPairs(pairsRes.data ?? [])
+      const roster = rosterRes.data ?? []
+      const freshPairs = pairsRes.data ?? []
+      setDaycareRoster(roster)
+      setPairs(freshPairs)
+      return { roster, pairs: freshPairs }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur de chargement')
+      return { roster: [], pairs: [] }
     } finally {
       setLoading(false)
     }
@@ -97,20 +113,30 @@ export function usePensionDaycare(playerId: number | null) {
     return map
   }, [pairs])
 
-  const placeInDaycare = useCallback(async (playerPokemonId: number): Promise<PensionActionStatus> => {
-    if (!playerId) return 'error'
+  const placeInDaycare = useCallback(async (playerPokemonId: number): Promise<PensionPlaceResult> => {
+    if (!playerId) return { status: 'error', formedPairs: [] }
     const { data, error } = await supabase.rpc('pension_place', { p_player_pokemon_id: playerPokemonId, p_player_id: playerId })
     if (error) {
       console.error('Erreur lors du placement en pension :', error)
-      return 'error'
+      return { status: 'error', formedPairs: [] }
     }
     const status = (data as { status: PensionActionStatus })?.status ?? 'error'
+    if (status !== 'ok') return { status, formedPairs: [] }
+
     // Recharge explicitement plutôt que de compter uniquement sur le Realtime
     // (pas de ligne player_pokemon complète en main ici pour une mise à jour
     // optimiste) : évite de devoir fermer/rouvrir le popup pour voir le
-    // placement pris en compte.
-    if (status === 'ok') await fetchAll()
-    return status
+    // placement pris en compte. La réponse fraîche sert aussi à détecter les
+    // paires nouvellement formées (pour le journal d'historique côté appelant).
+    const fresh = await fetchAll()
+    const rosterById = new Map(fresh.roster.map((r) => [r.id, r]))
+    const formedPairs = fresh.pairs
+      .filter((p) => p.pokemon_a_id === playerPokemonId || p.pokemon_b_id === playerPokemonId)
+      .map((p) => {
+        const partnerId = p.pokemon_a_id === playerPokemonId ? p.pokemon_b_id : p.pokemon_a_id
+        return { partnerId, partnerPokemonNom: rosterById.get(partnerId)?.pokemon_nom ?? '???' }
+      })
+    return { status, formedPairs }
   }, [playerId, fetchAll])
 
   const retrieveFromDaycare = useCallback(async (playerPokemonId: number): Promise<PensionActionStatus> => {

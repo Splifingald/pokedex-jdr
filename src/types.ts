@@ -193,6 +193,8 @@ export interface PlayerPokemon {
   daycare_lifetime_xp: number
   daycare_capped: boolean
   daycare_capped_notified: boolean
+  daycare_xp_at_placement: number | null
+  egg_reveal_seen: boolean
   created_at: string
 }
 
@@ -542,6 +544,7 @@ export interface PensionConfig {
   default_hatch_timer_min: number
   default_hatch_timer_max: number
   default_hatch_timer_unit: GiftTimerUnit
+  info_text: string
 }
 
 // 'default' = hérite de la réserve d'œufs par défaut (groupe sentinelle
@@ -728,6 +731,7 @@ export type HistoryActionType =
   | 'daycare_drop_off'  // pokémon déposé à la Pension
   | 'daycare_pickup'    // pokémon récupéré à la Pension
   | 'daycare_egg_received' // œuf reçu à la Pension
+  | 'daycare_pair_formed' // pokémon nouvellement placé compatible avec un pokémon déjà en pension
   | 'pokedex_add'       // espèce découverte
   | 'pokemon_new'       // nouveau Pokémon obtenu (équipe ou PC)
   | 'pokemon_move'      // Pokémon existant déplacé équipe <-> PC
@@ -793,6 +797,7 @@ export interface HistoryDaycarePayload {
   nickname: string | null
   parent_a_nom?: string   // action_type === 'daycare_egg_received' uniquement
   parent_b_nom?: string   // action_type === 'daycare_egg_received' uniquement
+  partner_pokemon_nom?: string   // action_type === 'daycare_pair_formed' uniquement
 }
 
 export type HistoryPayload =
