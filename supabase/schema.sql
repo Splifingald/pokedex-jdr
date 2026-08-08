@@ -1812,3 +1812,992 @@ END $$;
 -- (réserve propre à ce groupe) ou 'none' (ce groupe ne produit jamais d'œuf,
 -- même si la réserve par défaut n'est pas vide) — voir pension-tick.js::resolveEggPool.
 ALTER TABLE pension_group_config ADD COLUMN IF NOT EXISTS egg_pool_mode text NOT NULL DEFAULT 'default' CHECK (egg_pool_mode IN ('default', 'custom', 'none'));
+
+-- ============================================================
+-- Safari (mini-jeu collaboratif : une session partagée de 3 pokémon sauvages,
+-- chacun avec sa propre jauge de capture 0-100 ; tous les joueurs voient la
+-- même session et les mêmes jauges en direct, mais Baie Framby/Safari Ball
+-- sont un inventaire individuel par joueur, comme Ticket Fouille/Pokédollar).
+-- Les objets "Baie Framby"/"Safari Ball" existent déjà dans la table items
+-- (ajoutés à la main par l'admin) — pas d'INSERT de seed ici, contrairement à
+-- Ticket Fouille.
+-- ============================================================
+
+ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_safari_enabled boolean NOT NULL DEFAULT true;
+
+-- Paramètres admin du Safari (une seule ligne, id fixe = 1) — même schéma que
+-- mining_config/pension_config. Contrairement à Fouille (un seul minuteur de
+-- ticket), Safari a DEUX minuteurs de récompense automatique indépendants
+-- (Baie Framby / Safari Ball), chacun avec son propre plafond de mise en
+-- pause (berry_reward_max/ball_reward_max) — même principe que
+-- mining_config.ticket_max mais dédoublé.
+CREATE TABLE IF NOT EXISTS safari_config (
+  id                            bigint PRIMARY KEY DEFAULT 1,
+  nom                           text NOT NULL DEFAULT 'Safari',
+  icon_url                      text NOT NULL DEFAULT '/website_icons/icon_safari_game.png',
+  banner_url                    text NOT NULL DEFAULT '',
+  session_duration_amount       integer NOT NULL DEFAULT 72,
+  session_duration_unit         text NOT NULL DEFAULT 'hours' CHECK (session_duration_unit IN ('hours', 'minutes')),
+  -- Baie Framby
+  berry_min_increase            integer NOT NULL DEFAULT 5,
+  berry_max_increase            integer NOT NULL DEFAULT 15,
+  berry_reward_amount           integer NOT NULL DEFAULT 1,
+  berry_reward_interval_amount  integer NOT NULL DEFAULT 0, -- 0 = récompense automatique désactivée
+  berry_reward_interval_unit    text NOT NULL DEFAULT 'hours' CHECK (berry_reward_interval_unit IN ('hours', 'minutes')),
+  berry_reward_max              integer NOT NULL DEFAULT 5,
+  -- Safari Ball
+  ball_reward_amount            integer NOT NULL DEFAULT 1,
+  ball_reward_interval_amount   integer NOT NULL DEFAULT 0,
+  ball_reward_interval_unit     text NOT NULL DEFAULT 'hours' CHECK (ball_reward_interval_unit IN ('hours', 'minutes')),
+  ball_reward_max               integer NOT NULL DEFAULT 3,
+  CONSTRAINT single_row CHECK (id = 1)
+);
+INSERT INTO safari_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- Groupes de pokémon (gérés entièrement dans Admin → Safari, contrairement
+-- aux groupes d'œufs de la Pension qui viennent d'un import CSV) : nom +
+-- poids de tirage relatif pour la sélection de session (poids / somme des
+-- poids, même principe que gift_lootbox_items/mining_item_defs/pension_egg_pool).
+CREATE TABLE IF NOT EXISTS safari_groups (
+  id           bigserial PRIMARY KEY,
+  nom          text NOT NULL,
+  weight       integer NOT NULL DEFAULT 1 CHECK (weight >= 0),
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+-- Pokémon appartenant à un groupe, avec leur propre poids de tirage DANS ce
+-- groupe (tirage à deux étages : groupe d'abord, puis pokémon dans le
+-- groupe — voir safari_ensure_active_session ci-dessous).
+CREATE TABLE IF NOT EXISTS safari_group_pokemon (
+  id           bigserial PRIMARY KEY,
+  group_id     bigint NOT NULL REFERENCES safari_groups(id) ON DELETE CASCADE,
+  pokemon_nom  text NOT NULL,
+  weight       integer NOT NULL DEFAULT 1 CHECK (weight >= 1),
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_safari_group_pokemon_group ON safari_group_pokemon(group_id);
+
+-- Zones de la jauge de capture (0-100), propres à CHAQUE groupe (décision
+-- produit : un groupe "rare" peut avoir une courbe de capture différente
+-- d'un groupe "commun", pas seulement un poids de tirage différent). Doivent
+-- couvrir 0-100 sans trou ni chevauchement pour un groupe donné — validé
+-- côté client dans l'admin (voir src/lib/safari.ts::validateGaugeAreas),
+-- pas de contrainte SQL multi-lignes (même posture que mining_custom_grid_items,
+-- qui ne valide pas non plus le non-chevauchement en base).
+CREATE TABLE IF NOT EXISTS safari_gauge_areas (
+  id              bigserial PRIMARY KEY,
+  group_id        bigint NOT NULL REFERENCES safari_groups(id) ON DELETE CASCADE,
+  min_value       integer NOT NULL CHECK (min_value >= 0 AND min_value <= 100),
+  max_value       integer NOT NULL CHECK (max_value >= 0 AND max_value <= 100 AND max_value > min_value),
+  color           text NOT NULL DEFAULT '#f5a623',
+  catch_rate_pct  integer NOT NULL DEFAULT 20 CHECK (catch_rate_pct BETWEEN 0 AND 100),
+  sort_order      integer NOT NULL DEFAULT 0,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_safari_gauge_areas_group ON safari_gauge_areas(group_id, sort_order);
+
+-- Session Safari partagée par tous les joueurs (une seule active à la fois —
+-- même idiome que mining_grids.is_active). Une ligne par session jouée,
+-- is_active bascule à false + ended_at plutôt qu'une suppression.
+CREATE TABLE IF NOT EXISTS safari_sessions (
+  id           bigserial PRIMARY KEY,
+  is_active    boolean NOT NULL DEFAULT true,
+  started_at   timestamptz NOT NULL DEFAULT now(),
+  expires_at   timestamptz NOT NULL,
+  ended_at     timestamptz,
+  notified     boolean NOT NULL DEFAULT false -- consommé par la notification de démarrage (send-notifications.js)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_safari_sessions_one_active
+  ON safari_sessions (is_active) WHERE is_active = true;
+
+-- Les 3 pokémon d'une session. position_gauge est le seul état mutable en
+-- dehors de la résolution — mise à jour exclusivement par safari_throw_berry/
+-- safari_throw_ball (jamais recalculée ni envoyée par le client). group_id
+-- est conservé pour résoudre la jauge/le taux de capture de CE pokémon
+-- précis (chaque groupe a sa propre jauge, voir safari_gauge_areas).
+CREATE TABLE IF NOT EXISTS safari_session_pokemon (
+  id                     bigserial PRIMARY KEY,
+  session_id             bigint NOT NULL REFERENCES safari_sessions(id) ON DELETE CASCADE,
+  slot                   integer NOT NULL CHECK (slot BETWEEN 0 AND 2),
+  pokemon_nom            text NOT NULL,
+  group_id               bigint NOT NULL REFERENCES safari_groups(id),
+  position_gauge         integer NOT NULL CHECK (position_gauge BETWEEN 0 AND 100),
+  status                 text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'captured', 'fled')),
+  captured_by_player_id  bigint,
+  resolved_at            timestamptz,
+  created_at             timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (session_id, slot)
+);
+CREATE INDEX IF NOT EXISTS idx_safari_session_pokemon_session ON safari_session_pokemon(session_id);
+
+-- Une tentative de Safari Ball par joueur par pokémon par session — la
+-- contrainte UNIQUE (pas un simple flag booléen) est ce qui rend "une seule
+-- tentative" sûre face à des appels concurrents/doubles clics : un INSERT en
+-- conflit = tentative déjà utilisée, voir safari_throw_ball ci-dessous.
+CREATE TABLE IF NOT EXISTS safari_ball_attempts (
+  id                  bigserial PRIMARY KEY,
+  session_pokemon_id  bigint NOT NULL REFERENCES safari_session_pokemon(id) ON DELETE CASCADE,
+  player_id           bigint NOT NULL,
+  success             boolean NOT NULL,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (session_pokemon_id, player_id)
+);
+
+-- État Safari par joueur : deux minuteurs de récompense automatique
+-- indépendants (contrairement à mining_player_state qui n'en a qu'un).
+CREATE TABLE IF NOT EXISTS safari_player_state (
+  player_id      bigint PRIMARY KEY,
+  next_berry_at  timestamptz,
+  next_ball_at   timestamptz,
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+
+-- Flux live des actions de la session en cours, affiché sous les 3 pokémon
+-- dans SafariPopup — même rôle que mining_moves (distinct de history_events,
+-- qui ne reçoit que les événements résumés : lancer de baie, capture, fuite).
+CREATE TABLE IF NOT EXISTS safari_moves (
+  id                  bigserial PRIMARY KEY,
+  session_id          bigint NOT NULL REFERENCES safari_sessions(id) ON DELETE CASCADE,
+  session_pokemon_id  bigint REFERENCES safari_session_pokemon(id) ON DELETE SET NULL,
+  player_id           bigint NOT NULL,
+  action              text NOT NULL CHECK (action IN ('berry', 'ball_success', 'ball_fail')),
+  gauge_before        integer,
+  gauge_after         integer,
+  created_at          timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_safari_moves_session_created ON safari_moves(session_id, created_at);
+
+ALTER TABLE safari_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE safari_groups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE safari_group_pokemon ENABLE ROW LEVEL SECURITY;
+ALTER TABLE safari_gauge_areas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE safari_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE safari_session_pokemon ENABLE ROW LEVEL SECURITY;
+ALTER TABLE safari_ball_attempts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE safari_player_state ENABLE ROW LEVEL SECURITY;
+ALTER TABLE safari_moves ENABLE ROW LEVEL SECURITY;
+
+-- Lecture + écriture publiques partout (app sans vraie sécurité, comme le
+-- reste du schéma). Les fonctions RPC ci-dessous s'exécutent avec le rôle
+-- appelant (anon), pas en SECURITY DEFINER — elles ont donc besoin de ces
+-- mêmes policies.
+CREATE POLICY "Public read safari_config"
+  ON safari_config FOR SELECT TO anon USING (true);
+CREATE POLICY "Public update safari_config"
+  ON safari_config FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "Public read safari_groups"
+  ON safari_groups FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert safari_groups"
+  ON safari_groups FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update safari_groups"
+  ON safari_groups FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete safari_groups"
+  ON safari_groups FOR DELETE TO anon USING (true);
+
+CREATE POLICY "Public read safari_group_pokemon"
+  ON safari_group_pokemon FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert safari_group_pokemon"
+  ON safari_group_pokemon FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update safari_group_pokemon"
+  ON safari_group_pokemon FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete safari_group_pokemon"
+  ON safari_group_pokemon FOR DELETE TO anon USING (true);
+
+CREATE POLICY "Public read safari_gauge_areas"
+  ON safari_gauge_areas FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert safari_gauge_areas"
+  ON safari_gauge_areas FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update safari_gauge_areas"
+  ON safari_gauge_areas FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete safari_gauge_areas"
+  ON safari_gauge_areas FOR DELETE TO anon USING (true);
+
+CREATE POLICY "Public read safari_sessions"
+  ON safari_sessions FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert safari_sessions"
+  ON safari_sessions FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update safari_sessions"
+  ON safari_sessions FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "Public read safari_session_pokemon"
+  ON safari_session_pokemon FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert safari_session_pokemon"
+  ON safari_session_pokemon FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update safari_session_pokemon"
+  ON safari_session_pokemon FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "Public read safari_ball_attempts"
+  ON safari_ball_attempts FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert safari_ball_attempts"
+  ON safari_ball_attempts FOR INSERT TO anon WITH CHECK (true);
+
+CREATE POLICY "Public read safari_player_state"
+  ON safari_player_state FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert safari_player_state"
+  ON safari_player_state FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update safari_player_state"
+  ON safari_player_state FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "Public read safari_moves"
+  ON safari_moves FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert safari_moves"
+  ON safari_moves FOR INSERT TO anon WITH CHECK (true);
+
+-- ── Fonctions RPC de concurrence ────────────────────────────────
+-- Même justification et même posture (rôle appelant anon, pas SECURITY
+-- DEFINER) que mining_ensure_active_grid/mining_dig_cell : Safari est
+-- cooperative et non authentifiée, donc plusieurs clients peuvent
+-- légitimement se disputer la création de session ou la résolution d'un
+-- même pokémon en même temps.
+
+-- Retourne l'id de la session active, en la créant si besoin (aucune session
+-- active, ou session active expirée). pg_advisory_xact_lock sérialise tous
+-- les appels concurrents pour la durée de la transaction — le premier
+-- appelant crée la session, tous les autres voient simplement la session
+-- fraîchement créée et la retournent telle quelle (même idiome que
+-- mining_ensure_active_grid).
+--
+-- Cette fonction n'est appelée QUE quand un joueur ouvre Safari (montage de
+-- SafariPopup) ou quand le 3e pokémon d'une session vient d'être résolu
+-- (voir safari_throw_ball) — jamais par un minuteur en arrière-plan. C'est ce
+-- qui garantit qu'une session expirée avec des pokémon non résolus reste
+-- inactive tant qu'aucun joueur n'ouvre Safari : "expirer" une session ici
+-- ne fait que la clôturer, ça ne relance rien tant que le flux ci-dessous
+-- n'a pas été exécuté jusqu'au bout par un appelant.
+CREATE OR REPLACE FUNCTION safari_ensure_active_session()
+RETURNS bigint
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_session_id   bigint;
+  v_expires_at   timestamptz;
+  v_slot         integer;
+  v_group_id     bigint;
+  v_pokemon_nom  text;
+  v_first_min    integer;
+  v_first_max    integer;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('safari_session_generation'));
+
+  SELECT id INTO v_session_id FROM safari_sessions
+    WHERE is_active = true AND expires_at > now() FOR UPDATE;
+  IF v_session_id IS NOT NULL THEN
+    RETURN v_session_id;
+  END IF;
+
+  -- Session active mais expirée : on la clôture. Aucune nouvelle session
+  -- n'est créée automatiquement ici par un minuteur — uniquement parce que
+  -- CETTE fonction vient d'être appelée par un joueur qui ouvre Safari.
+  UPDATE safari_sessions SET is_active = false, ended_at = now()
+    WHERE is_active = true AND expires_at <= now();
+
+  IF NOT EXISTS (SELECT 1 FROM safari_groups WHERE weight > 0) THEN
+    RAISE EXCEPTION 'Aucun groupe Safari avec un poids de tirage > 0 — configuration admin incomplète';
+  END IF;
+
+  SELECT (now() + (session_duration_amount ||
+      (CASE WHEN session_duration_unit = 'minutes' THEN ' minutes' ELSE ' hours' END))::interval)
+    INTO v_expires_at FROM safari_config WHERE id = 1;
+
+  INSERT INTO safari_sessions (is_active, expires_at) VALUES (true, v_expires_at)
+    RETURNING id INTO v_session_id;
+
+  FOR v_slot IN 0..2 LOOP
+    -- Tirage pondéré du groupe, puis du pokémon DANS ce groupe — portage SQL
+    -- de l'idiome pickWeightedEggSpecies (src/lib/pension.ts) /
+    -- pickOneWeighted (src/lib/mining.ts) : somme cumulative des poids sur
+    -- une fenêtre, tirage d'un nombre aléatoire dans [0, total).
+    SELECT id INTO v_group_id FROM (
+      SELECT id, sum(weight) OVER (ORDER BY id) AS cum, sum(weight) OVER () AS total
+      FROM safari_groups WHERE weight > 0
+    ) w WHERE cum >= random() * w.total ORDER BY cum LIMIT 1;
+
+    IF v_group_id IS NULL THEN
+      RAISE EXCEPTION 'Tirage du groupe Safari impossible — configuration admin incomplète';
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM safari_group_pokemon WHERE group_id = v_group_id AND weight > 0) THEN
+      RAISE EXCEPTION 'Le groupe Safari % n''a aucun pokémon avec un poids > 0', v_group_id;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM safari_gauge_areas WHERE group_id = v_group_id) THEN
+      RAISE EXCEPTION 'Le groupe Safari % n''a aucune zone de jauge configurée', v_group_id;
+    END IF;
+
+    SELECT pokemon_nom INTO v_pokemon_nom FROM (
+      SELECT pokemon_nom, sum(weight) OVER (ORDER BY id) AS cum, sum(weight) OVER () AS total
+      FROM safari_group_pokemon WHERE group_id = v_group_id AND weight > 0
+    ) w WHERE cum >= random() * w.total ORDER BY cum LIMIT 1;
+
+    SELECT min_value, max_value INTO v_first_min, v_first_max
+      FROM safari_gauge_areas WHERE group_id = v_group_id ORDER BY min_value ASC LIMIT 1;
+
+    INSERT INTO safari_session_pokemon (session_id, slot, pokemon_nom, group_id, position_gauge)
+    VALUES (
+      v_session_id, v_slot, v_pokemon_nom, v_group_id,
+      v_first_min + floor(random() * GREATEST(1, v_first_max - v_first_min))::int
+    );
+  END LOOP;
+
+  RETURN v_session_id;
+END;
+$$;
+
+-- Lance une Baie sur un pokémon : atomique de bout en bout. Le verrouillage
+-- de ligne (SELECT ... FOR UPDATE) sur CE pokémon précis suffit à rendre
+-- l'opération sûre face à des joueurs concurrents — même raisonnement que
+-- pour mining_grid_cells (une ligne par ressource contestée = sérialisation
+-- automatique par Postgres, pas besoin de verrou global) ; deux joueurs qui
+-- lancent une baie sur deux pokémon DIFFÉRENTS ne se bloquent jamais.
+CREATE OR REPLACE FUNCTION safari_throw_berry(p_session_pokemon_id bigint, p_player_id bigint)
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_status      text;
+  v_before      integer;
+  v_after       integer;
+  v_session_id  bigint;
+  v_min_inc     integer;
+  v_max_inc     integer;
+  v_delta       integer;
+BEGIN
+  SELECT status, position_gauge, session_id INTO v_status, v_before, v_session_id
+    FROM safari_session_pokemon WHERE id = p_session_pokemon_id FOR UPDATE;
+
+  IF v_status IS NULL THEN
+    RETURN jsonb_build_object('status', 'not_found');
+  END IF;
+  IF v_status <> 'active' THEN
+    RETURN jsonb_build_object('status', 'already_resolved');
+  END IF;
+
+  SELECT berry_min_increase, berry_max_increase INTO v_min_inc, v_max_inc FROM safari_config WHERE id = 1;
+  v_delta := v_min_inc + floor(random() * GREATEST(1, v_max_inc - v_min_inc + 1))::int;
+  v_after := LEAST(100, v_before + v_delta);
+
+  UPDATE safari_session_pokemon SET position_gauge = v_after WHERE id = p_session_pokemon_id;
+
+  INSERT INTO safari_moves (session_id, session_pokemon_id, player_id, action, gauge_before, gauge_after)
+  VALUES (v_session_id, p_session_pokemon_id, p_player_id, 'berry', v_before, v_after);
+
+  RETURN jsonb_build_object('status', 'ok', 'gauge_before', v_before, 'gauge_after', v_after);
+END;
+$$;
+
+-- Tente de capturer un pokémon avec une Safari Ball : l'action terminale et
+-- critique en termes de course. Deux garanties distinctes, toutes deux déjà
+-- posées par le verrouillage de ligne initial (SELECT ... FOR UPDATE) sur ce
+-- pokémon précis, qui est tenu pour toute la durée de la fonction :
+--   1) "une seule tentative par joueur" est garanti par la contrainte UNIQUE
+--      de safari_ball_attempts (pas par une simple lecture-avant-écriture) ;
+--   2) "un seul gagnant si plusieurs joueurs capturent en même temps" est
+--      garanti par le verrou de ligne : le premier appelant à l'obtenir voit
+--      status='active' et peut résoudre le pokémon ; tout second appelant,
+--      une fois le verrou obtenu à son tour, voit déjà status<>'active' et
+--      est rejeté — sa tentative reste néanmoins journalisée (comptée).
+CREATE OR REPLACE FUNCTION safari_throw_ball(p_session_pokemon_id bigint, p_player_id bigint)
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_status        text;
+  v_gauge         integer;
+  v_session_id    bigint;
+  v_group_id      bigint;
+  v_catch_rate    integer;
+  v_success       boolean;
+  v_new_status    text;
+  v_all_resolved  boolean;
+BEGIN
+  SELECT status, position_gauge, session_id, group_id INTO v_status, v_gauge, v_session_id, v_group_id
+    FROM safari_session_pokemon WHERE id = p_session_pokemon_id FOR UPDATE;
+
+  IF v_status IS NULL THEN
+    RETURN jsonb_build_object('status', 'not_found');
+  END IF;
+  IF v_status <> 'active' THEN
+    RETURN jsonb_build_object('status', 'already_resolved');
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM safari_ball_attempts WHERE session_pokemon_id = p_session_pokemon_id AND player_id = p_player_id) THEN
+    RETURN jsonb_build_object('status', 'already_attempted');
+  END IF;
+
+  SELECT catch_rate_pct INTO v_catch_rate FROM safari_gauge_areas
+    WHERE group_id = v_group_id AND v_gauge >= min_value AND v_gauge < max_value
+    ORDER BY min_value LIMIT 1;
+  IF v_catch_rate IS NULL THEN
+    -- Cas limite gauge = 100 (borne supérieure exclusive de la dernière
+    -- zone) : repli explicite sur la dernière zone de CE groupe.
+    SELECT catch_rate_pct INTO v_catch_rate FROM safari_gauge_areas
+      WHERE group_id = v_group_id ORDER BY min_value DESC LIMIT 1;
+  END IF;
+
+  v_success := random() < (COALESCE(v_catch_rate, 0) / 100.0);
+
+  BEGIN
+    INSERT INTO safari_ball_attempts (session_pokemon_id, player_id, success)
+      VALUES (p_session_pokemon_id, p_player_id, v_success);
+  EXCEPTION WHEN unique_violation THEN
+    RETURN jsonb_build_object('status', 'already_attempted');
+  END;
+
+  v_new_status := CASE WHEN v_success THEN 'captured' ELSE 'fled' END;
+
+  UPDATE safari_session_pokemon
+  SET status = v_new_status,
+      captured_by_player_id = CASE WHEN v_success THEN p_player_id ELSE NULL END,
+      resolved_at = now()
+  WHERE id = p_session_pokemon_id;
+
+  INSERT INTO safari_moves (session_id, session_pokemon_id, player_id, action, gauge_before, gauge_after)
+  VALUES (v_session_id, p_session_pokemon_id, p_player_id, CASE WHEN v_success THEN 'ball_success' ELSE 'ball_fail' END, v_gauge, v_gauge);
+
+  -- Si les 3 pokémon de la session sont désormais résolus, on démarre
+  -- immédiatement une nouvelle session. safari_ensure_active_session()
+  -- reprend son propre verrou avisoire, donc pas de risque de double
+  -- création même si deux appels y entrent l'un après l'autre pour la même
+  -- session tout juste terminée.
+  SELECT NOT EXISTS (SELECT 1 FROM safari_session_pokemon WHERE session_id = v_session_id AND status = 'active')
+    INTO v_all_resolved;
+  IF v_all_resolved THEN
+    UPDATE safari_sessions SET is_active = false, ended_at = now() WHERE id = v_session_id;
+    PERFORM safari_ensure_active_session();
+  END IF;
+
+  RETURN jsonb_build_object('status', 'ok', 'success', v_success);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION safari_ensure_active_session() TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION safari_throw_berry(bigint, bigint) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION safari_throw_ball(bigint, bigint) TO anon, authenticated;
+
+-- history_events.category doit accepter la nouvelle catégorie 'safari'
+-- (lancer de baie, capture, fuite) — même technique que pour 'daycare'.
+ALTER TABLE history_events DROP CONSTRAINT IF EXISTS history_events_category_check;
+ALTER TABLE history_events ADD CONSTRAINT history_events_category_check
+  CHECK (category IN ('inventory', 'pokedex', 'team', 'combat', 'minigame', 'daycare', 'safari'));
+
+-- Diffusion Realtime — mêmes raisons que le bloc Fouille/Pension ci-dessus
+DO $$
+DECLARE
+  t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'safari_config', 'safari_groups', 'safari_group_pokemon', 'safari_gauge_areas',
+    'safari_sessions', 'safari_session_pokemon', 'safari_ball_attempts',
+    'safari_player_state', 'safari_moves'
+  ]
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = t
+    ) THEN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE %I', t);
+    END IF;
+  END LOOP;
+END $$;
+
+-- ============================================================
+-- Combat Auto (mini-jeu de combat automatique par niveaux)
+-- ============================================================
+-- Le ticket est unique et codé en dur (comme Fouille/Mini-Jeux/Casino),
+-- seul son coût/régénération est configurable en admin — voir
+-- autobattle_config ci-dessous. Plusieurs "variantes" (parcours indépendants)
+-- peuvent être créées par l'admin ; chaque variante a sa propre séquence de
+-- niveaux (opposant + récompenses), jouée séquentiellement par chaque joueur.
+
+CREATE TABLE IF NOT EXISTS autobattle_config (
+  id                          bigint PRIMARY KEY DEFAULT 1,
+  -- Économie du ticket partagé (Ticket Combat, un seul pour toutes les variantes)
+  ticket_max                  integer NOT NULL DEFAULT 3,
+  ticket_regen_amount         integer NOT NULL DEFAULT 24,
+  ticket_regen_unit           text NOT NULL DEFAULT 'hours' CHECK (ticket_regen_unit IN ('hours', 'minutes')),
+  ticket_buy_cost             integer NOT NULL DEFAULT 0,
+  ticket_daily_buy_cap        integer NOT NULL DEFAULT 3,
+  ticket_full_notify_enabled  boolean NOT NULL DEFAULT false,
+  -- Affichage du widget d'accueil partagé (liste des variantes)
+  nom                         text NOT NULL DEFAULT 'Combat Auto',
+  icon_url                    text NOT NULL DEFAULT '',
+  CONSTRAINT single_row CHECK (id = 1)
+);
+INSERT INTO autobattle_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- Une variante = un parcours indépendant (propre bannière/icône/nom/niveaux/état).
+CREATE TABLE IF NOT EXISTS autobattle_variants (
+  id            bigserial PRIMARY KEY,
+  nom           text NOT NULL DEFAULT '',
+  enabled       boolean NOT NULL DEFAULT false,
+  icon_url      text NOT NULL DEFAULT '',
+  banner_url    text NOT NULL DEFAULT '',
+  sort_order    integer NOT NULL DEFAULT 0,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+-- Un niveau = un combat prédéfini dans une variante, joué séquentiellement.
+-- opponent_pokemon_nom / opponent_ability_nom référencent pokemon.nom /
+-- attacks.nom par nom (pas de FK, même convention que tout le schéma) — les
+-- stats de l'opposant (hp/base_damage) sont propres à ce niveau et ne
+-- modifient jamais la ligne globale pokemon/attacks correspondante.
+CREATE TABLE IF NOT EXISTS autobattle_levels (
+  id                    bigserial PRIMARY KEY,
+  variant_id            bigint NOT NULL REFERENCES autobattle_variants(id) ON DELETE CASCADE,
+  level_index           integer NOT NULL,
+  opponent_pokemon_nom  text NOT NULL,
+  opponent_hp           integer NOT NULL DEFAULT 1 CHECK (opponent_hp > 0),
+  opponent_base_damage  integer NOT NULL DEFAULT 0 CHECK (opponent_base_damage >= 0),
+  opponent_ability_nom  text NOT NULL,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (variant_id, level_index)
+);
+CREATE INDEX IF NOT EXISTS idx_autobattle_levels_variant ON autobattle_levels(variant_id, level_index);
+
+-- Récompense(s) d'un niveau — 1 ou plusieurs lignes. 'badge' et 'item' sont
+-- mécaniquement identiques (créditées via player_items) : reward_type ne sert
+-- qu'à distinguer l'affichage/le sélecteur admin (un objet marqué comme badge
+-- via items.rarete = 'Badge' n'est pas un système à part, voir types.ts).
+CREATE TABLE IF NOT EXISTS autobattle_level_rewards (
+  id            bigserial PRIMARY KEY,
+  level_id      bigint NOT NULL REFERENCES autobattle_levels(id) ON DELETE CASCADE,
+  reward_type   text NOT NULL CHECK (reward_type IN ('xp', 'item', 'badge')),
+  xp_amount     integer,
+  item_nom      text,
+  item_quantity integer,
+  sort_order    integer NOT NULL DEFAULT 0,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT autobattle_reward_xp_fields CHECK (reward_type <> 'xp' OR (xp_amount IS NOT NULL AND xp_amount > 0)),
+  CONSTRAINT autobattle_reward_item_fields CHECK (reward_type NOT IN ('item', 'badge') OR (item_nom IS NOT NULL AND item_quantity IS NOT NULL AND item_quantity > 0))
+);
+CREATE INDEX IF NOT EXISTS idx_autobattle_level_rewards_level ON autobattle_level_rewards(level_id);
+
+-- État Combat Auto par joueur : minuteur du prochain ticket gratuit + suivi
+-- des achats du jour — même schéma que mining_player_state/casino_player_state.
+CREATE TABLE IF NOT EXISTS autobattle_player_state (
+  player_id             bigint PRIMARY KEY,
+  next_ticket_at        timestamptz,
+  purchase_count        integer NOT NULL DEFAULT 0,
+  purchase_date         date,
+  ticket_full_notified  boolean NOT NULL DEFAULT false,
+  created_at            timestamptz NOT NULL DEFAULT now()
+);
+
+-- Progression d'un joueur dans une variante : niveau courant (celui qu'il
+-- doit jouer ensuite) + statut "variante entièrement terminée".
+CREATE TABLE IF NOT EXISTS autobattle_player_variant_progress (
+  player_id            bigint NOT NULL,
+  variant_id           bigint NOT NULL REFERENCES autobattle_variants(id) ON DELETE CASCADE,
+  current_level_index  integer NOT NULL DEFAULT 0,
+  variant_completed    boolean NOT NULL DEFAULT false,
+  completed_at         timestamptz,
+  created_at           timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (player_id, variant_id)
+);
+
+-- Découverte/complétion d'un niveau par un joueur : discovered permet de
+-- révéler l'opposant une fois le niveau joué au moins une fois (même en cas
+-- de défaite, où il reste révélé pour la nouvelle tentative) ; completed
+-- passe à true uniquement à la victoire. C'est aussi la ligne verrouillée
+-- (SELECT ... FOR UPDATE) par autobattle_resolve_battle pour sérialiser les
+-- tentatives concurrentes d'un même joueur sur un même niveau — même idiome
+-- que le verrouillage de safari_session_pokemon dans safari_throw_ball.
+CREATE TABLE IF NOT EXISTS autobattle_player_level_state (
+  player_id      bigint NOT NULL,
+  level_id       bigint NOT NULL REFERENCES autobattle_levels(id) ON DELETE CASCADE,
+  discovered     boolean NOT NULL DEFAULT false,
+  discovered_at  timestamptz,
+  completed      boolean NOT NULL DEFAULT false,
+  completed_at   timestamptz,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (player_id, level_id)
+);
+
+-- Journal des combats résolus (une ligne par appel à autobattle_resolve_battle
+-- qui a dépassé la vérification d'idempotence) : sert à la fois de flux
+-- "derniers combats" et de garde anti-double-soumission via
+-- idempotency_key UNIQUE (voir la fonction ci-dessous) — même rôle que
+-- safari_ball_attempts, mais générique à toute tentative (pas seulement les
+-- doublons "même joueur + même cible").
+CREATE TABLE IF NOT EXISTS autobattle_battles (
+  id                 bigserial PRIMARY KEY,
+  player_id          bigint NOT NULL,
+  level_id           bigint NOT NULL REFERENCES autobattle_levels(id) ON DELETE CASCADE,
+  player_pokemon_id  bigint NOT NULL,
+  ability_nom        text NOT NULL,
+  outcome            text CHECK (outcome IS NULL OR outcome IN ('win', 'lose')),
+  turn_log           jsonb NOT NULL DEFAULT '[]'::jsonb,
+  rewards_granted    jsonb,
+  idempotency_key    uuid NOT NULL,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_autobattle_battles_player ON autobattle_battles(player_id, created_at);
+
+ALTER TABLE autobattle_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE autobattle_variants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE autobattle_levels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE autobattle_level_rewards ENABLE ROW LEVEL SECURITY;
+ALTER TABLE autobattle_player_state ENABLE ROW LEVEL SECURITY;
+ALTER TABLE autobattle_player_variant_progress ENABLE ROW LEVEL SECURITY;
+ALTER TABLE autobattle_player_level_state ENABLE ROW LEVEL SECURITY;
+ALTER TABLE autobattle_battles ENABLE ROW LEVEL SECURITY;
+
+-- Lecture + écriture publiques partout (app sans vraie sécurité, comme le
+-- reste du schéma). autobattle_resolve_battle s'exécute avec le rôle
+-- appelant (anon), pas en SECURITY DEFINER — elle a donc besoin de ces
+-- mêmes policies pour toucher player_items/player_pokemon/history_events.
+CREATE POLICY "Public read autobattle_config" ON autobattle_config FOR SELECT TO anon USING (true);
+CREATE POLICY "Public update autobattle_config" ON autobattle_config FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "Public read autobattle_variants" ON autobattle_variants FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert autobattle_variants" ON autobattle_variants FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update autobattle_variants" ON autobattle_variants FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete autobattle_variants" ON autobattle_variants FOR DELETE TO anon USING (true);
+
+CREATE POLICY "Public read autobattle_levels" ON autobattle_levels FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert autobattle_levels" ON autobattle_levels FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update autobattle_levels" ON autobattle_levels FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete autobattle_levels" ON autobattle_levels FOR DELETE TO anon USING (true);
+
+CREATE POLICY "Public read autobattle_level_rewards" ON autobattle_level_rewards FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert autobattle_level_rewards" ON autobattle_level_rewards FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update autobattle_level_rewards" ON autobattle_level_rewards FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete autobattle_level_rewards" ON autobattle_level_rewards FOR DELETE TO anon USING (true);
+
+CREATE POLICY "Public read autobattle_player_state" ON autobattle_player_state FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert autobattle_player_state" ON autobattle_player_state FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update autobattle_player_state" ON autobattle_player_state FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "Public read autobattle_player_variant_progress" ON autobattle_player_variant_progress FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert autobattle_player_variant_progress" ON autobattle_player_variant_progress FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update autobattle_player_variant_progress" ON autobattle_player_variant_progress FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "Public read autobattle_player_level_state" ON autobattle_player_level_state FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert autobattle_player_level_state" ON autobattle_player_level_state FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update autobattle_player_level_state" ON autobattle_player_level_state FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+CREATE POLICY "Public read autobattle_battles" ON autobattle_battles FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert autobattle_battles" ON autobattle_battles FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update autobattle_battles" ON autobattle_battles FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+-- Ticket Combat : catalogue seedé une fois (RLS bloque l'écriture anon
+-- sur items, donc à exécuter manuellement via l'éditeur SQL Supabase — même
+-- caveat que "Ticket Fouille" plus haut dans ce fichier).
+-- INSERT INTO items (nom, type, achat, vente, description, image_url)
+-- VALUES ('Ticket Combat', 'Monnaie', 0, 0, 'Permet de lancer un combat automatique.', '/website_icons/icon_battle_ticket.png')
+-- ON CONFLICT (nom) DO NOTHING;
+
+ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_autobattle_enabled boolean NOT NULL DEFAULT true;
+
+-- Somme des bonus XP (PV ou DMG) d'une espèce jusqu'à un XP donné — portage SQL
+-- de getHpBonus/getDamageBonus (src/lib/xpBonuses.ts) : chaque case xp_10..xp_100
+-- est un texte libre, seules celles au format "+N PV"/"+N DMG" comptent, sommées
+-- pour tout palier <= p_xp. p_kind vaut 'PV' ou 'DMG'.
+CREATE OR REPLACE FUNCTION autobattle_xp_bonus(p_pokemon_nom text, p_xp integer, p_kind text)
+RETURNS integer
+LANGUAGE sql STABLE
+AS $$
+  SELECT COALESCE(SUM((m.match)[1]::integer), 0)::integer
+  FROM (
+    SELECT t.threshold, regexp_match(trim(t.cell), '^\+\s*(\d+)\s*(PV|DMG)$', 'i') AS match
+    FROM pokemon p,
+    LATERAL (VALUES
+      (10, p.xp_10), (20, p.xp_20), (30, p.xp_30), (40, p.xp_40), (50, p.xp_50),
+      (60, p.xp_60), (70, p.xp_70), (80, p.xp_80), (90, p.xp_90), (100, p.xp_100)
+    ) AS t(threshold, cell)
+    WHERE p.nom = p_pokemon_nom
+  ) m
+  WHERE m.match IS NOT NULL AND m.threshold <= p_xp AND upper((m.match)[2]) = upper(p_kind)
+$$;
+
+-- Palier XP maximum configuré pour une espèce (case xp_* non vide la plus
+-- haute, quel que soit son contenu) — portage SQL de getMaxXp, utilisé pour
+-- plafonner l'XP gagnée en Combat Auto (même règle que clampXp côté client).
+-- NULL si l'espèce n'a aucun palier configuré (= pas de plafond, comme côté client).
+CREATE OR REPLACE FUNCTION autobattle_max_xp(p_pokemon_nom text)
+RETURNS integer
+LANGUAGE sql STABLE
+AS $$
+  SELECT MAX(t.threshold)::integer
+  FROM pokemon p,
+  LATERAL (VALUES
+    (10, p.xp_10), (20, p.xp_20), (30, p.xp_30), (40, p.xp_40), (50, p.xp_50),
+    (60, p.xp_60), (70, p.xp_70), (80, p.xp_80), (90, p.xp_90), (100, p.xp_100)
+  ) AS t(threshold, cell)
+  WHERE p.nom = p_pokemon_nom AND trim(COALESCE(t.cell, '')) <> ''
+$$;
+
+-- Résout un combat Combat Auto de bout en bout, de façon atomique et
+-- autoritaire côté serveur (rien n'est fait confiance côté client hormis les
+-- 4 identifiants passés en argument — stats, dégâts, avantage de type, coup
+-- de dé et issue sont tous recalculés ici à partir de pokemon/attacks).
+--
+-- Étapes : 1) garde anti-double-soumission (idempotency_key UNIQUE) ;
+-- 2) verrouille la ligne de progression niveau (FOR UPDATE) pour sérialiser
+-- les tentatives concurrentes du même joueur sur ce niveau ; 3) valide
+-- variante/niveau actifs, niveau attendu (pas de saut/rejeu), pokémon/capacité
+-- éligibles ; 4) débite 1 ticket (échoue proprement si aucun) ; 5) simule le
+-- combat tour par tour (formule : dégâts pokémon ×2 si son espèce est
+-- "super efficace" contre le type de l'adversaire, + dégâts de la capacité,
+-- jamais doublés) ; 6) à la victoire, crédite toutes les récompenses du
+-- niveau et fait avancer la progression ; à la défaite, marque seulement le
+-- niveau comme découvert. Tout ceci dans une seule transaction implicite
+-- (fonction plpgsql) : soit tout est appliqué, soit rien ne l'est.
+CREATE OR REPLACE FUNCTION autobattle_resolve_battle(
+  p_player_id bigint,
+  p_level_id bigint,
+  p_player_pokemon_id bigint,
+  p_ability_nom text,
+  p_idempotency_key uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_battle_id           bigint;
+  v_level               record;
+  v_variant             record;
+  v_progress            record;
+  v_pp                  record;
+  v_player_species      record;
+  v_ability             record;
+  v_opponent_species    record;
+  v_opponent_ability    record;
+  v_ticket_item_nom     text := 'Ticket Combat';
+  v_player_max_hp       integer;
+  v_player_damage       integer;
+  v_player_type_bonus   boolean;
+  v_opponent_damage     integer;
+  v_opponent_type_bonus boolean;
+  v_player_hp           integer;
+  v_opponent_hp         integer;
+  v_coin_player_first   boolean;
+  v_attacker            text;
+  v_turn_no             integer := 0;
+  v_turns               jsonb := '[]'::jsonb;
+  v_outcome             text;
+  v_rewards             jsonb := '[]'::jsonb;
+  v_reward              record;
+  v_max_level_index     integer;
+  v_variant_completed   boolean := false;
+  v_next_level_index    integer;
+  v_new_xp              integer;
+  v_max_xp              integer;
+BEGIN
+  BEGIN
+    INSERT INTO autobattle_battles (player_id, level_id, player_pokemon_id, ability_nom, idempotency_key)
+    VALUES (p_player_id, p_level_id, p_player_pokemon_id, p_ability_nom, p_idempotency_key)
+    RETURNING id INTO v_battle_id;
+  EXCEPTION WHEN unique_violation THEN
+    RETURN jsonb_build_object('status', 'duplicate_request');
+  END;
+
+  SELECT * INTO v_level FROM autobattle_levels WHERE id = p_level_id;
+  IF v_level IS NULL THEN
+    RETURN jsonb_build_object('status', 'not_found');
+  END IF;
+
+  SELECT * INTO v_variant FROM autobattle_variants WHERE id = v_level.variant_id;
+  IF v_variant IS NULL OR v_variant.enabled = false THEN
+    RETURN jsonb_build_object('status', 'variant_disabled');
+  END IF;
+
+  INSERT INTO autobattle_player_variant_progress (player_id, variant_id)
+  VALUES (p_player_id, v_variant.id)
+  ON CONFLICT (player_id, variant_id) DO NOTHING;
+
+  SELECT * INTO v_progress FROM autobattle_player_variant_progress
+    WHERE player_id = p_player_id AND variant_id = v_variant.id FOR UPDATE;
+
+  IF v_progress.variant_completed THEN
+    RETURN jsonb_build_object('status', 'variant_completed');
+  END IF;
+  IF v_progress.current_level_index <> v_level.level_index THEN
+    RETURN jsonb_build_object('status', 'wrong_level');
+  END IF;
+
+  INSERT INTO autobattle_player_level_state (player_id, level_id)
+  VALUES (p_player_id, p_level_id)
+  ON CONFLICT (player_id, level_id) DO NOTHING;
+
+  PERFORM 1 FROM autobattle_player_level_state
+    WHERE player_id = p_player_id AND level_id = p_level_id FOR UPDATE;
+
+  SELECT * INTO v_pp FROM player_pokemon WHERE id = p_player_pokemon_id AND player_id = p_player_id;
+  IF v_pp IS NULL THEN
+    RETURN jsonb_build_object('status', 'ineligible_pokemon');
+  END IF;
+  IF v_pp.in_daycare THEN
+    RETURN jsonb_build_object('status', 'ineligible_pokemon');
+  END IF;
+  IF NOT (p_ability_nom = ANY(v_pp.moves)) THEN
+    RETURN jsonb_build_object('status', 'ineligible_ability');
+  END IF;
+
+  SELECT * INTO v_player_species FROM pokemon WHERE nom = v_pp.pokemon_nom;
+  SELECT * INTO v_ability FROM attacks WHERE nom = p_ability_nom;
+  IF v_player_species IS NULL OR v_ability IS NULL OR v_ability.degats_base IS NULL OR v_ability.degats_base <= 0 THEN
+    RETURN jsonb_build_object('status', 'ineligible_ability');
+  END IF;
+
+  SELECT * INTO v_opponent_species FROM pokemon WHERE nom = v_level.opponent_pokemon_nom;
+  SELECT * INTO v_opponent_ability FROM attacks WHERE nom = v_level.opponent_ability_nom;
+  IF v_opponent_species IS NULL OR v_opponent_ability IS NULL THEN
+    RETURN jsonb_build_object('status', 'invalid_level');
+  END IF;
+
+  -- Débite le ticket seulement une fois toutes les validations passées (rien
+  -- n'est dépensé sur un statut d'erreur ci-dessus) — le client fait aussi un
+  -- débit optimiste "à l'entrée" et le rembourse sur tout statut <> 'ok'.
+  UPDATE player_items SET quantity = quantity - 1
+    WHERE player_id = p_player_id AND item_nom = v_ticket_item_nom AND quantity >= 1;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('status', 'no_ticket');
+  END IF;
+
+  v_player_max_hp := COALESCE(v_player_species.pv_base, 0) + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'PV');
+  v_player_type_bonus := EXISTS (
+    SELECT 1 FROM (VALUES
+      (v_player_species.super_efficace_1), (v_player_species.super_efficace_2),
+      (v_player_species.super_efficace_3), (v_player_species.super_efficace_4)
+    ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_opponent_species.type))
+  );
+  v_player_damage := (COALESCE(v_player_species.degats_base, 0) + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'DMG'))
+    * (CASE WHEN v_player_type_bonus THEN 2 ELSE 1 END) + COALESCE(v_ability.degats_base, 0);
+
+  v_opponent_type_bonus := EXISTS (
+    SELECT 1 FROM (VALUES
+      (v_opponent_species.super_efficace_1), (v_opponent_species.super_efficace_2),
+      (v_opponent_species.super_efficace_3), (v_opponent_species.super_efficace_4)
+    ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_player_species.type))
+  );
+  v_opponent_damage := v_level.opponent_base_damage * (CASE WHEN v_opponent_type_bonus THEN 2 ELSE 1 END)
+    + COALESCE(v_opponent_ability.degats_base, 0);
+
+  v_player_hp := GREATEST(1, v_player_max_hp);
+  v_opponent_hp := v_level.opponent_hp;
+  v_coin_player_first := random() < 0.5;
+  v_attacker := CASE WHEN v_coin_player_first THEN 'player' ELSE 'opponent' END;
+
+  LOOP
+    v_turn_no := v_turn_no + 1;
+    IF v_attacker = 'player' THEN
+      v_opponent_hp := v_opponent_hp - GREATEST(0, v_player_damage);
+      v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+        'turn', v_turn_no, 'attacker', 'player', 'damage', GREATEST(0, v_player_damage),
+        'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', v_opponent_hp <= 0
+      ));
+      IF v_opponent_hp <= 0 THEN v_outcome := 'win'; EXIT; END IF;
+      v_attacker := 'opponent';
+    ELSE
+      v_player_hp := v_player_hp - GREATEST(0, v_opponent_damage);
+      v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+        'turn', v_turn_no, 'attacker', 'opponent', 'damage', GREATEST(0, v_opponent_damage),
+        'defender_hp_after', GREATEST(0, v_player_hp), 'ko', v_player_hp <= 0
+      ));
+      IF v_player_hp <= 0 THEN v_outcome := 'lose'; EXIT; END IF;
+      v_attacker := 'player';
+    END IF;
+    -- Filet de sécurité : si les deux côtés infligent 0 dégât (mauvaise
+    -- configuration admin), on force une défaite plutôt qu'une boucle infinie.
+    IF v_turn_no > 200 THEN v_outcome := 'lose'; EXIT; END IF;
+  END LOOP;
+
+  IF v_outcome = 'win' THEN
+    FOR v_reward IN SELECT * FROM autobattle_level_rewards WHERE level_id = p_level_id ORDER BY sort_order LOOP
+      IF v_reward.reward_type = 'xp' THEN
+        v_max_xp := autobattle_max_xp(v_pp.pokemon_nom);
+        v_new_xp := GREATEST(0, v_pp.xp + v_reward.xp_amount);
+        IF v_max_xp IS NOT NULL THEN v_new_xp := LEAST(v_new_xp, v_max_xp); END IF;
+        UPDATE player_pokemon SET xp = v_new_xp WHERE id = p_player_pokemon_id;
+        v_rewards := v_rewards || jsonb_build_array(jsonb_build_object(
+          'reward_type', 'xp', 'xp_amount', v_reward.xp_amount,
+          'player_pokemon_id', p_player_pokemon_id, 'xp_before', v_pp.xp, 'xp_after', v_new_xp
+        ));
+        v_pp.xp := v_new_xp;
+      ELSE
+        INSERT INTO player_items (player_id, item_nom, quantity)
+        VALUES (p_player_id, v_reward.item_nom, v_reward.item_quantity)
+        ON CONFLICT (player_id, item_nom) DO UPDATE SET quantity = player_items.quantity + EXCLUDED.quantity;
+        v_rewards := v_rewards || jsonb_build_array(jsonb_build_object(
+          'reward_type', v_reward.reward_type, 'item_nom', v_reward.item_nom, 'quantity', v_reward.item_quantity
+        ));
+      END IF;
+    END LOOP;
+
+    UPDATE autobattle_player_level_state
+      SET discovered = true, discovered_at = COALESCE(discovered_at, now()), completed = true, completed_at = now()
+      WHERE player_id = p_player_id AND level_id = p_level_id;
+
+    SELECT MAX(level_index) INTO v_max_level_index FROM autobattle_levels WHERE variant_id = v_variant.id;
+    IF v_level.level_index >= v_max_level_index THEN
+      v_variant_completed := true;
+      v_next_level_index := v_progress.current_level_index;
+    ELSE
+      v_next_level_index := v_progress.current_level_index + 1;
+    END IF;
+
+    UPDATE autobattle_player_variant_progress
+      SET current_level_index = v_next_level_index, variant_completed = v_variant_completed,
+          completed_at = CASE WHEN v_variant_completed THEN now() ELSE completed_at END
+      WHERE player_id = p_player_id AND variant_id = v_variant.id;
+  ELSE
+    UPDATE autobattle_player_level_state
+      SET discovered = true, discovered_at = COALESCE(discovered_at, now())
+      WHERE player_id = p_player_id AND level_id = p_level_id;
+    v_next_level_index := v_progress.current_level_index;
+  END IF;
+
+  UPDATE autobattle_battles
+    SET outcome = v_outcome, turn_log = v_turns, rewards_granted = v_rewards
+    WHERE id = v_battle_id;
+
+  RETURN jsonb_build_object(
+    'status', 'ok',
+    'coin_toss_first', CASE WHEN v_coin_player_first THEN 'player' ELSE 'opponent' END,
+    'player_max_hp', v_player_max_hp,
+    'opponent_hp', v_level.opponent_hp,
+    'player_damage_per_hit', v_player_damage,
+    'opponent_damage_per_hit', v_opponent_damage,
+    'player_type_bonus', v_player_type_bonus,
+    'opponent_type_bonus', v_opponent_type_bonus,
+    'turns', v_turns,
+    'outcome', v_outcome,
+    'rewards', v_rewards,
+    'variant_completed', v_variant_completed,
+    'next_level_index', v_next_level_index,
+    'opponent_pokemon_nom', v_level.opponent_pokemon_nom,
+    'opponent_ability_nom', v_level.opponent_ability_nom
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION autobattle_resolve_battle(bigint, bigint, bigint, text, uuid) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION autobattle_xp_bonus(text, integer, text) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION autobattle_max_xp(text) TO anon, authenticated;
+
+-- history_events.category doit accepter la nouvelle catégorie 'autobattle'
+ALTER TABLE history_events DROP CONSTRAINT IF EXISTS history_events_category_check;
+ALTER TABLE history_events ADD CONSTRAINT history_events_category_check
+  CHECK (category IN ('inventory', 'pokedex', 'team', 'combat', 'minigame', 'daycare', 'safari', 'autobattle'));
+
+-- Diffusion Realtime — mêmes raisons que les blocs Fouille/Pension/Safari ci-dessus
+DO $$
+DECLARE
+  t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'autobattle_config', 'autobattle_variants', 'autobattle_levels', 'autobattle_level_rewards',
+    'autobattle_player_state', 'autobattle_player_variant_progress', 'autobattle_player_level_state',
+    'autobattle_battles'
+  ]
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = t
+    ) THEN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE %I', t);
+    END IF;
+  END LOOP;
+END $$;

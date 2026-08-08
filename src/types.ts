@@ -220,6 +220,8 @@ export interface AdminParameters {
   feature_minijeux_enabled: boolean
   feature_mining_enabled: boolean
   feature_pension_enabled: boolean
+  feature_safari_enabled: boolean
+  feature_autobattle_enabled: boolean
   stat_points_base: number
   stat_min: number
   stat_max: number
@@ -623,6 +625,236 @@ export interface PokemonEggGroupCsvRow {
 
 export const POKEMON_EGG_GROUP_CSV_REQUIRED_HEADERS: (keyof PokemonEggGroupCsvRow)[] = ['Pokémon']
 
+// ── Safari (mini-jeu collaboratif : session partagée de 3 pokémon sauvages) ──
+export const BERRY_SAFARI_ITEM_NAME = 'Baie Framby'
+export const BALL_SAFARI_ITEM_NAME = 'Safari Ball'
+
+export interface SafariConfig {
+  id: number
+  nom: string
+  icon_url: string
+  banner_url: string
+  session_duration_amount: number
+  session_duration_unit: GiftTimerUnit
+  berry_min_increase: number
+  berry_max_increase: number
+  berry_reward_amount: number
+  berry_reward_interval_amount: number
+  berry_reward_interval_unit: GiftTimerUnit
+  berry_reward_max: number
+  ball_reward_amount: number
+  ball_reward_interval_amount: number
+  ball_reward_interval_unit: GiftTimerUnit
+  ball_reward_max: number
+}
+
+export interface SafariGroup {
+  id: number
+  nom: string
+  weight: number
+  created_at: string
+}
+
+export interface SafariGroupPokemon {
+  id: number
+  group_id: number
+  pokemon_nom: string
+  weight: number
+  created_at: string
+}
+
+export interface SafariGaugeArea {
+  id: number
+  group_id: number
+  min_value: number
+  max_value: number
+  color: string
+  catch_rate_pct: number
+  sort_order: number
+  created_at: string
+}
+
+export type SafariPokemonStatus = 'active' | 'captured' | 'fled'
+
+export interface SafariSession {
+  id: number
+  is_active: boolean
+  started_at: string
+  expires_at: string
+  ended_at: string | null
+  notified: boolean
+}
+
+export interface SafariSessionPokemon {
+  id: number
+  session_id: number
+  slot: number
+  pokemon_nom: string
+  group_id: number
+  position_gauge: number
+  status: SafariPokemonStatus
+  captured_by_player_id: number | null
+  resolved_at: string | null
+  created_at: string
+}
+
+export interface SafariBallAttempt {
+  id: number
+  session_pokemon_id: number
+  player_id: number
+  success: boolean
+  created_at: string
+}
+
+export interface SafariPlayerState {
+  player_id: number
+  next_berry_at: string | null
+  next_ball_at: string | null
+  created_at: string
+}
+
+export type SafariMoveAction = 'berry' | 'ball_success' | 'ball_fail'
+
+export interface SafariMove {
+  id: number
+  session_id: number
+  session_pokemon_id: number | null
+  player_id: number
+  action: SafariMoveAction
+  gauge_before: number | null
+  gauge_after: number | null
+  created_at: string
+}
+
+// ── Combat Auto (mini-jeu de combat automatique par niveaux) ───
+export const TICKET_AUTOBATTLE_ITEM_NAME = 'Ticket Combat'
+
+export interface AutoBattleConfig {
+  id: number
+  ticket_max: number
+  ticket_regen_amount: number
+  ticket_regen_unit: GiftTimerUnit
+  ticket_buy_cost: number
+  ticket_daily_buy_cap: number
+  ticket_full_notify_enabled: boolean
+  nom: string
+  icon_url: string
+}
+
+export interface AutoBattlePlayerState {
+  player_id: number
+  next_ticket_at: string | null
+  purchase_count: number
+  purchase_date: string | null
+  ticket_full_notified: boolean
+  created_at: string
+}
+
+export interface AutoBattleVariant {
+  id: number
+  nom: string
+  enabled: boolean
+  icon_url: string
+  banner_url: string
+  sort_order: number
+  created_at: string
+}
+
+export interface AutoBattleLevel {
+  id: number
+  variant_id: number
+  level_index: number
+  opponent_pokemon_nom: string
+  opponent_hp: number
+  opponent_base_damage: number
+  opponent_ability_nom: string
+  created_at: string
+}
+
+export type AutoBattleRewardType = 'xp' | 'item' | 'badge'
+
+export interface AutoBattleLevelReward {
+  id: number
+  level_id: number
+  reward_type: AutoBattleRewardType
+  xp_amount: number | null
+  item_nom: string | null
+  item_quantity: number | null
+  sort_order: number
+  created_at: string
+}
+
+export interface AutoBattlePlayerVariantProgress {
+  player_id: number
+  variant_id: number
+  current_level_index: number
+  variant_completed: boolean
+  completed_at: string | null
+  created_at: string
+}
+
+export interface AutoBattlePlayerLevelState {
+  player_id: number
+  level_id: number
+  discovered: boolean
+  discovered_at: string | null
+  completed: boolean
+  completed_at: string | null
+  created_at: string
+}
+
+// Un tour du journal de combat renvoyé par le RPC autobattle_resolve_battle —
+// le client se contente de rejouer cette séquence (jamais recalculée côté client).
+export interface AutoBattleTurn {
+  turn: number
+  attacker: 'player' | 'opponent'
+  damage: number
+  defender_hp_after: number
+  ko: boolean
+}
+
+export interface AutoBattleReward {
+  reward_type: AutoBattleRewardType
+  xp_amount?: number
+  player_pokemon_id?: number
+  xp_before?: number
+  xp_after?: number
+  item_nom?: string
+  quantity?: number
+}
+
+export type AutoBattleResolveStatus =
+  | 'ok'
+  | 'duplicate_request'
+  | 'not_found'
+  | 'variant_disabled'
+  | 'variant_completed'
+  | 'wrong_level'
+  | 'ineligible_pokemon'
+  | 'ineligible_ability'
+  | 'invalid_level'
+  | 'no_ticket'
+
+// Réponse du RPC autobattle_resolve_battle (voir supabase/schema.sql) — seuls
+// les champs pertinents pour status='ok' sont garantis présents.
+export interface AutoBattleResolveResult {
+  status: AutoBattleResolveStatus
+  coin_toss_first?: 'player' | 'opponent'
+  player_max_hp?: number
+  opponent_hp?: number
+  player_damage_per_hit?: number
+  opponent_damage_per_hit?: number
+  player_type_bonus?: boolean
+  opponent_type_bonus?: boolean
+  turns?: AutoBattleTurn[]
+  outcome?: 'win' | 'lose'
+  rewards?: AutoBattleReward[]
+  variant_completed?: boolean
+  next_level_index?: number
+  opponent_pokemon_nom?: string
+  opponent_ability_nom?: string
+}
+
 // ── Notifications Push ───────────────────────────────────────
 export interface PushSubscriptionRow {
   id: number
@@ -715,7 +947,7 @@ export const EMPTY_CHAPTER_CONTENT: import('@tiptap/core').JSONContent = {
 }
 
 // ── Historique (journal des actions joueurs) ──────────────────
-export type HistoryCategory = 'inventory' | 'pokedex' | 'team' | 'combat' | 'minigame' | 'daycare'
+export type HistoryCategory = 'inventory' | 'pokedex' | 'team' | 'combat' | 'minigame' | 'daycare' | 'safari' | 'autobattle'
 
 export type HistoryActionType =
   | 'item_add'          // ajout générique (Sac, achat de ticket, recharge de tickets)
@@ -726,12 +958,19 @@ export type HistoryActionType =
   | 'item_casino_spend' // ticket dépensé au Casino
   | 'item_minigame_spend' // ticket Mini-Jeux dépensé
   | 'item_mining_spend' // ticket Fouille dépensé
+  | 'item_autobattle_spend' // ticket Combat Auto dépensé
   | 'minigame_xp_gain'  // XP crédité à un Pokémon via un Mini-Jeu
   | 'mining_item_found' // objet entièrement déterré sur la grille de Fouille
   | 'daycare_drop_off'  // pokémon déposé à la Pension
   | 'daycare_pickup'    // pokémon récupéré à la Pension
   | 'daycare_egg_received' // œuf reçu à la Pension
   | 'daycare_pair_formed' // pokémon nouvellement placé compatible avec un pokémon déjà en pension
+  | 'safari_berry_throw' // baie lancée sur un pokémon Safari
+  | 'safari_capture'     // pokémon Safari capturé
+  | 'safari_flee'        // pokémon Safari a fui
+  | 'autobattle_win'     // niveau de Combat Auto remporté
+  | 'autobattle_lose'    // niveau de Combat Auto perdu
+  | 'autobattle_variant_completed' // dernière niveau d'une variante remporté
   | 'pokedex_add'       // espèce découverte
   | 'pokemon_new'       // nouveau Pokémon obtenu (équipe ou PC)
   | 'pokemon_move'      // Pokémon existant déplacé équipe <-> PC
@@ -800,6 +1039,23 @@ export interface HistoryDaycarePayload {
   partner_pokemon_nom?: string   // action_type === 'daycare_pair_formed' uniquement
 }
 
+export interface HistorySafariPayload {
+  pokemon_nom: string
+  session_pokemon_id: number
+  gauge_before?: number   // action_type === 'safari_berry_throw'
+  gauge_after?: number    // action_type === 'safari_berry_throw'
+}
+
+export interface HistoryAutoBattlePayload {
+  variant_nom: string
+  pokemon_nom: string
+  player_pokemon_id: number
+  nickname: string | null
+  level_index: number
+  opponent_pokemon_nom: string
+  variant_completed?: boolean // action_type === 'autobattle_variant_completed' uniquement
+}
+
 export type HistoryPayload =
   | HistoryInventoryPayload
   | HistoryPokedexPayload
@@ -808,6 +1064,8 @@ export type HistoryPayload =
   | HistoryMinigamePayload
   | HistoryMiningPayload
   | HistoryDaycarePayload
+  | HistorySafariPayload
+  | HistoryAutoBattlePayload
 
 export interface HistoryEvent {
   id: number

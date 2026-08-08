@@ -106,6 +106,16 @@ html, body, #root {
   50% { transform: scale(1) rotate(90deg); opacity: 1; }
   100% { transform: scale(0.4) rotate(180deg); opacity: 0; }
 }
+@keyframes hit-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  75% { transform: translateX(6px); }
+}
+@keyframes damage-number-pop {
+  0% { transform: translateY(0) scale(0.7); opacity: 0; }
+  30% { transform: translateY(-12px) scale(1.1); opacity: 1; }
+  100% { transform: translateY(-32px) scale(1); opacity: 0; }
+}
 @keyframes confetti-fall {
   0% { transform: translateY(-20px) rotate(0deg); opacity: 1; }
   100% { transform: translateY(240px) rotate(360deg); opacity: 0; }

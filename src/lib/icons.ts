@@ -77,3 +77,8 @@ export const MINING_ICON = `${BASE}/icon_digging_game.png`
 export const MINING_TICKET_ICON = `${BASE}/icon_digging_ticket.png`
 
 export const PENSION_ICON = `${BASE}/icon_daycare_game.png`
+
+export const SAFARI_ICON = `${BASE}/icon_safari_game.png`
+
+export const AUTOBATTLE_ICON = `${BASE}/icon_battle_game.png`
+export const AUTOBATTLE_TICKET_ICON = `${BASE}/icon_battle_ticket.png`

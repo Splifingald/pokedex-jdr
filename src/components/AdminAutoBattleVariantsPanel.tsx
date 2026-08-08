@@ -1,0 +1,417 @@
+import { useState } from 'react'
+import type { AutoBattleLevel, AutoBattleLevelReward, AutoBattleRewardType, Pokemon, Attack, Item } from '../types'
+import { useAutoBattleVariants } from '../hooks/useAutoBattleVariants'
+import { usePokemon } from '../hooks/usePokemon'
+import { useAttacks } from '../hooks/useAttacks'
+import { useItems } from '../hooks/useItems'
+import { isDamagingAbility } from '../lib/autoBattle'
+import { NumberInput } from './NumberInput'
+import { PokemonSearchInput } from './PokemonSearchInput'
+import { MoveSearchInput } from './MoveSearchInput'
+import { TypeBadge } from './TypeBadge'
+import { PixelIcon } from './icons/PixelIcon'
+import { STAT_ICON } from '../lib/icons'
+import { BUTTON_STYLE } from '../lib/buttonStyles'
+import { PIXEL_BORDER_SM } from '../lib/panelStyles'
+import { CloseIcon } from './icons/CloseIcon'
+
+// Le sélecteur n'offre que XP / Objet : un badge n'est mécaniquement rien
+// d'autre qu'un objet (voir types.ts) — 'badge' reste une valeur valide en
+// base (compat. lignes existantes) mais n'est plus proposé comme choix
+// distinct en admin, pour ne pas laisser croire à un système séparé.
+const REWARD_TYPE_LABEL: Record<'xp' | 'item', string> = { xp: 'XP', item: 'Objet' }
+const isItemReward = (t: AutoBattleRewardType) => t === 'item' || t === 'badge'
+
+// "Objet" cliqué mais pas encore d'objet choisi : seul cas où l'affichage
+// diverge temporairement de reward.reward_type — passer sur "Objet" ne
+// s'écrit en base qu'une fois un objet effectivement choisi (reward_type +
+// item_nom + item_quantity envoyés ensemble). Écrire reward_type='item' seul
+// violerait la contrainte autobattle_reward_item_fields (item_nom/quantity
+// NOT NULL requis), ce qui provoquait un rejet serveur invisible et un
+// fetchAll() de secours donnant l'impression que "la page se rafraîchit".
+function RewardRow({
+  reward, items, onUpdate, onRemove,
+}: {
+  reward: AutoBattleLevelReward
+  items: Item[]
+  onUpdate: (id: number, patch: Partial<Omit<AutoBattleLevelReward, 'id' | 'level_id' | 'created_at'>>) => void
+  onRemove: (id: number) => void
+}) {
+  const [pendingItem, setPendingItem] = useState(false)
+  const committedIsItem = isItemReward(reward.reward_type)
+  const draftType: 'xp' | 'item' = pendingItem || committedIsItem ? 'item' : 'xp'
+
+  const handleTypeChange = (newType: 'xp' | 'item') => {
+    if (newType === 'item') {
+      setPendingItem(true)
+      return
+    }
+    setPendingItem(false)
+    onUpdate(reward.id, { reward_type: 'xp', xp_amount: reward.xp_amount ?? 10, item_nom: null, item_quantity: null })
+  }
+
+  const handleItemSelect = (itemNom: string) => {
+    setPendingItem(false)
+    onUpdate(reward.id, { reward_type: 'item', item_nom: itemNom, item_quantity: reward.item_quantity ?? 1 })
+  }
+
+  return (
+    <div className={`flex flex-col gap-1.5 p-2 rounded ${PIXEL_BORDER_SM} bg-white`}>
+      <div className="flex items-center gap-2">
+        <select
+          value={draftType}
+          onChange={(e) => handleTypeChange(e.target.value as 'xp' | 'item')}
+          className="bg-white border-2 border-ink rounded px-2 py-1 text-ink text-xs outline-none"
+        >
+          {(Object.keys(REWARD_TYPE_LABEL) as ('xp' | 'item')[]).map((t) => (
+            <option key={t} value={t}>{REWARD_TYPE_LABEL[t]}</option>
+          ))}
+        </select>
+        <div className="flex-1" />
+        <button onClick={() => onRemove(reward.id)} className={`text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>
+          <CloseIcon className="w-3 h-3" />
+        </button>
+      </div>
+
+      {draftType === 'xp' && (
+        <div className="flex items-center gap-2">
+          <span className="text-ink-muted-2 text-xs">Montant XP</span>
+          <NumberInput
+            min={1}
+            fallback={reward.xp_amount ?? 1}
+            value={reward.xp_amount ?? 0}
+            onCommit={(v) => onUpdate(reward.id, { xp_amount: Math.max(1, v) })}
+            className="w-20 bg-white border-2 border-ink rounded px-1 py-1 text-ink text-sm text-center outline-none"
+          />
+        </div>
+      )}
+
+      {draftType === 'item' && (
+        <div className="flex items-center gap-2">
+          <select
+            value={committedIsItem ? (reward.item_nom ?? '') : ''}
+            onChange={(e) => { if (e.target.value) handleItemSelect(e.target.value) }}
+            className="flex-1 min-w-0 bg-white border-2 border-ink rounded px-2 py-1.5 text-ink text-sm outline-none"
+          >
+            <option value="">Sélectionner un objet…</option>
+            {items.map((i) => (
+              <option key={i.nom} value={i.nom}>{i.nom}</option>
+            ))}
+          </select>
+          {committedIsItem && reward.item_nom && (
+            <>
+              <span className="text-ink-muted-2 text-xs shrink-0">×</span>
+              <NumberInput
+                min={1}
+                fallback={reward.item_quantity ?? 1}
+                value={reward.item_quantity ?? 1}
+                onCommit={(v) => onUpdate(reward.id, { item_quantity: Math.max(1, v) })}
+                className="w-16 shrink-0 bg-white border-2 border-ink rounded px-1 py-1 text-ink text-sm text-center outline-none"
+              />
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RewardEditor({
+  levelId, rewards, items,
+  onAdd, onUpdate, onRemove,
+}: {
+  levelId: number
+  rewards: AutoBattleLevelReward[]
+  items: Item[]
+  onAdd: (levelId: number) => void
+  onUpdate: (id: number, patch: Partial<Omit<AutoBattleLevelReward, 'id' | 'level_id' | 'created_at'>>) => void
+  onRemove: (id: number) => void
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      {rewards.length === 0 && <p className="text-hp-red text-xs italic">Aucune récompense — le niveau ne peut pas être validé.</p>}
+      {rewards.map((r) => (
+        <RewardRow key={r.id} reward={r} items={items} onUpdate={onUpdate} onRemove={onRemove} />
+      ))}
+      <button onClick={() => onAdd(levelId)} className={`text-xs px-3 py-1.5 rounded font-bold self-start ${BUTTON_STYLE.gray}`}>
+        + Ajouter une récompense
+      </button>
+    </div>
+  )
+}
+
+function LevelEditor({
+  level, index, total, rewards, pokemon, attacks, items,
+  onUpdate, onMoveUp, onMoveDown, onDelete, onAddReward, onUpdateReward, onRemoveReward,
+}: {
+  level: AutoBattleLevel
+  index: number
+  total: number
+  rewards: AutoBattleLevelReward[]
+  pokemon: Pokemon[]
+  attacks: Attack[]
+  items: Item[]
+  onUpdate: (id: number, patch: Partial<Omit<AutoBattleLevel, 'id' | 'variant_id' | 'created_at'>>) => void
+  onMoveUp: () => void
+  onMoveDown: () => void
+  onDelete: () => void
+  onAddReward: (levelId: number) => void
+  onUpdateReward: (id: number, patch: Partial<Omit<AutoBattleLevelReward, 'id' | 'level_id' | 'created_at'>>) => void
+  onRemoveReward: (id: number) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const opponentSpecies = pokemon.find((p) => p.nom === level.opponent_pokemon_nom)
+  const opponentAbility = attacks.find((a) => a.nom === level.opponent_ability_nom)
+  const damagingAttacks = attacks.filter(isDamagingAbility)
+  const invalid = !level.opponent_pokemon_nom || !level.opponent_ability_nom || rewards.length === 0
+
+  return (
+    <div className={`rounded ${PIXEL_BORDER_SM} ${invalid ? 'bg-red-50' : 'bg-cream-secondary'}`}>
+      <div className="flex items-center gap-2 p-2">
+        <button onClick={onMoveUp} disabled={index === 0} className={`text-xs px-1.5 py-1 rounded ${BUTTON_STYLE.gray} disabled:opacity-30`}>▲</button>
+        <button onClick={onMoveDown} disabled={index === total - 1} className={`text-xs px-1.5 py-1 rounded ${BUTTON_STYLE.gray} disabled:opacity-30`}>▼</button>
+        <button onClick={() => setExpanded((e) => !e)} className="flex-1 flex items-center gap-2 text-left">
+          <span className="text-ink text-sm font-bold shrink-0">Niveau {index + 1}</span>
+          <div className="w-6 h-6 shrink-0 flex items-center justify-center">
+            {opponentSpecies?.image_miniature ? (
+              <img src={opponentSpecies.image_miniature} alt="" className="pixelated w-full h-full object-contain" />
+            ) : (
+              <span className="text-ink-muted-2 text-lg">?</span>
+            )}
+          </div>
+          <span className="text-ink-muted-2 text-xs truncate">{level.opponent_pokemon_nom || 'Aucun opposant configuré'}</span>
+          {invalid && <span className="text-hp-red text-xs font-bold shrink-0">⚠</span>}
+        </button>
+        <button onClick={onDelete} className={`text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>
+          <CloseIcon className="w-3 h-3" />
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="flex flex-col gap-3 p-3 border-t-2 border-[#cfc7a8]">
+          <div>
+            <p className="text-ink-muted-2 text-xs mb-1">Pokémon adverse</p>
+            {level.opponent_pokemon_nom ? (
+              <div className="flex items-center gap-2 mb-1.5">
+                <div className="w-8 h-8 shrink-0 rounded border-2 border-ink bg-cream-secondary flex items-center justify-center overflow-hidden">
+                  {opponentSpecies?.image_miniature ? (
+                    <img src={opponentSpecies.image_miniature} alt="" className="pixelated w-full h-full object-contain" />
+                  ) : (
+                    <span className="text-ink-muted-2 text-sm">?</span>
+                  )}
+                </div>
+                <span className="text-ink text-sm flex-1">{level.opponent_pokemon_nom}</span>
+                <button onClick={() => onUpdate(level.id, { opponent_pokemon_nom: '' })} className={`text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>Changer</button>
+              </div>
+            ) : (
+              <PokemonSearchInput
+                options={pokemon}
+                onSelect={(p) => onUpdate(level.id, {
+                  opponent_pokemon_nom: p.nom,
+                  opponent_hp: p.pv_base > 0 ? p.pv_base : 1,
+                  opponent_base_damage: p.degats_base,
+                })}
+              />
+            )}
+          </div>
+
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <p className="text-ink-muted-2 text-xs mb-1 flex items-center gap-1">
+                <PixelIcon src={STAT_ICON.hp} size={14} colored className="text-ink" />
+                PV de l'opposant
+              </p>
+              <NumberInput
+                min={1}
+                fallback={level.opponent_hp}
+                value={level.opponent_hp}
+                onCommit={(v) => onUpdate(level.id, { opponent_hp: Math.max(1, v) })}
+                className="w-full bg-white border-2 border-ink rounded px-2 py-1.5 text-ink text-sm outline-none"
+              />
+            </div>
+            <div className="flex-1">
+              <p className="text-ink-muted-2 text-xs mb-1 flex items-center gap-1">
+                <PixelIcon src={STAT_ICON.damage} size={14} colored className="text-ink" />
+                Dégâts de base de l'opposant
+              </p>
+              <NumberInput
+                min={0}
+                fallback={level.opponent_base_damage}
+                value={level.opponent_base_damage}
+                onCommit={(v) => onUpdate(level.id, { opponent_base_damage: Math.max(0, v) })}
+                className="w-full bg-white border-2 border-ink rounded px-2 py-1.5 text-ink text-sm outline-none"
+              />
+            </div>
+          </div>
+
+          <div>
+            <p className="text-ink-muted-2 text-xs mb-1">Capacité offensive de l'opposant</p>
+            {level.opponent_ability_nom ? (
+              <div className="flex items-center gap-2">
+                <TypeBadge type={opponentAbility?.type ?? '?'} small />
+                <span className="text-ink text-sm flex-1 truncate">{level.opponent_ability_nom}</span>
+                <span className="flex items-center gap-1 shrink-0">
+                  <PixelIcon src={STAT_ICON.damage} size={14} colored className="text-ink" />
+                  <span className="text-ink text-sm font-bold">{opponentAbility?.degats_base ?? '—'}</span>
+                </span>
+                <button onClick={() => onUpdate(level.id, { opponent_ability_nom: '' })} className={`text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>Changer</button>
+              </div>
+            ) : (
+              <MoveSearchInput options={damagingAttacks} disabled={false} showDamage onSelect={(a) => onUpdate(level.id, { opponent_ability_nom: a.nom })} />
+            )}
+          </div>
+
+          <div className="border-t-2 border-[#cfc7a8] pt-2">
+            <p className="text-ink-muted-2 text-xs mb-2">Récompenses</p>
+            <RewardEditor levelId={level.id} rewards={rewards} items={items} onAdd={onAddReward} onUpdate={onUpdateReward} onRemove={onRemoveReward} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function AdminAutoBattleVariantsPanel() {
+  const {
+    variants, levelsByVariant, rewardsByLevel, loading,
+    addVariant, updateVariant, deleteVariant,
+    addLevel, updateLevel, swapLevelOrder, deleteLevel,
+    addReward, updateReward, removeReward,
+  } = useAutoBattleVariants()
+  const { pokemon } = usePokemon()
+  const { attacks } = useAttacks()
+  const { items } = useItems()
+  const [selected, setSelected] = useState<number | null>(null)
+  const [newVariantName, setNewVariantName] = useState('')
+
+  if (loading) {
+    return (
+      <div className="bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] w-full p-6">
+        <p className="text-ink-muted-2 text-sm">Chargement…</p>
+      </div>
+    )
+  }
+
+  const selectedVariant = variants.find((v) => v.id === selected) ?? null
+  const selectedLevels = selected ? levelsByVariant.get(selected) ?? [] : []
+  const canEnable = !!selectedVariant?.nom.trim() && !!selectedVariant.banner_url.trim() && !!selectedVariant.icon_url.trim() && selectedLevels.length > 0
+
+  return (
+    <div className="flex flex-col md:flex-row gap-4 w-full items-start">
+      <div className={`bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] w-full p-6 ${selected ? 'md:w-80 shrink-0' : ''}`}>
+        <div className="flex items-center gap-2 mb-5">
+          <span className="text-2xl">⚔️</span>
+          <h3 className="text-[#a3841a] text-lg font-bold">Variantes</h3>
+        </div>
+
+        <div className="flex gap-2 mb-4">
+          <input
+            type="text"
+            value={newVariantName}
+            onChange={(e) => setNewVariantName(e.target.value)}
+            placeholder="Nouvelle variante…"
+            className="flex-1 bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+          />
+          <button
+            onClick={async () => { if (newVariantName.trim()) { const v = await addVariant(newVariantName.trim()); setNewVariantName(''); if (v) setSelected(v.id) } }}
+            className={`px-3 py-2 rounded text-sm font-bold ${BUTTON_STYLE.yellow}`}
+          >
+            + Créer
+          </button>
+        </div>
+
+        {variants.length === 0 ? (
+          <p className="text-ink-muted-2 text-sm">Aucune variante pour l'instant.</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {variants.map((v) => (
+              <div key={v.id} className="flex items-center gap-2">
+                <button
+                  onClick={() => setSelected(selected === v.id ? null : v.id)}
+                  className={`flex-1 text-left px-3 py-2 rounded text-sm font-bold ${PIXEL_BORDER_SM} ${selected === v.id ? 'bg-yellow-100 ring-2 ring-[#a3841a]' : 'bg-cream-secondary'}`}
+                >
+                  {v.nom || '(sans nom)'} {v.enabled && <span className="text-[#2f6b3f]">●</span>}
+                </button>
+                <button onClick={() => deleteVariant(v.id)} className={`text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>
+                  <CloseIcon className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {selectedVariant && (
+        <div className="flex-1 min-w-0 bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] w-full p-6">
+          <div className="flex flex-col gap-3 mb-4">
+            <div>
+              <label className="text-ink-muted-2 text-sm block mb-1">Nom</label>
+              <input
+                type="text"
+                value={selectedVariant.nom}
+                onChange={(e) => updateVariant(selectedVariant.id, { nom: e.target.value })}
+                className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-ink-muted-2 text-sm block mb-1">Bannière (URL)</label>
+              <input
+                type="text"
+                value={selectedVariant.banner_url}
+                onChange={(e) => updateVariant(selectedVariant.id, { banner_url: e.target.value })}
+                className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-ink-muted-2 text-sm block mb-1">Icône (URL)</label>
+              <input
+                type="text"
+                value={selectedVariant.icon_url}
+                onChange={(e) => updateVariant(selectedVariant.id, { icon_url: e.target.value })}
+                className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+              />
+            </div>
+            <label className="flex items-center gap-2 text-sm text-ink-muted">
+              <input
+                type="checkbox"
+                checked={selectedVariant.enabled}
+                disabled={!canEnable}
+                onChange={(e) => updateVariant(selectedVariant.id, { enabled: e.target.checked })}
+                className="w-4 h-4"
+              />
+              <span>Activée {!canEnable && '(nom, bannière, icône et au moins un niveau requis)'}</span>
+            </label>
+          </div>
+
+          <div className="border-t-2 border-[#cfc7a8] pt-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-ink-muted-2 text-sm font-bold">Niveaux ({selectedLevels.length})</p>
+              <button onClick={() => addLevel(selectedVariant.id)} className={`text-xs px-3 py-1.5 rounded font-bold ${BUTTON_STYLE.gray}`}>+ Ajouter un niveau</button>
+            </div>
+            <div className="flex flex-col gap-2">
+              {selectedLevels.map((level, i) => (
+                <LevelEditor
+                  key={level.id}
+                  level={level}
+                  index={i}
+                  total={selectedLevels.length}
+                  rewards={rewardsByLevel.get(level.id) ?? []}
+                  pokemon={pokemon}
+                  attacks={attacks}
+                  items={items}
+                  onUpdate={updateLevel}
+                  onMoveUp={() => i > 0 && swapLevelOrder(level, selectedLevels[i - 1])}
+                  onMoveDown={() => i < selectedLevels.length - 1 && swapLevelOrder(level, selectedLevels[i + 1])}
+                  onDelete={() => deleteLevel(level.id)}
+                  onAddReward={(levelId) => addReward(levelId, { reward_type: 'xp', xp_amount: 10, item_nom: null, item_quantity: null, sort_order: (rewardsByLevel.get(levelId)?.length ?? 0) })}
+                  onUpdateReward={updateReward}
+                  onRemoveReward={removeReward}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

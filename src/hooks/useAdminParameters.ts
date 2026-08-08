@@ -19,6 +19,8 @@ const DEFAULTS: AdminParameters = {
   feature_minijeux_enabled: true,
   feature_mining_enabled: true,
   feature_pension_enabled: true,
+  feature_safari_enabled: true,
+  feature_autobattle_enabled: true,
   stat_points_base: 40,
   stat_min: 5,
   stat_max: 15,

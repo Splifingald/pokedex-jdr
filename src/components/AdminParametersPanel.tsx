@@ -477,6 +477,24 @@ export function AdminParametersPanel() {
                 />
                 Pension Pokémon
               </label>
+              <label className="flex items-center gap-2 text-sm text-ink-muted">
+                <input
+                  type="checkbox"
+                  checked={parameters.feature_safari_enabled}
+                  onChange={(e) => updateParameters({ feature_safari_enabled: e.target.checked })}
+                  className="w-4 h-4"
+                />
+                Safari
+              </label>
+              <label className="flex items-center gap-2 text-sm text-ink-muted">
+                <input
+                  type="checkbox"
+                  checked={parameters.feature_autobattle_enabled}
+                  onChange={(e) => updateParameters({ feature_autobattle_enabled: e.target.checked })}
+                  className="w-4 h-4"
+                />
+                Combat Auto
+              </label>
             </div>
           </div>
         </div>

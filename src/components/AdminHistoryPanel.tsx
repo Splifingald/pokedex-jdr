@@ -24,6 +24,8 @@ const CATEGORY_LABELS: Record<HistoryCategory, string> = {
   combat: 'Combat',
   minigame: 'Mini-Jeux',
   daycare: 'Pension',
+  safari: 'Safari',
+  autobattle: 'Combat Auto',
 }
 
 function Avatar({ player, size = 8 }: { player?: Player; size?: 5 | 8 }) {

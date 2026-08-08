@@ -4,15 +4,19 @@ import { AdminMinigamesEconomyPanel } from './AdminMinigamesEconomyPanel'
 import { AdminMagikarpPanel } from './AdminMagikarpPanel'
 import { AdminMiningPanel } from './AdminMiningPanel'
 import { AdminPensionPanel } from './AdminPensionPanel'
+import { AdminSafariPanel } from './AdminSafariPanel'
+import { AdminAutoBattlePanel } from './AdminAutoBattlePanel'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 
-type SubSection = 'casino' | 'magikarp' | 'mining' | 'pension'
+type SubSection = 'casino' | 'magikarp' | 'mining' | 'pension' | 'safari' | 'autobattle'
 
 const SUB_SECTIONS: { id: SubSection; label: string }[] = [
   { id: 'casino', label: '🎰 Casino' },
   { id: 'magikarp', label: '🐟 Magikarp' },
   { id: 'mining', label: '⛏️ Fouille' },
   { id: 'pension', label: '🏡 Pension' },
+  { id: 'safari', label: '🦁 Safari' },
+  { id: 'autobattle', label: '⚔️ Combat Auto' },
 ]
 
 export function AdminMiniGamesPanel() {
@@ -44,6 +48,10 @@ export function AdminMiniGamesPanel() {
       {sub === 'mining' && <AdminMiningPanel />}
 
       {sub === 'pension' && <AdminPensionPanel />}
+
+      {sub === 'safari' && <AdminSafariPanel />}
+
+      {sub === 'autobattle' && <AdminAutoBattlePanel />}
     </div>
   )
 }

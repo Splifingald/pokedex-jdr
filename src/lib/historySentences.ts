@@ -1,4 +1,4 @@
-import type { Player, Pokemon, Item, HistoryInventoryPayload, HistoryPokedexPayload, HistoryTeamPayload, HistoryCombatPayload, HistoryMinigamePayload, HistoryMiningPayload, HistoryDaycarePayload } from '../types'
+import type { Player, Pokemon, Item, HistoryInventoryPayload, HistoryPokedexPayload, HistoryTeamPayload, HistoryCombatPayload, HistoryMinigamePayload, HistoryMiningPayload, HistoryDaycarePayload, HistorySafariPayload } from '../types'
 import { POKEDOLLAR_ITEM_NAME, TICKET_CASINO_ITEM_NAME, TICKET_TREMPETTE_ITEM_NAME, TICKET_MINING_ITEM_NAME } from '../types'
 import type { ReferenceEntry } from '../hooks/useReferenceIndex'
 import { getStatusInfo } from './status'
@@ -161,6 +161,22 @@ function daycareSentence(entry: DisplayHistoryEntry, ctx: SentenceContext): Sent
   return [player, { text: ' a reçu un œuf (' }, pokemonRef, { text: ') de ' }, parentA, { text: ' et ' }, parentB, { text: ' à la Pension Pokémon' }]
 }
 
+function safariSentence(entry: DisplayHistoryEntry, ctx: SentenceContext): SentencePart[] {
+  const payload = entry.payload as HistorySafariPayload
+  const player = playerPart(ctx, entry.player_id)
+  const pokemonRef = pokemonPart(ctx, payload.pokemon_nom)
+
+  if (entry.action_type === 'safari_berry_throw') {
+    const delta = (payload.gauge_after ?? 0) - (payload.gauge_before ?? 0)
+    return [player, { text: ' a lancé une Baie Framby sur ' }, pokemonRef, { text: ` au Safari (+${delta})` }]
+  }
+  if (entry.action_type === 'safari_capture') {
+    return [player, { text: ' a capturé ' }, pokemonRef, { text: ' au Safari' }]
+  }
+  // safari_flee
+  return [pokemonRef, { text: ' a fui le Safari (tentative de ' }, player, { text: ')' }]
+}
+
 export function buildSentenceParts(entry: DisplayHistoryEntry, ctx: SentenceContext): SentencePart[] {
   switch (entry.category) {
     case 'inventory':
@@ -175,6 +191,8 @@ export function buildSentenceParts(entry: DisplayHistoryEntry, ctx: SentenceCont
       return minigameSentence(entry, ctx)
     case 'daycare':
       return daycareSentence(entry, ctx)
+    case 'safari':
+      return safariSentence(entry, ctx)
     default:
       return [{ text: '' }]
   }

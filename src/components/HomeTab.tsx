@@ -14,13 +14,15 @@ import { CasinoPopup } from './CasinoPopup'
 import { MiniGamesPopup } from './MiniGamesPopup'
 import { MiningPopup } from './MiningPopup'
 import { PensionPopup } from './PensionPopup'
+import { SafariPopup } from './SafariPopup'
+import { AutoBattlePopup } from './AutoBattlePopup'
 import { useMinigamesConfig } from '../hooks/useMinigamesConfig'
 import { useCasinoConfig } from '../hooks/useCasinoConfig'
 import { hasAnyMinigameAvailable } from '../lib/magikarpGame'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { PixelIcon } from './icons/PixelIcon'
-import { PHOTO_ICON, CASINO_MASCOT_ICON, MINIGAMES_ICON, MINING_ICON, PENSION_ICON } from '../lib/icons'
+import { PHOTO_ICON, CASINO_MASCOT_ICON, MINIGAMES_ICON, MINING_ICON, PENSION_ICON, SAFARI_ICON, AUTOBATTLE_ICON } from '../lib/icons'
 import { isGiftReady, resolveLootboxForSpecies, drawLootboxReward, randomNextGiftAt, maybeResetGiftTimerOnEntry } from '../lib/gifting'
 import { logHistoryEvent } from '../lib/historyLog'
 
@@ -62,6 +64,11 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
 
   const sceneRef = useRef<HTMLDivElement>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  // true uniquement quand la fiche est ouverte depuis Safari, qui doit rester
+  // ouvert derrière (contrairement à Mini-Jeux/Pension qui se ferment) — la
+  // fiche doit alors passer au-dessus du popup Safari (z-50) plutôt que
+  // d'être masquée par lui.
+  const [selectedElevated, setSelectedElevated] = useState(false)
   const [jumpingId, setJumpingId] = useState<number | null>(null)
   const [giftPokemonId, setGiftPokemonId] = useState<number | null>(null)
   const [giftReward, setGiftReward] = useState<GiftReward | null>(null)
@@ -69,6 +76,8 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
   const [showMiniGames, setShowMiniGames] = useState(false)
   const [showMining, setShowMining] = useState(false)
   const [showPension, setShowPension] = useState(false)
+  const [showSafari, setShowSafari] = useState(false)
+  const [showAutoBattle, setShowAutoBattle] = useState(false)
 
   // Recalcul périodique de "maintenant" pour détecter les cadeaux devenus prêts
   // pendant que l'app reste ouverte — pas de compte à rebours affiché, juste
@@ -266,6 +275,26 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           </button>
         )}
 
+        {player && parameters.feature_safari_enabled && (
+          <button
+            onClick={() => setShowSafari(true)}
+            title="Safari"
+            className="w-14 h-14 rounded-full border-[3px] border-ink bg-gradient-to-br from-[#e0a83e] to-[#8a5a1f] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+          >
+            <img src={SAFARI_ICON} alt="Safari" className="pixelated w-9 h-9 object-contain" />
+          </button>
+        )}
+
+        {player && parameters.feature_autobattle_enabled && (
+          <button
+            onClick={() => setShowAutoBattle(true)}
+            title="Combat Auto"
+            className="w-14 h-14 rounded-full border-[3px] border-ink bg-gradient-to-br from-[#8a3ee0] to-[#3f0f7a] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+          >
+            <img src={AUTOBATTLE_ICON} alt="Combat Auto" className="pixelated w-9 h-9 object-contain" />
+          </button>
+        )}
+
         {canScan && (
           <button
             onClick={onScan}
@@ -280,6 +309,7 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
       {selected && (
         <PokemonDetailSheet
           context="home"
+          elevated={selectedElevated}
           pokemon={pokemonByName.get(selected.pokemon_nom)}
           playerPokemon={selected}
           attacksByName={attacksByName}
@@ -299,7 +329,7 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           evolutionsByPokemonNom={evolutionsByPokemonNom}
           playerItems={playerItems}
           onEvolve={evolvePokemon}
-          onClose={() => setSelectedId(null)}
+          onClose={() => { setSelectedId(null); setSelectedElevated(false) }}
         />
       )}
 
@@ -332,7 +362,7 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           evolutionsByPokemonNom={evolutionsByPokemonNom}
           itemsByName={itemsByName}
           pokedollarImageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
-          onRequestPokemonDetail={(id) => { setShowMiniGames(false); setSelectedId(id) }}
+          onRequestPokemonDetail={(id) => { setShowMiniGames(false); setSelectedElevated(false); setSelectedId(id) }}
           onClose={() => setShowMiniGames(false)}
         />
       )}
@@ -354,9 +384,35 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           pokemonByName={pokemonByName}
           itemsByName={itemsByName}
           evolutionsByPokemonNom={evolutionsByPokemonNom}
-          onRequestPokemonDetail={(id) => { setShowPension(false); setSelectedId(id) }}
+          onRequestPokemonDetail={(id) => { setShowPension(false); setSelectedElevated(false); setSelectedId(id) }}
           onMarkEggSeen={markEggRevealSeen}
           onClose={() => setShowPension(false)}
+        />
+      )}
+
+      {showSafari && player && (
+        <SafariPopup
+          player={player}
+          playerItems={playerItems}
+          itemsByName={itemsByName}
+          pokedollarImageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
+          onRequestPokemonDetail={(id) => { setSelectedElevated(true); setSelectedId(id) }}
+          onClose={() => setShowSafari(false)}
+        />
+      )}
+
+      {showAutoBattle && player && (
+        <AutoBattlePopup
+          player={player}
+          playerItems={playerItems}
+          roster={roster}
+          pokemonByName={pokemonByName}
+          attacksByName={attacksByName}
+          itemsByName={itemsByName}
+          evolutionsByPokemonNom={evolutionsByPokemonNom}
+          pokedollarImageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
+          onRequestPokemonDetail={(id) => { setShowAutoBattle(false); setSelectedElevated(false); setSelectedId(id) }}
+          onClose={() => setShowAutoBattle(false)}
         />
       )}
     </div>

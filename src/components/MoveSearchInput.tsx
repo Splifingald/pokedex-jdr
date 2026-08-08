@@ -1,15 +1,19 @@
 import { useState, useMemo } from 'react'
 import type { Attack } from '../types'
 import { TypeBadge } from './TypeBadge'
+import { PixelIcon } from './icons/PixelIcon'
+import { STAT_ICON } from '../lib/icons'
 import { normalizeSearch } from '../lib/normalizeSearch'
 
 interface Props {
   options: Attack[]
   disabled: boolean
   onSelect: (attack: Attack) => void
+  /** Affiche les dégâts de base à côté de chaque résultat (défaut: masqué) */
+  showDamage?: boolean
 }
 
-export function MoveSearchInput({ options, disabled, onSelect }: Props) {
+export function MoveSearchInput({ options, disabled, onSelect, showDamage = false }: Props) {
   const [query, setQuery] = useState('')
 
   const matches = useMemo(() => {
@@ -52,7 +56,13 @@ export function MoveSearchInput({ options, disabled, onSelect }: Props) {
                 className="w-full flex items-center gap-2 px-3 py-2 border-b border-[#cfc7a8] last:border-b-0 hover:bg-cream-secondary transition-colors text-left"
               >
                 <TypeBadge type={a.type} small />
-                <span className="text-ink text-sm truncate">{a.nom}</span>
+                <span className="flex-1 text-ink text-sm truncate">{a.nom}</span>
+                {showDamage && (
+                  <span className="flex items-center gap-1 shrink-0">
+                    <PixelIcon src={STAT_ICON.damage} size={14} colored className="text-ink" />
+                    <span className="text-ink text-xs font-bold">{a.degats_base ?? 0}</span>
+                  </span>
+                )}
               </button>
             ))
           )}

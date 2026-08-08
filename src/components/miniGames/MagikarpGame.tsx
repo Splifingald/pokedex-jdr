@@ -175,8 +175,8 @@ export function MagikarpGame({
       {(phase === 'countdown' || phase === 'playing') && (
         <div
           className={`relative w-full h-64 rounded overflow-hidden mb-4 ${PIXEL_BORDER_SM} ${phase === 'playing' ? 'cursor-pointer' : ''}`}
-          onClick={phase === 'playing' ? handleTap : undefined}
-          onTouchStart={phase === 'playing' ? (e) => { e.preventDefault(); handleTap() } : undefined}
+          onPointerDown={phase === 'playing' ? (e) => { e.preventDefault(); handleTap() } : undefined}
+          style={{ touchAction: 'none' }}
         >
           <SeaBackground />
 

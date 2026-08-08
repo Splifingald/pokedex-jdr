@@ -68,6 +68,28 @@ exports.handler = async () => {
     }
   }
 
+  // ── Safari : nouvelle session démarrée ───────────────────────────────────
+  // Diffusion à tous les joueurs (contrairement aux autres blocs, condition
+  // par-joueur) — voir schema.sql::safari_sessions.notified, consommé ici une
+  // seule fois par session. Délai potentiel jusqu'à ~1h (fréquence du cron),
+  // accepté pour cette fonctionnalité plutôt qu'un endpoint de push instantané.
+  const { data: newSafariSession, error: safariSessionError } = await supabase
+    .from('safari_sessions').select('id').eq('is_active', true).eq('notified', false).maybeSingle()
+  if (safariSessionError) {
+    console.error('Erreur lecture safari_sessions :', safariSessionError.message)
+  } else if (newSafariSession) {
+    const { data: activePlayers } = await supabase.from('players').select('id').eq('is_npc', false)
+    for (const p of activePlayers || []) {
+      notifications.push({
+        playerId: p.id,
+        title: 'Pokémon JDR : Safari',
+        body: 'Une nouvelle session Safari a démarré, viens tenter ta chance !',
+        icon: absoluteUrl(siteUrl, '/website_icons/icon_safari_game.png'),
+      })
+    }
+    await supabase.from('safari_sessions').update({ notified: true }).eq('id', newSafariSession.id)
+  }
+
   // ── Cadeaux pokémon prêts ────────────────────────────────────────────────
   // Prêts, mais pas encore réclamés : soit jamais notifiés, soit notifiés il y
   // a plus de 72h (relance tant que le cadeau n'est pas ouvert).

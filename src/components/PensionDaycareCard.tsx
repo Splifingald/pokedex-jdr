@@ -69,7 +69,13 @@ export function PensionDaycareCard({
   ))
 
   return (
-    <div className="relative aspect-square min-w-0 border-2 border-ink rounded-lg bg-cream-secondary overflow-hidden">
+    <div className="relative aspect-[2/3] min-w-0">
+      {/* Fond/bordure sur une couche dédiée (plutôt que sur ce conteneur) :
+          le sprite agrandi (scale-[1.6] ci-dessous) doit pouvoir déborder de
+          sa case sans être rogné par un overflow-hidden porté par ce même
+          conteneur. */}
+      <div className="absolute inset-0 border-2 border-ink rounded-lg bg-cream-secondary overflow-hidden" />
+
       {owner && (
         <span
           className="absolute top-1 left-1 z-10 w-6 h-6 rounded-full border-2 shrink-0 overflow-hidden bg-cream"
@@ -90,14 +96,19 @@ export function PensionDaycareCard({
         </span>
       )}
 
-      <button onClick={onSelect} className="absolute inset-0 flex items-center justify-center p-1" title={ownedPokemonName(playerPokemon)}>
+      {/* z-[1] (plutôt que l'empilement par défaut) : sans valeur explicite, le
+          débordement du sprite serait comparé à l'échelle de toute la grille
+          par ordre du DOM plutôt que par carte — le fond (non positionné) de
+          la case suivante repasserait alors par-dessus le débordement de
+          celle-ci dès que deux cases voisines sont occupées. */}
+      <button onClick={onSelect} className="absolute inset-0 z-[1] flex items-center justify-center p-1" title={ownedPokemonName(playerPokemon)}>
         <div className="w-full h-full flex items-center justify-center" style={jumping ? { animation: 'jump-pop 0.6s ease-out 1' } : undefined}>
           <div className="w-full h-full flex items-center justify-center" style={{ animation: `idle-bob ${bobDuration}s ease-in-out ${bobDelay}s infinite` }}>
             {pokemon?.image_miniature ? (
               <img
                 src={pokemon.image_miniature}
                 alt=""
-                className="pixelated max-w-full max-h-full object-contain [filter:drop-shadow(1px_2px_1px_rgba(0,0,0,0.3))]"
+                className="pixelated max-w-full max-h-full object-contain scale-[1.6] [filter:drop-shadow(1px_2px_1px_rgba(0,0,0,0.3))]"
               />
             ) : (
               <span className="text-ink-muted-2 text-6xl">?</span>
