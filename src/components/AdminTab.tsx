@@ -6,9 +6,10 @@ import { AdminGiftingPanel } from './AdminGiftingPanel'
 import { AdminMiniGamesPanel } from './AdminMiniGamesPanel'
 import { AdminDisplayPanel } from './AdminDisplayPanel'
 import { AdminHistoryPanel } from './AdminHistoryPanel'
+import { AdminChatPanel } from './AdminChatPanel'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 
-type Section = 'import' | 'joueurs' | 'parametres' | 'cadeaux' | 'casino' | 'display' | 'historique'
+type Section = 'import' | 'joueurs' | 'parametres' | 'cadeaux' | 'casino' | 'display' | 'historique' | 'chat'
 
 interface Props {
   onImportSuccess: () => void
@@ -25,6 +26,7 @@ export function AdminTab({ onImportSuccess }: Props) {
     { id: 'casino', label: '🎰 Mini-Jeux' },
     { id: 'display', label: '🖼️ Affichage' },
     { id: 'historique', label: '📈 Historique' },
+    { id: 'chat', label: '💬 Chat' },
   ]
 
   return (
@@ -48,6 +50,7 @@ export function AdminTab({ onImportSuccess }: Props) {
       {section === 'casino' && <AdminMiniGamesPanel />}
       {section === 'display' && <AdminDisplayPanel />}
       {section === 'historique' && <AdminHistoryPanel />}
+      {section === 'chat' && <AdminChatPanel />}
     </div>
   )
 }

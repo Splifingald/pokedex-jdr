@@ -1,6 +1,7 @@
 import { AdminSafariGeneralPanel } from './AdminSafariGeneralPanel'
 import { AdminSafariBerryPanel } from './AdminSafariBerryPanel'
 import { AdminSafariGroupsPanel } from './AdminSafariGroupsPanel'
+import { AdminSafariForcedDrawPanel } from './AdminSafariForcedDrawPanel'
 
 export function AdminSafariPanel() {
   return (
@@ -8,6 +9,7 @@ export function AdminSafariPanel() {
       <AdminSafariGeneralPanel />
       <AdminSafariBerryPanel />
       <AdminSafariGroupsPanel />
+      <AdminSafariForcedDrawPanel />
     </div>
   )
 }

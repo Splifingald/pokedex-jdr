@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { AutoBattleLevel, AutoBattleLevelReward, AutoBattleRewardType, Pokemon, Attack, Item } from '../types'
 import { useAutoBattleVariants } from '../hooks/useAutoBattleVariants'
+import { useAutoBattleBannedAttacks } from '../hooks/useAutoBattleBannedAttacks'
 import { usePokemon } from '../hooks/usePokemon'
 import { useAttacks } from '../hooks/useAttacks'
 import { useItems } from '../hooks/useItems'
@@ -8,9 +9,10 @@ import { isDamagingAbility } from '../lib/autoBattle'
 import { NumberInput } from './NumberInput'
 import { PokemonSearchInput } from './PokemonSearchInput'
 import { MoveSearchInput } from './MoveSearchInput'
+import { ItemSearchInput } from './ItemSearchInput'
 import { TypeBadge } from './TypeBadge'
 import { PixelIcon } from './icons/PixelIcon'
-import { STAT_ICON } from '../lib/icons'
+import { STAT_ICON, DICE_GENERIC_ICON } from '../lib/icons'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { CloseIcon } from './icons/CloseIcon'
@@ -37,21 +39,24 @@ function RewardRow({
   onUpdate: (id: number, patch: Partial<Omit<AutoBattleLevelReward, 'id' | 'level_id' | 'created_at'>>) => void
   onRemove: (id: number) => void
 }) {
-  const [pendingItem, setPendingItem] = useState(false)
+  // true tant qu'on doit afficher le champ de recherche d'objet plutôt que
+  // l'objet déjà choisi : soit parce qu'on vient de passer sur "Objet" sans
+  // encore rien choisir, soit parce que l'admin a cliqué "Changer".
+  const [editingItem, setEditingItem] = useState(false)
   const committedIsItem = isItemReward(reward.reward_type)
-  const draftType: 'xp' | 'item' = pendingItem || committedIsItem ? 'item' : 'xp'
+  const draftType: 'xp' | 'item' = editingItem || committedIsItem ? 'item' : 'xp'
 
   const handleTypeChange = (newType: 'xp' | 'item') => {
     if (newType === 'item') {
-      setPendingItem(true)
+      setEditingItem(true)
       return
     }
-    setPendingItem(false)
-    onUpdate(reward.id, { reward_type: 'xp', xp_amount: reward.xp_amount ?? 10, item_nom: null, item_quantity: null })
+    setEditingItem(false)
+    onUpdate(reward.id, { reward_type: 'xp', xp_amount: reward.xp_amount ?? 1, item_nom: null, item_quantity: null })
   }
 
   const handleItemSelect = (itemNom: string) => {
-    setPendingItem(false)
+    setEditingItem(false)
     onUpdate(reward.id, { reward_type: 'item', item_nom: itemNom, item_quantity: reward.item_quantity ?? 1 })
   }
 
@@ -87,19 +92,17 @@ function RewardRow({
       )}
 
       {draftType === 'item' && (
-        <div className="flex items-center gap-2">
-          <select
-            value={committedIsItem ? (reward.item_nom ?? '') : ''}
-            onChange={(e) => { if (e.target.value) handleItemSelect(e.target.value) }}
-            className="flex-1 min-w-0 bg-white border-2 border-ink rounded px-2 py-1.5 text-ink text-sm outline-none"
-          >
-            <option value="">Sélectionner un objet…</option>
-            {items.map((i) => (
-              <option key={i.nom} value={i.nom}>{i.nom}</option>
-            ))}
-          </select>
-          {committedIsItem && reward.item_nom && (
-            <>
+        <div className="flex flex-col gap-1.5">
+          {!editingItem && committedIsItem && reward.item_nom ? (
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 shrink-0 flex items-center justify-center">
+                {items.find((i) => i.nom === reward.item_nom)?.image_url ? (
+                  <img src={items.find((i) => i.nom === reward.item_nom)?.image_url ?? ''} alt="" className="w-full h-full object-contain" />
+                ) : (
+                  <span className="text-lg">🎒</span>
+                )}
+              </div>
+              <span className="text-ink text-sm flex-1 truncate">{reward.item_nom}</span>
               <span className="text-ink-muted-2 text-xs shrink-0">×</span>
               <NumberInput
                 min={1}
@@ -108,7 +111,10 @@ function RewardRow({
                 onCommit={(v) => onUpdate(reward.id, { item_quantity: Math.max(1, v) })}
                 className="w-16 shrink-0 bg-white border-2 border-ink rounded px-1 py-1 text-ink text-sm text-center outline-none"
               />
-            </>
+              <button onClick={() => setEditingItem(true)} className={`text-xs px-2 py-1 rounded shrink-0 ${BUTTON_STYLE.gray}`}>Changer</button>
+            </div>
+          ) : (
+            <ItemSearchInput options={items} onSelect={(item) => handleItemSelect(item.nom)} />
           )}
         </div>
       )}
@@ -141,7 +147,7 @@ function RewardEditor({
 }
 
 function LevelEditor({
-  level, index, total, rewards, pokemon, attacks, items,
+  level, index, total, rewards, pokemon, attacks, items, bannedAttacks,
   onUpdate, onMoveUp, onMoveDown, onDelete, onAddReward, onUpdateReward, onRemoveReward,
 }: {
   level: AutoBattleLevel
@@ -151,6 +157,7 @@ function LevelEditor({
   pokemon: Pokemon[]
   attacks: Attack[]
   items: Item[]
+  bannedAttacks: Set<string>
   onUpdate: (id: number, patch: Partial<Omit<AutoBattleLevel, 'id' | 'variant_id' | 'created_at'>>) => void
   onMoveUp: () => void
   onMoveDown: () => void
@@ -162,7 +169,7 @@ function LevelEditor({
   const [expanded, setExpanded] = useState(false)
   const opponentSpecies = pokemon.find((p) => p.nom === level.opponent_pokemon_nom)
   const opponentAbility = attacks.find((a) => a.nom === level.opponent_ability_nom)
-  const damagingAttacks = attacks.filter(isDamagingAbility)
+  const damagingAttacks = attacks.filter((a) => isDamagingAbility(a) && !bannedAttacks.has(a.nom))
   const invalid = !level.opponent_pokemon_nom || !level.opponent_ability_nom || rewards.length === 0
 
   return (
@@ -254,6 +261,12 @@ function LevelEditor({
                   <PixelIcon src={STAT_ICON.damage} size={14} colored className="text-ink" />
                   <span className="text-ink text-sm font-bold">{opponentAbility?.degats_base ?? '—'}</span>
                 </span>
+                {opponentAbility?.degats_de != null && (
+                  <span className="flex items-center gap-1 shrink-0">
+                    <PixelIcon src={DICE_GENERIC_ICON} size={14} colored className="text-ink" />
+                    <span className="text-ink text-sm font-bold">{opponentAbility.degats_de}</span>
+                  </span>
+                )}
                 <button onClick={() => onUpdate(level.id, { opponent_ability_nom: '' })} className={`text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>Changer</button>
               </div>
             ) : (
@@ -278,6 +291,7 @@ export function AdminAutoBattleVariantsPanel() {
     addLevel, updateLevel, swapLevelOrder, deleteLevel,
     addReward, updateReward, removeReward,
   } = useAutoBattleVariants()
+  const { bannedNames } = useAutoBattleBannedAttacks()
   const { pokemon } = usePokemon()
   const { attacks } = useAttacks()
   const { items } = useItems()
@@ -399,11 +413,12 @@ export function AdminAutoBattleVariantsPanel() {
                   pokemon={pokemon}
                   attacks={attacks}
                   items={items}
+                  bannedAttacks={bannedNames}
                   onUpdate={updateLevel}
                   onMoveUp={() => i > 0 && swapLevelOrder(level, selectedLevels[i - 1])}
                   onMoveDown={() => i < selectedLevels.length - 1 && swapLevelOrder(level, selectedLevels[i + 1])}
                   onDelete={() => deleteLevel(level.id)}
-                  onAddReward={(levelId) => addReward(levelId, { reward_type: 'xp', xp_amount: 10, item_nom: null, item_quantity: null, sort_order: (rewardsByLevel.get(levelId)?.length ?? 0) })}
+                  onAddReward={(levelId) => addReward(levelId, { reward_type: 'xp', xp_amount: 1, item_nom: null, item_quantity: null, sort_order: (rewardsByLevel.get(levelId)?.length ?? 0) })}
                   onUpdateReward={updateReward}
                   onRemoveReward={removeReward}
                 />

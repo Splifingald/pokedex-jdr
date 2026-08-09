@@ -495,6 +495,15 @@ export function AdminParametersPanel() {
                 />
                 Combat Auto
               </label>
+              <label className="flex items-center gap-2 text-sm text-ink-muted">
+                <input
+                  type="checkbox"
+                  checked={parameters.feature_chat_enabled}
+                  onChange={(e) => updateParameters({ feature_chat_enabled: e.target.checked })}
+                  className="w-4 h-4"
+                />
+                Chat
+              </label>
             </div>
           </div>
         </div>

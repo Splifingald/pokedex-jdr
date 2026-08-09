@@ -42,6 +42,7 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
 
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('numero')
+  const [confirmingDeleteAll, setConfirmingDeleteAll] = useState(false)
 
   const addableOptions = useMemo(
     () => pokemonList.filter((p) => isAdmin || discovered.has(p.nom)),
@@ -132,6 +133,15 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
     showToast(`${pp ? ownedPokemonName(pp) : 'Pokémon'} supprimé.`)
   }
 
+  const handleDeleteAll = async () => {
+    for (const pp of roster) {
+      await deleteOwnedPokemon(pp.id)
+    }
+    setSelectedId(null)
+    setConfirmingDeleteAll(false)
+    showToast('Équipe entièrement supprimée.')
+  }
+
   const handleRestoreAll = () => {
     sortedRoster.forEach((pp) => {
       const wasKo = (getLocalHp(pp.id) ?? getMaxHp(pp, pokemonByName.get(pp.pokemon_nom))) <= 0
@@ -174,6 +184,32 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
           >
             <PixelIcon src={STAT_ICON.hp} size={12} colored /> Tout soigner
           </button>
+        )}
+        {isAdmin && sortedRoster.length > 0 && (
+          confirmingDeleteAll ? (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="text-xs text-ink">Tout supprimer ?</span>
+              <button
+                onClick={handleDeleteAll}
+                className={`text-xs px-2.5 py-1 rounded-md font-bold ${BUTTON_STYLE.red}`}
+              >
+                Confirmer
+              </button>
+              <button
+                onClick={() => setConfirmingDeleteAll(false)}
+                className={`text-xs px-2.5 py-1 rounded-md font-bold ${BUTTON_STYLE.gray}`}
+              >
+                Annuler
+              </button>
+            </span>
+          ) : (
+            <button
+              onClick={() => setConfirmingDeleteAll(true)}
+              className={`text-xs px-2.5 py-1 rounded-md font-bold ${BUTTON_STYLE.red}`}
+            >
+              Tout supprimer
+            </button>
+          )
         )}
       </div>
 

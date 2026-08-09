@@ -45,13 +45,16 @@ export function SafariPokemonCard({ sessionPokemon, pokemon, areas, capturedByPl
 
   const currentArea = sessionPokemon.status === 'active' ? resolveGaugeArea(areas, sessionPokemon.position_gauge) : null
   // Base 64px/160px (compact/étendu), agrandies ×1.3 et ×1.7, puis la version
-  // étendue est ramenée à 80% (272×0.8 ≈ 218px).
-  const spriteSize = expanded ? 'w-[218px] h-[218px]' : 'w-[84px] h-[84px]'
-  const gaugeWidth = expanded ? 'w-72' : 'w-24'
+  // étendue est ramenée à 80% (272×0.8 ≈ 218px) — plafonds desktop atteints
+  // via clamp(), qui rétrécit proportionnellement à la largeur d'écran sur
+  // mobile (le popup Safari occupe 100vw en dessous du breakpoint sm) pour
+  // que la rangée de 3 cartes + le panneau étendu ne débordent jamais.
+  const spriteSize = expanded ? 'w-[clamp(140px,55vw,218px)] h-[clamp(140px,55vw,218px)]' : 'w-[clamp(56px,18vw,84px)] h-[clamp(56px,18vw,84px)]'
+  const gaugeWidth = expanded ? 'w-[clamp(200px,78vw,288px)]' : 'w-[clamp(70px,22vw,96px)]'
   // Largeur de carte fixe (ne dépend jamais du texte affiché, y compris les
   // messages "capturé"/"a fui" qui passent à la ligne plutôt que d'élargir
   // la carte) — dérivée de la largeur de la jauge, l'élément le plus large.
-  const cardWidth = expanded ? 'w-80' : 'w-28'
+  const cardWidth = expanded ? 'w-[clamp(220px,85vw,320px)]' : 'w-[clamp(84px,26vw,112px)]'
 
   return (
     <button

@@ -168,7 +168,10 @@ export default function App() {
   return (
     <div className="relative flex flex-col h-full bg-app-bg">
       {/* En-tête persistant */}
-      <header className="shrink-0 flex items-center gap-2.5 px-3.5 py-2.5 bg-shell border-b-4 border-ink shadow-[0_4px_0_rgba(0,0,0,0.35)]">
+      <header
+        className="shrink-0 flex items-center gap-2.5 px-3.5 pb-2.5 bg-shell border-b-4 border-ink shadow-[0_4px_0_rgba(0,0,0,0.35)]"
+        style={{ paddingTop: 'calc(0.625rem + env(safe-area-inset-top))' }}
+      >
         <div className="w-5 h-5 rounded-full bg-[#7fd6ff] border-[3px] border-cream shadow-[0_0_6px_#7fd6ff] shrink-0" />
         <h1 className="flex-1 min-w-0 text-lg text-cream tracking-wide [text-shadow:2px_2px_0_rgba(0,0,0,0.35)] truncate">
           {TAB_TITLES[activeTab]}
@@ -210,8 +213,10 @@ export default function App() {
           {activeTab === 'accueil' && (
             <HomeTab
               player={player}
+              players={players}
               isAdmin={isAdmin}
               pokemonByName={pokemonByName}
+              discoveredPokemon={discovered}
               attacksByName={attacksByName}
               itemsByName={itemsByName}
               playerItems={playerItems}

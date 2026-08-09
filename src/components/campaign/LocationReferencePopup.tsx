@@ -16,10 +16,13 @@ interface Props {
   pokemonByName: Map<string, Pokemon>
   attacksByName: Map<string, Attack>
   displayBar?: ReactNode
+  /** Masque la table "Rencontres possibles" — utilisé pour les popups ouverts
+   * depuis le chat, qui ne doit pas exposer la table de rencontres aux joueurs. */
+  hideEncounters?: boolean
   onClose: () => void
 }
 
-export function LocationReferencePopup({ location, encounters, pokemonByName, attacksByName, displayBar, onClose }: Props) {
+export function LocationReferencePopup({ location, encounters, pokemonByName, attacksByName, displayBar, hideEncounters = false, onClose }: Props) {
   const [viewerOpen, setViewerOpen] = useState(false)
   const [quickPick, setQuickPick] = useState<number | null>(null)
   const [selectedPokemon, setSelectedPokemon] = useState<Pokemon | null>(null)
@@ -66,7 +69,7 @@ export function LocationReferencePopup({ location, encounters, pokemonByName, at
           </div>
         )}
 
-        {sortedEncounters.length > 0 && (
+        {!hideEncounters && sortedEncounters.length > 0 && (
           <div className="mt-3 pt-3 border-t-2 border-[#cfc7a8]">
             <div className="flex items-center gap-1.5 mb-1.5">
               <PixelIcon src={NAV_ICON.rencontres!} size={14} colored className="text-[#7a7c9a]" alt="" />

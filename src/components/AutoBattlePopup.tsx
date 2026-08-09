@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import type { Player, PlayerPokemon, Pokemon, Attack, PokemonEvolution, Item, AutoBattleVariant, AutoBattleLevel, AutoBattleResolveResult } from '../types'
 import { TICKET_AUTOBATTLE_ITEM_NAME, POKEDOLLAR_ITEM_NAME, ownedPokemonName } from '../types'
 import { supabase } from '../lib/supabase'
@@ -7,7 +7,8 @@ import { useAutoBattleConfig } from '../hooks/useAutoBattleConfig'
 import { useAutoBattlePlayerState } from '../hooks/useAutoBattlePlayerState'
 import { useAutoBattleVariants } from '../hooks/useAutoBattleVariants'
 import { useAutoBattleProgress } from '../hooks/useAutoBattleProgress'
-import { computeTicketRegen, isPurchaseCapReached, localDateString, formatCountdown } from '../lib/casino'
+import { useAutoBattleBannedAttacks } from '../hooks/useAutoBattleBannedAttacks'
+import { isPurchaseCapReached, localDateString, formatCountdown } from '../lib/casino'
 import { generateIdempotencyKey } from '../lib/autoBattle'
 import { getEvolutionOptions } from '../lib/evolution'
 import { useToast } from '../context/ToastContext'
@@ -64,6 +65,7 @@ export function AutoBattlePopup({
   const { state, updateState } = useAutoBattlePlayerState(player.id)
   const { variants, levelsByVariant, rewardsByLevel, loading: variantsLoading } = useAutoBattleVariants()
   const { progressByVariant, stateByLevel } = useAutoBattleProgress(player.id)
+  const { bannedNames } = useAutoBattleBannedAttacks()
   const { showToast } = useToast()
 
   const [view, setView] = useState<View>('list')
@@ -78,32 +80,13 @@ export function AutoBattlePopup({
   const ticketRow = playerItems.inventory.find((r) => r.item_nom === TICKET_AUTOBATTLE_ITEM_NAME)
   const ticketCount = ticketRow?.quantity ?? 0
 
-  const tickRegen = useCallback(async () => {
-    if (!state) return
-    const result = computeTicketRegen(state.next_ticket_at, ticketCount, config, new Date())
-    if (result.ticketsGranted > 0) {
-      await playerItems.addItems(TICKET_AUTOBATTLE_ITEM_NAME, result.ticketsGranted)
-      void logHistoryEvent('inventory', 'item_add', player.id, {
-        item_nom: TICKET_AUTOBATTLE_ITEM_NAME,
-        delta: result.ticketsGranted,
-        total: ticketCount + result.ticketsGranted,
-        source: 'la recharge de tickets',
-      })
-    }
-    if (result.nextTicketAt !== state.next_ticket_at) {
-      await updateState({ next_ticket_at: result.nextTicketAt })
-    }
-  }, [state, ticketCount, config, playerItems, updateState, player.id])
-
+  // La régénération des tickets (octroi + minuteur) tourne en tâche de fond
+  // dans HomeTab dès que le jeu est débloqué — ce popup ne fait qu'afficher
+  // le compte à rebours, il ne crédite plus rien lui-même.
   useEffect(() => {
-    tickRegen()
-    const interval = window.setInterval(() => {
-      setNow(Date.now())
-      tickRegen()
-    }, 1000)
+    const interval = window.setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(interval)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- tickRegen intentionally excluded: rebuilt every render, only state?.next_ticket_at / ticketCount should restart the interval
-  }, [state?.next_ticket_at, ticketCount])
+  }, [])
 
   const handleBuyTicket = async () => {
     if (!state) return
@@ -192,6 +175,15 @@ export function AutoBattlePopup({
       return
     }
 
+    // Les récompenses (objets/badges) sont créditées côté serveur par le RPC,
+    // pas via les setInventory optimistes habituels de usePlayerItems — on
+    // force un refetch dès maintenant (pendant l'animation coin-toss/combat)
+    // plutôt que de compter sur le Realtime pour que le Sac les reflète sans
+    // attendre un rechargement de l'app (même raison que MiningPopup).
+    if (result.outcome === 'win') {
+      void playerItems.refetch()
+    }
+
     setBattleResult(result)
     setView('coin-toss')
   }
@@ -274,6 +266,13 @@ export function AutoBattlePopup({
   const activeSpecies = selectedPokemon ? pokemonByName.get(selectedPokemon.pokemon_nom) : undefined
   const opponentSpecies = battleResult ? pokemonByName.get(battleResult.opponent_pokemon_nom ?? '') : undefined
 
+  // Variantes déjà terminées reléguées en bas de liste (ordre stable sinon).
+  const sortedEnabledVariants = [...variants.filter((v) => v.enabled)].sort((a, b) => {
+    const aDone = progressByVariant.get(a.id)?.variant_completed ?? false
+    const bDone = progressByVariant.get(b.id)?.variant_completed ?? false
+    return Number(aDone) - Number(bDone)
+  })
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-0 sm:p-4"
@@ -285,7 +284,7 @@ export function AutoBattlePopup({
       >
         <button
           onClick={onClose}
-          className="absolute right-3 top-3 z-20 w-8 h-8 rounded-full flex items-center justify-center text-ink bg-cream/70 hover:bg-black/10"
+          className="absolute right-3 top-3 z-20 w-8 h-8 rounded-full border-2 border-ink bg-cream shadow-[var(--shadow-pixel)] flex items-center justify-center text-ink hover:bg-black/10 active:shadow-none active:translate-x-[1px] active:translate-y-[1px] transition-all"
         >
           <CloseIcon className="w-4 h-4" />
         </button>
@@ -327,10 +326,10 @@ export function AutoBattlePopup({
               <div className="flex flex-col gap-4">
                 {variantsLoading ? (
                   <p className="text-ink-muted-2 text-sm">Chargement…</p>
-                ) : variants.filter((v) => v.enabled).length === 0 ? (
+                ) : sortedEnabledVariants.length === 0 ? (
                   <p className="text-ink-muted-2 text-sm text-center py-4">Aucun parcours disponible pour le moment.</p>
                 ) : (
-                  variants.filter((v) => v.enabled).map((variant) => {
+                  sortedEnabledVariants.map((variant) => {
                     const levels = levelsByVariant.get(variant.id) ?? []
                     const progress = progressByVariant.get(variant.id)
                     const completed = progress?.variant_completed ?? false
@@ -380,6 +379,7 @@ export function AutoBattlePopup({
               roster={roster}
               pokemonByName={pokemonByName}
               attacksByName={attacksByName}
+              bannedAttacks={bannedNames}
               onSelect={(pp) => { setSelectedPokemon(pp); setView('pick-ability') }}
               onBack={resetToList}
             />
@@ -389,6 +389,7 @@ export function AutoBattlePopup({
             <AutoBattleAbilityPicker
               playerPokemon={selectedPokemon}
               attacksByName={attacksByName}
+              bannedAttacks={bannedNames}
               onSelect={(ability) => void handleSelectAbility(selectedPokemon, ability)}
               onBack={() => setView('pick-pokemon')}
             />
@@ -411,7 +412,9 @@ export function AutoBattlePopup({
               opponentMaxHp={battleResult.opponent_hp ?? 1}
               opponentNom={battleResult.opponent_pokemon_nom ?? ''}
               turns={battleResult.turns}
-              onFinished={handleBattleFinished}
+              playerTypeBonus={battleResult.player_type_bonus ?? false}
+              opponentTypeBonus={battleResult.opponent_type_bonus ?? false}
+              onContinue={handleBattleFinished}
             />
           )}
 

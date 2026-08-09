@@ -2,22 +2,24 @@ import type { PlayerPokemon, Attack } from '../../types'
 import { getEligibleAbilities } from '../../lib/autoBattle'
 import { TypeBadge } from '../TypeBadge'
 import { PixelIcon } from '../icons/PixelIcon'
-import { STAT_ICON } from '../../lib/icons'
+import { STAT_ICON, DICE_GENERIC_ICON } from '../../lib/icons'
 import { PANEL } from '../../lib/panelStyles'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 
 interface Props {
   playerPokemon: PlayerPokemon
   attacksByName: Map<string, Attack>
+  bannedAttacks: Set<string>
   onSelect: (ability: Attack) => void
   onBack: () => void
 }
 
-// Sélection de la capacité offensive — n'affiche QUE nom/type/dégâts de base
-// (requirement #10) : ni dégâts dé, ni effet, contrairement à AttackDetailCard
-// utilisé partout ailleurs dans l'app.
-export function AutoBattleAbilityPicker({ playerPokemon, attacksByName, onSelect, onBack }: Props) {
-  const abilities = getEligibleAbilities(playerPokemon.moves, attacksByName)
+// Sélection de la capacité offensive — n'affiche que nom/type/dégâts de base
+// + dé (requirement #10, dé désormais inclus dans le calcul de dégâts) :
+// jamais l'effet, contrairement à AttackDetailCard utilisé partout ailleurs
+// dans l'app. Capacités bannies (trop puissantes) exclues.
+export function AutoBattleAbilityPicker({ playerPokemon, attacksByName, bannedAttacks, onSelect, onBack }: Props) {
+  const abilities = getEligibleAbilities(playerPokemon.moves, attacksByName, bannedAttacks)
 
   return (
     <div className="flex flex-col gap-3">
@@ -38,6 +40,12 @@ export function AutoBattleAbilityPicker({ playerPokemon, attacksByName, onSelect
               <PixelIcon src={STAT_ICON.damage} size={16} colored className="text-ink" />
               <span className="text-ink text-sm font-bold">{a.degats_base}</span>
             </span>
+            {a.degats_de != null && (
+              <span className="flex items-center gap-1 shrink-0">
+                <PixelIcon src={DICE_GENERIC_ICON} size={16} colored className="text-ink" />
+                <span className="text-ink text-sm font-bold">{a.degats_de}</span>
+              </span>
+            )}
           </button>
         ))}
       </div>

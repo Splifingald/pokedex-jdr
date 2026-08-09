@@ -116,6 +116,10 @@ html, body, #root {
   30% { transform: translateY(-12px) scale(1.1); opacity: 1; }
   100% { transform: translateY(-32px) scale(1); opacity: 0; }
 }
+@keyframes hit-flash {
+  0% { opacity: 0.75; }
+  100% { opacity: 0; }
+}
 @keyframes confetti-fall {
   0% { transform: translateY(-20px) rotate(0deg); opacity: 1; }
   100% { transform: translateY(240px) rotate(360deg); opacity: 0; }
@@ -195,6 +199,11 @@ html, body, #root {
 }
 .ProseMirror ul { list-style: disc; }
 .ProseMirror ol { list-style: decimal; }
+
+/* Chat global : entrée sur une ligne, pas de marge de paragraphe Tiptap */
+.chat-input .ProseMirror p {
+  margin: 0;
+}
 
 /* Pixel art images sans lissage */
 .pixelated {

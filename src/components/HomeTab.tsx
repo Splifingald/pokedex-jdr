@@ -16,8 +16,21 @@ import { MiningPopup } from './MiningPopup'
 import { PensionPopup } from './PensionPopup'
 import { SafariPopup } from './SafariPopup'
 import { AutoBattlePopup } from './AutoBattlePopup'
+import { ChatPopup } from './chat/ChatPopup'
+import { useChatMessages } from '../hooks/useChatMessages'
+import { useChatUnread } from '../hooks/useChatUnread'
 import { useMinigamesConfig } from '../hooks/useMinigamesConfig'
+import { useMinigamesPlayerState } from '../hooks/useMinigamesPlayerState'
 import { useCasinoConfig } from '../hooks/useCasinoConfig'
+import { useCasinoPlayerState } from '../hooks/useCasinoPlayerState'
+import { useMiningConfig } from '../hooks/useMiningConfig'
+import { useMiningPlayerState } from '../hooks/useMiningPlayerState'
+import { useAutoBattleConfig } from '../hooks/useAutoBattleConfig'
+import { useAutoBattlePlayerState } from '../hooks/useAutoBattlePlayerState'
+import { useSafariConfig } from '../hooks/useSafariConfig'
+import { useSafariPlayerState } from '../hooks/useSafariPlayerState'
+import { useTicketRegen, useSafariTicketRegen } from '../hooks/useTicketRegen'
+import { TICKET_CASINO_ITEM_NAME, TICKET_TREMPETTE_ITEM_NAME, TICKET_MINING_ITEM_NAME, TICKET_AUTOBATTLE_ITEM_NAME, BERRY_SAFARI_ITEM_NAME, BALL_SAFARI_ITEM_NAME } from '../types'
 import { hasAnyMinigameAvailable } from '../lib/magikarpGame'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
@@ -28,8 +41,10 @@ import { logHistoryEvent } from '../lib/historyLog'
 
 interface Props {
   player: Player | null
+  players: Player[]
   isAdmin: boolean
   pokemonByName: Map<string, Pokemon>
+  discoveredPokemon: Set<string>
   attacksByName: Map<string, Attack>
   itemsByName: Map<string, Item>
   playerItems: ReturnType<typeof usePlayerItems>
@@ -52,7 +67,7 @@ const homeBgStyle = (url: string): React.CSSProperties => ({
   backgroundRepeat: 'no-repeat',
 })
 
-export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsByName, playerItems, evolutionsByPokemonNom, canScan, onScan, onRequestLogin }: Props) {
+export function HomeTab({ player, players, isAdmin, pokemonByName, discoveredPokemon, attacksByName, itemsByName, playerItems, evolutionsByPokemonNom, canScan, onScan, onRequestLogin }: Props) {
   const { roster, updateXp, updateNickname, evolvePokemon, toggleInTeam, setNextGiftAt, addMove, removeMove, deleteOwnedPokemon, markEggRevealSeen } = usePlayerPokemon(player?.id ?? null)
   const { pokedollars, addItems, setPokedollars } = playerItems
   const { parameters } = useAdminParameters()
@@ -60,7 +75,16 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
   const { lootboxes, lootboxItems, speciesAssignments } = useGiftLootboxes()
   const { config: minigamesConfig } = useMinigamesConfig()
   const { config: casinoConfig } = useCasinoConfig()
+  const { config: miningConfig } = useMiningConfig()
+  const { config: autoBattleConfig } = useAutoBattleConfig()
+  const { config: safariConfig } = useSafariConfig()
   const { showToast } = useToast()
+
+  const { state: minigamesTicketState, updateState: updateMinigamesTicketState } = useMinigamesPlayerState(player?.id ?? null)
+  const { state: casinoTicketState, updateState: updateCasinoTicketState } = useCasinoPlayerState(player?.id ?? null)
+  const { state: miningTicketState, updateState: updateMiningTicketState } = useMiningPlayerState(player?.id ?? null)
+  const { state: autoBattleTicketState, updateState: updateAutoBattleTicketState } = useAutoBattlePlayerState(player?.id ?? null)
+  const { state: safariTicketState, updateState: updateSafariTicketState } = useSafariPlayerState(player?.id ?? null)
 
   const sceneRef = useRef<HTMLDivElement>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -78,6 +102,45 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
   const [showPension, setShowPension] = useState(false)
   const [showSafari, setShowSafari] = useState(false)
   const [showAutoBattle, setShowAutoBattle] = useState(false)
+  const [showChat, setShowChat] = useState(false)
+  const chat = useChatMessages()
+  const { unreadCount, markSeen } = useChatUnread(chat.messages)
+
+  // Régénération des tickets/ressources de mini-jeux en tâche de fond : dès
+  // que l'app est ouverte et le jeu débloqué, sans avoir besoin d'ouvrir son
+  // popup (les popups eux-mêmes n'affichent plus que le compte à rebours).
+  const minigamesTicketCount = playerItems.inventory.find((r) => r.item_nom === TICKET_TREMPETTE_ITEM_NAME)?.quantity ?? 0
+  const casinoTicketCount = playerItems.inventory.find((r) => r.item_nom === TICKET_CASINO_ITEM_NAME)?.quantity ?? 0
+  const miningTicketCount = playerItems.inventory.find((r) => r.item_nom === TICKET_MINING_ITEM_NAME)?.quantity ?? 0
+  const autoBattleTicketCount = playerItems.inventory.find((r) => r.item_nom === TICKET_AUTOBATTLE_ITEM_NAME)?.quantity ?? 0
+  const safariBerryCount = playerItems.inventory.find((r) => r.item_nom === BERRY_SAFARI_ITEM_NAME)?.quantity ?? 0
+  const safariBallCount = playerItems.inventory.find((r) => r.item_nom === BALL_SAFARI_ITEM_NAME)?.quantity ?? 0
+
+  useTicketRegen(
+    !!player && parameters.feature_minijeux_enabled && !!minigamesTicketState,
+    player?.id ?? 0, TICKET_TREMPETTE_ITEM_NAME, minigamesTicketCount,
+    minigamesTicketState?.next_ticket_at ?? null, minigamesConfig, playerItems, updateMinigamesTicketState
+  )
+  useTicketRegen(
+    !!player && (casinoConfig.slots_enabled || casinoConfig.dice_enabled) && !!casinoTicketState,
+    player?.id ?? 0, TICKET_CASINO_ITEM_NAME, casinoTicketCount,
+    casinoTicketState?.next_ticket_at ?? null, casinoConfig, playerItems, updateCasinoTicketState
+  )
+  useTicketRegen(
+    !!player && parameters.feature_mining_enabled && !!miningTicketState,
+    player?.id ?? 0, TICKET_MINING_ITEM_NAME, miningTicketCount,
+    miningTicketState?.next_ticket_at ?? null, miningConfig, playerItems, updateMiningTicketState
+  )
+  useTicketRegen(
+    !!player && parameters.feature_autobattle_enabled && !!autoBattleTicketState,
+    player?.id ?? 0, TICKET_AUTOBATTLE_ITEM_NAME, autoBattleTicketCount,
+    autoBattleTicketState?.next_ticket_at ?? null, autoBattleConfig, playerItems, updateAutoBattleTicketState
+  )
+  useSafariTicketRegen(
+    !!player && parameters.feature_safari_enabled && !!safariTicketState,
+    player?.id ?? 0, BERRY_SAFARI_ITEM_NAME, BALL_SAFARI_ITEM_NAME, safariBerryCount, safariBallCount,
+    safariTicketState?.next_berry_at ?? null, safariTicketState?.next_ball_at ?? null, safariConfig, playerItems, updateSafariTicketState
+  )
 
   // Recalcul périodique de "maintenant" pour détecter les cadeaux devenus prêts
   // pendant que l'app reste ouverte — pas de compte à rebours affiché, juste
@@ -232,16 +295,32 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
         </div>
       ) : null}
 
-      {/* Widgets épinglés à droite : un seul conteneur invisible, toujours alignés
-          (chaque bouton se replie naturellement sur les autres s'il est masqué) */}
-      <div className="absolute right-3 top-1/2 -translate-y-1/2 z-[35] flex flex-col items-center gap-3">
+      {/* Chat global : bouton flottant en bas à gauche, visible uniquement connecté */}
+      {player && parameters.feature_chat_enabled && (
+        <button
+          onClick={() => { setShowChat(true); markSeen() }}
+          title="Chat"
+          className="absolute left-2 sm:left-3 bottom-3 z-[35] w-10 h-10 sm:w-14 sm:h-14 rounded-full border-2 sm:border-[3px] border-ink bg-gradient-to-br from-[#3ea0e0] to-[#0f4a7a] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+        >
+          <span className="text-xl sm:text-2xl">💬</span>
+          {unreadCount > 0 && (
+            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-hp-red border-2 border-ink text-white text-[10px] font-bold flex items-center justify-center">
+              {unreadCount > 9 ? '9+' : unreadCount}
+            </span>
+          )}
+        </button>
+      )}
+
+      {/* Widgets épinglés à droite : plus petits sur mobile (~70%), en grille de
+          6 lignes max par colonne sur PC (colonne suivante au-delà) */}
+      <div className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 z-[35] flex flex-col sm:grid sm:grid-flow-col sm:grid-rows-6 items-center gap-2 sm:gap-3">
         {player && parameters.feature_minijeux_enabled && hasAnyMinigameAvailable(minigamesConfig, roster) && (
           <button
             onClick={() => setShowMiniGames(true)}
             title="Mini-Jeux"
-            className="w-14 h-14 rounded-full border-[3px] border-ink bg-gradient-to-br from-[#2f8fd6] to-[#0f3f7a] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+            className="w-10 h-10 sm:w-14 sm:h-14 rounded-full border-2 sm:border-[3px] border-ink bg-gradient-to-br from-[#2f8fd6] to-[#0f3f7a] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
           >
-            <img src={MINIGAMES_ICON} alt="Mini-Jeux" className="pixelated w-9 h-9 object-contain" />
+            <img src={MINIGAMES_ICON} alt="Mini-Jeux" className="pixelated w-6 h-6 sm:w-9 sm:h-9 object-contain" />
           </button>
         )}
 
@@ -249,9 +328,9 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           <button
             onClick={() => setShowCasino(true)}
             title="Casino"
-            className="w-14 h-14 rounded-full border-[3px] border-ink bg-gradient-to-br from-[#e0293f] to-[#7a0f1f] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+            className="w-10 h-10 sm:w-14 sm:h-14 rounded-full border-2 sm:border-[3px] border-ink bg-gradient-to-br from-[#e0293f] to-[#7a0f1f] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
           >
-            <img src={CASINO_MASCOT_ICON} alt="Casino" className="pixelated w-9 h-9 object-contain" />
+            <img src={CASINO_MASCOT_ICON} alt="Casino" className="pixelated w-6 h-6 sm:w-9 sm:h-9 object-contain" />
           </button>
         )}
 
@@ -259,9 +338,9 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           <button
             onClick={() => setShowMining(true)}
             title="Fouille"
-            className="w-14 h-14 rounded-full border-[3px] border-ink bg-gradient-to-br from-[#c98a3e] to-[#6b4a1f] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+            className="w-10 h-10 sm:w-14 sm:h-14 rounded-full border-2 sm:border-[3px] border-ink bg-gradient-to-br from-[#c98a3e] to-[#6b4a1f] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
           >
-            <img src={MINING_ICON} alt="Fouille" className="pixelated w-9 h-9 object-contain" />
+            <img src={MINING_ICON} alt="Fouille" className="pixelated w-6 h-6 sm:w-9 sm:h-9 object-contain" />
           </button>
         )}
 
@@ -269,9 +348,9 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           <button
             onClick={() => setShowPension(true)}
             title="Pension Pokémon"
-            className="w-14 h-14 rounded-full border-[3px] border-ink bg-gradient-to-br from-[#7ec98f] to-[#2f6b3f] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+            className="w-10 h-10 sm:w-14 sm:h-14 rounded-full border-2 sm:border-[3px] border-ink bg-gradient-to-br from-[#7ec98f] to-[#2f6b3f] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
           >
-            <img src={PENSION_ICON} alt="Pension Pokémon" className="pixelated w-9 h-9 object-contain" />
+            <img src={PENSION_ICON} alt="Pension Pokémon" className="pixelated w-6 h-6 sm:w-9 sm:h-9 object-contain" />
           </button>
         )}
 
@@ -279,9 +358,9 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           <button
             onClick={() => setShowSafari(true)}
             title="Safari"
-            className="w-14 h-14 rounded-full border-[3px] border-ink bg-gradient-to-br from-[#e0a83e] to-[#8a5a1f] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+            className="w-10 h-10 sm:w-14 sm:h-14 rounded-full border-2 sm:border-[3px] border-ink bg-gradient-to-br from-[#e0a83e] to-[#8a5a1f] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
           >
-            <img src={SAFARI_ICON} alt="Safari" className="pixelated w-9 h-9 object-contain" />
+            <img src={SAFARI_ICON} alt="Safari" className="pixelated w-6 h-6 sm:w-9 sm:h-9 object-contain" />
           </button>
         )}
 
@@ -289,9 +368,9 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           <button
             onClick={() => setShowAutoBattle(true)}
             title="Combat Auto"
-            className="w-14 h-14 rounded-full border-[3px] border-ink bg-gradient-to-br from-[#8a3ee0] to-[#3f0f7a] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+            className="w-10 h-10 sm:w-14 sm:h-14 rounded-full border-2 sm:border-[3px] border-ink bg-gradient-to-br from-[#8a3ee0] to-[#3f0f7a] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
           >
-            <img src={AUTOBATTLE_ICON} alt="Combat Auto" className="pixelated w-9 h-9 object-contain" />
+            <img src={AUTOBATTLE_ICON} alt="Combat Auto" className="pixelated w-6 h-6 sm:w-9 sm:h-9 object-contain" />
           </button>
         )}
 
@@ -299,9 +378,9 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           <button
             onClick={onScan}
             title="Scanner un Pokémon"
-            className="w-14 h-14 rounded-full border-[3px] border-ink bg-gradient-to-br from-hp-orange to-hp-red text-white flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+            className="w-10 h-10 sm:w-14 sm:h-14 rounded-full border-2 sm:border-[3px] border-ink bg-gradient-to-br from-hp-orange to-hp-red text-white flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
           >
-            <PixelIcon src={PHOTO_ICON} size={34} alt="Scanner un Pokémon" colored />
+            <PixelIcon src={PHOTO_ICON} size={24} alt="Scanner un Pokémon" colored className="sm:!w-[34px] sm:!h-[34px]" />
           </button>
         )}
       </div>
@@ -413,6 +492,21 @@ export function HomeTab({ player, isAdmin, pokemonByName, attacksByName, itemsBy
           pokedollarImageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
           onRequestPokemonDetail={(id) => { setShowAutoBattle(false); setSelectedElevated(false); setSelectedId(id) }}
           onClose={() => setShowAutoBattle(false)}
+        />
+      )}
+
+      {showChat && player && (
+        <ChatPopup
+          player={player}
+          players={players}
+          chat={chat}
+          pokemonByName={pokemonByName}
+          discoveredPokemon={discoveredPokemon}
+          attacksByName={attacksByName}
+          itemsByName={itemsByName}
+          maxMessageLength={parameters.chat_max_message_length}
+          spamLimitPerMinute={parameters.chat_spam_limit_per_minute}
+          onClose={() => setShowChat(false)}
         />
       )}
     </div>

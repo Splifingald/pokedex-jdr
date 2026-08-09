@@ -1943,6 +1943,20 @@ CREATE TABLE IF NOT EXISTS safari_ball_attempts (
   UNIQUE (session_pokemon_id, player_id)
 );
 
+-- Tirage forcé pour la PROCHAINE session (au plus 3 lignes, une par slot) —
+-- même idiome que mining_config.next_custom_grid_id : consommé une seule
+-- fois par safari_ensure_active_session() puis vidé. group_id fixe le
+-- groupe (donc les zones de jauge) à utiliser pour ce pokémon précis ; il
+-- n'a pas besoin d'appartenir à safari_group_pokemon pour ce groupe — c'est
+-- justement ce qui permet à l'admin de forcer N'IMPORTE QUEL pokémon existant
+-- avec la jauge d'un groupe de son choix.
+CREATE TABLE IF NOT EXISTS safari_forced_pokemon (
+  slot         integer PRIMARY KEY CHECK (slot BETWEEN 0 AND 2),
+  group_id     bigint NOT NULL REFERENCES safari_groups(id) ON DELETE CASCADE,
+  pokemon_nom  text NOT NULL,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+
 -- État Safari par joueur : deux minuteurs de récompense automatique
 -- indépendants (contrairement à mining_player_state qui n'en a qu'un).
 CREATE TABLE IF NOT EXISTS safari_player_state (
@@ -1974,6 +1988,7 @@ ALTER TABLE safari_gauge_areas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE safari_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE safari_session_pokemon ENABLE ROW LEVEL SECURITY;
 ALTER TABLE safari_ball_attempts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE safari_forced_pokemon ENABLE ROW LEVEL SECURITY;
 ALTER TABLE safari_player_state ENABLE ROW LEVEL SECURITY;
 ALTER TABLE safari_moves ENABLE ROW LEVEL SECURITY;
 
@@ -2032,6 +2047,15 @@ CREATE POLICY "Public read safari_ball_attempts"
 CREATE POLICY "Public insert safari_ball_attempts"
   ON safari_ball_attempts FOR INSERT TO anon WITH CHECK (true);
 
+CREATE POLICY "Public read safari_forced_pokemon"
+  ON safari_forced_pokemon FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert safari_forced_pokemon"
+  ON safari_forced_pokemon FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update safari_forced_pokemon"
+  ON safari_forced_pokemon FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete safari_forced_pokemon"
+  ON safari_forced_pokemon FOR DELETE TO anon USING (true);
+
 CREATE POLICY "Public read safari_player_state"
   ON safari_player_state FOR SELECT TO anon USING (true);
 CREATE POLICY "Public insert safari_player_state"
@@ -2077,6 +2101,8 @@ DECLARE
   v_pokemon_nom  text;
   v_first_min    integer;
   v_first_max    integer;
+  v_picked_noms  text[] := '{}';
+  v_forced_count integer;
 BEGIN
   PERFORM pg_advisory_xact_lock(hashtext('safari_session_generation'));
 
@@ -2092,8 +2118,16 @@ BEGIN
   UPDATE safari_sessions SET is_active = false, ended_at = now()
     WHERE is_active = true AND expires_at <= now();
 
-  IF NOT EXISTS (SELECT 1 FROM safari_groups WHERE weight > 0) THEN
-    RAISE EXCEPTION 'Aucun groupe Safari avec un poids de tirage > 0 — configuration admin incomplète';
+  -- Tirage forcé par l'admin (safari_forced_pokemon) : consommé une seule
+  -- fois pour la toute prochaine session s'il contient exactement 3 lignes
+  -- (une par slot) — sinon ignoré silencieusement (configuration incomplète,
+  -- on retombe sur le tirage pondéré normal ci-dessous).
+  SELECT count(*) INTO v_forced_count FROM safari_forced_pokemon;
+
+  IF v_forced_count <> 3 THEN
+    IF NOT EXISTS (SELECT 1 FROM safari_groups WHERE weight > 0) THEN
+      RAISE EXCEPTION 'Aucun groupe Safari avec un poids de tirage > 0 — configuration admin incomplète';
+    END IF;
   END IF;
 
   SELECT (now() + (session_duration_amount ||
@@ -2104,30 +2138,49 @@ BEGIN
     RETURNING id INTO v_session_id;
 
   FOR v_slot IN 0..2 LOOP
-    -- Tirage pondéré du groupe, puis du pokémon DANS ce groupe — portage SQL
-    -- de l'idiome pickWeightedEggSpecies (src/lib/pension.ts) /
-    -- pickOneWeighted (src/lib/mining.ts) : somme cumulative des poids sur
-    -- une fenêtre, tirage d'un nombre aléatoire dans [0, total).
-    SELECT id INTO v_group_id FROM (
-      SELECT id, sum(weight) OVER (ORDER BY id) AS cum, sum(weight) OVER () AS total
-      FROM safari_groups WHERE weight > 0
-    ) w WHERE cum >= random() * w.total ORDER BY cum LIMIT 1;
+    IF v_forced_count = 3 THEN
+      SELECT group_id, pokemon_nom INTO v_group_id, v_pokemon_nom
+        FROM safari_forced_pokemon WHERE slot = v_slot;
+    ELSE
+      -- Tirage pondéré du groupe, puis du pokémon DANS ce groupe — portage SQL
+      -- de l'idiome pickWeightedEggSpecies (src/lib/pension.ts) /
+      -- pickOneWeighted (src/lib/mining.ts) : somme cumulative des poids sur
+      -- une fenêtre, tirage d'un nombre aléatoire dans [0, total).
+      SELECT id INTO v_group_id FROM (
+        SELECT id, sum(weight) OVER (ORDER BY id) AS cum, sum(weight) OVER () AS total
+        FROM safari_groups WHERE weight > 0
+      ) w WHERE cum >= random() * w.total ORDER BY cum LIMIT 1;
 
-    IF v_group_id IS NULL THEN
-      RAISE EXCEPTION 'Tirage du groupe Safari impossible — configuration admin incomplète';
+      IF v_group_id IS NULL THEN
+        RAISE EXCEPTION 'Tirage du groupe Safari impossible — configuration admin incomplète';
+      END IF;
+
+      IF NOT EXISTS (SELECT 1 FROM safari_group_pokemon WHERE group_id = v_group_id AND weight > 0) THEN
+        RAISE EXCEPTION 'Le groupe Safari % n''a aucun pokémon avec un poids > 0', v_group_id;
+      END IF;
+
+      -- Exclut les pokémon déjà tirés dans cette session (pas de doublon), sauf
+      -- si le groupe tiré n'a plus aucun pokémon disponible hors doublons — dans
+      -- ce cas on retombe sur le pool complet du groupe (dernier restant).
+      SELECT pokemon_nom INTO v_pokemon_nom FROM (
+        SELECT pokemon_nom, sum(weight) OVER (ORDER BY id) AS cum, sum(weight) OVER () AS total
+        FROM safari_group_pokemon
+        WHERE group_id = v_group_id AND weight > 0 AND NOT (pokemon_nom = ANY(v_picked_noms))
+      ) w WHERE cum >= random() * w.total ORDER BY cum LIMIT 1;
+
+      IF v_pokemon_nom IS NULL THEN
+        SELECT pokemon_nom INTO v_pokemon_nom FROM (
+          SELECT pokemon_nom, sum(weight) OVER (ORDER BY id) AS cum, sum(weight) OVER () AS total
+          FROM safari_group_pokemon WHERE group_id = v_group_id AND weight > 0
+        ) w WHERE cum >= random() * w.total ORDER BY cum LIMIT 1;
+      END IF;
     END IF;
 
-    IF NOT EXISTS (SELECT 1 FROM safari_group_pokemon WHERE group_id = v_group_id AND weight > 0) THEN
-      RAISE EXCEPTION 'Le groupe Safari % n''a aucun pokémon avec un poids > 0', v_group_id;
-    END IF;
     IF NOT EXISTS (SELECT 1 FROM safari_gauge_areas WHERE group_id = v_group_id) THEN
       RAISE EXCEPTION 'Le groupe Safari % n''a aucune zone de jauge configurée', v_group_id;
     END IF;
 
-    SELECT pokemon_nom INTO v_pokemon_nom FROM (
-      SELECT pokemon_nom, sum(weight) OVER (ORDER BY id) AS cum, sum(weight) OVER () AS total
-      FROM safari_group_pokemon WHERE group_id = v_group_id AND weight > 0
-    ) w WHERE cum >= random() * w.total ORDER BY cum LIMIT 1;
+    v_picked_noms := array_append(v_picked_noms, v_pokemon_nom);
 
     SELECT min_value, max_value INTO v_first_min, v_first_max
       FROM safari_gauge_areas WHERE group_id = v_group_id ORDER BY min_value ASC LIMIT 1;
@@ -2138,6 +2191,10 @@ BEGIN
       v_first_min + floor(random() * GREATEST(1, v_first_max - v_first_min))::int
     );
   END LOOP;
+
+  IF v_forced_count = 3 THEN
+    DELETE FROM safari_forced_pokemon;
+  END IF;
 
   RETURN v_session_id;
 END;
@@ -2288,7 +2345,7 @@ BEGIN
   FOREACH t IN ARRAY ARRAY[
     'safari_config', 'safari_groups', 'safari_group_pokemon', 'safari_gauge_areas',
     'safari_sessions', 'safari_session_pokemon', 'safari_ball_attempts',
-    'safari_player_state', 'safari_moves'
+    'safari_forced_pokemon', 'safari_player_state', 'safari_moves'
   ]
   LOOP
     IF NOT EXISTS (
@@ -2481,6 +2538,20 @@ CREATE POLICY "Public read autobattle_battles" ON autobattle_battles FOR SELECT 
 CREATE POLICY "Public insert autobattle_battles" ON autobattle_battles FOR INSERT TO anon WITH CHECK (true);
 CREATE POLICY "Public update autobattle_battles" ON autobattle_battles FOR UPDATE TO anon USING (true) WITH CHECK (true);
 
+-- Capacités bannies (trop puissantes pour ce mode de jeu) : liste gérée
+-- librement par l'admin, référencée par nom (pas de FK, même convention que
+-- tout le schéma) — exclut la capacité à la fois du choix du joueur et de
+-- celui de l'adversaire (voir autobattle_resolve_battle et les filtres
+-- côté client dans src/lib/autoBattle.ts).
+CREATE TABLE IF NOT EXISTS autobattle_banned_attacks (
+  attack_nom  text PRIMARY KEY,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE autobattle_banned_attacks ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public read autobattle_banned_attacks" ON autobattle_banned_attacks FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert autobattle_banned_attacks" ON autobattle_banned_attacks FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public delete autobattle_banned_attacks" ON autobattle_banned_attacks FOR DELETE TO anon USING (true);
+
 -- Ticket Combat : catalogue seedé une fois (RLS bloque l'écriture anon
 -- sur items, donc à exécuter manuellement via l'éditeur SQL Supabase — même
 -- caveat que "Ticket Fouille" plus haut dans ce fichier).
@@ -2570,6 +2641,8 @@ DECLARE
   v_player_type_bonus   boolean;
   v_opponent_damage     integer;
   v_opponent_type_bonus boolean;
+  v_hit_dice            integer;
+  v_hit_damage          integer;
   v_player_hp           integer;
   v_opponent_hp         integer;
   v_coin_player_first   boolean;
@@ -2637,7 +2710,14 @@ BEGIN
 
   SELECT * INTO v_player_species FROM pokemon WHERE nom = v_pp.pokemon_nom;
   SELECT * INTO v_ability FROM attacks WHERE nom = p_ability_nom;
-  IF v_player_species IS NULL OR v_ability IS NULL OR v_ability.degats_base IS NULL OR v_ability.degats_base <= 0 THEN
+  -- Éligible dès qu'il y a des dégâts de base OU un dé (au moins un des deux
+  -- strictement positif) — une capacité à 0 dégâts de base mais avec un dé
+  -- reste utilisable, voir isDamagingAbility côté client (src/lib/autoBattle.ts).
+  IF v_player_species IS NULL OR v_ability IS NULL
+     OR (COALESCE(v_ability.degats_base, 0) <= 0 AND COALESCE(v_ability.degats_de, 0) <= 0) THEN
+    RETURN jsonb_build_object('status', 'ineligible_ability');
+  END IF;
+  IF EXISTS (SELECT 1 FROM autobattle_banned_attacks WHERE attack_nom = p_ability_nom) THEN
     RETURN jsonb_build_object('status', 'ineligible_ability');
   END IF;
 
@@ -2663,6 +2743,10 @@ BEGIN
       (v_player_species.super_efficace_3), (v_player_species.super_efficace_4)
     ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_opponent_species.type))
   );
+  -- Dégâts de base (avant dé) : bonus de type inclus, jamais redoublé par le
+  -- dé. Le dé (attacks.degats_de) est retiré au sort à CHAQUE coup dans la
+  -- boucle ci-dessous (1..degats_de inclus), pas une seule fois pour tout le
+  -- combat — c'est ce qui lui donne son côté aléatoire "à chaque attaque".
   v_player_damage := (COALESCE(v_player_species.degats_base, 0) + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'DMG'))
     * (CASE WHEN v_player_type_bonus THEN 2 ELSE 1 END) + COALESCE(v_ability.degats_base, 0);
 
@@ -2683,17 +2767,23 @@ BEGIN
   LOOP
     v_turn_no := v_turn_no + 1;
     IF v_attacker = 'player' THEN
-      v_opponent_hp := v_opponent_hp - GREATEST(0, v_player_damage);
+      v_hit_dice := CASE WHEN v_ability.degats_de IS NOT NULL AND v_ability.degats_de > 0
+        THEN 1 + floor(random() * v_ability.degats_de)::integer ELSE 0 END;
+      v_hit_damage := GREATEST(0, v_player_damage + v_hit_dice);
+      v_opponent_hp := v_opponent_hp - v_hit_damage;
       v_turns := v_turns || jsonb_build_array(jsonb_build_object(
-        'turn', v_turn_no, 'attacker', 'player', 'damage', GREATEST(0, v_player_damage),
+        'turn', v_turn_no, 'attacker', 'player', 'damage', v_hit_damage,
         'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', v_opponent_hp <= 0
       ));
       IF v_opponent_hp <= 0 THEN v_outcome := 'win'; EXIT; END IF;
       v_attacker := 'opponent';
     ELSE
-      v_player_hp := v_player_hp - GREATEST(0, v_opponent_damage);
+      v_hit_dice := CASE WHEN v_opponent_ability.degats_de IS NOT NULL AND v_opponent_ability.degats_de > 0
+        THEN 1 + floor(random() * v_opponent_ability.degats_de)::integer ELSE 0 END;
+      v_hit_damage := GREATEST(0, v_opponent_damage + v_hit_dice);
+      v_player_hp := v_player_hp - v_hit_damage;
       v_turns := v_turns || jsonb_build_array(jsonb_build_object(
-        'turn', v_turn_no, 'attacker', 'opponent', 'damage', GREATEST(0, v_opponent_damage),
+        'turn', v_turn_no, 'attacker', 'opponent', 'damage', v_hit_damage,
         'defender_hp_after', GREATEST(0, v_player_hp), 'ko', v_player_hp <= 0
       ));
       IF v_player_hp <= 0 THEN v_outcome := 'lose'; EXIT; END IF;
@@ -2790,7 +2880,7 @@ BEGIN
   FOREACH t IN ARRAY ARRAY[
     'autobattle_config', 'autobattle_variants', 'autobattle_levels', 'autobattle_level_rewards',
     'autobattle_player_state', 'autobattle_player_variant_progress', 'autobattle_player_level_state',
-    'autobattle_battles'
+    'autobattle_battles', 'autobattle_banned_attacks'
   ]
   LOOP
     IF NOT EXISTS (
@@ -2801,3 +2891,56 @@ BEGIN
     END IF;
   END LOOP;
 END $$;
+
+-- ============================================================
+-- Chat (canal de discussion global temps réel, un seul salon)
+-- ============================================================
+
+-- Un message par ligne, joueur (ou PNJ) émetteur. content est du texte brut :
+-- les références objet/pokémon/lieu sont détectées à l'affichage côté client
+-- (même mécanisme que le texte des chapitres de campagne), rien de spécial
+-- n'est stocké ici. player_id référence players.id sans FK, comme le reste
+-- du schéma.
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id          bigserial PRIMARY KEY,
+  player_id   bigint NOT NULL,
+  content     text NOT NULL,
+  is_npc      boolean NOT NULL DEFAULT false,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at);
+
+ALTER TABLE chat_messages ENABLE ROW LEVEL SECURITY;
+
+-- Lecture + écriture + suppression publiques (app sans vraie sécurité, comme
+-- le reste du schéma) — la limite anti-spam (admin_parameters.chat_spam_limit_per_minute)
+-- et la modération admin (suppression d'un message, "tout effacer") sont donc
+-- appliquées côté client uniquement.
+CREATE POLICY "Public read chat_messages" ON chat_messages FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert chat_messages" ON chat_messages FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public delete chat_messages" ON chat_messages FOR DELETE TO anon USING (true);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'chat_messages'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE chat_messages;
+  END IF;
+END $$;
+
+-- Paramètres du chat + activation/désactivation de la fonctionnalité (Admin → Paramètres)
+ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_chat_enabled boolean NOT NULL DEFAULT true;
+ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS chat_max_message_length integer NOT NULL DEFAULT 300;
+ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS chat_spam_limit_per_minute integer NOT NULL DEFAULT 3;
+-- Horodatage du dernier message joueur (non-PNJ) notifié par le job horaire
+-- (netlify/functions/send-notifications.js) — distinct du push instantané des
+-- messages PNJ envoyés depuis Admin → Chat (netlify/functions/send-chat-notification.js),
+-- qui ne passe pas par ce job.
+ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS chat_last_notified_at timestamptz;
+
+-- history_events.category doit accepter la nouvelle catégorie 'chat'
+ALTER TABLE history_events DROP CONSTRAINT IF EXISTS history_events_category_check;
+ALTER TABLE history_events ADD CONSTRAINT history_events_category_check
+  CHECK (category IN ('inventory', 'pokedex', 'team', 'combat', 'minigame', 'daycare', 'safari', 'autobattle', 'chat'));

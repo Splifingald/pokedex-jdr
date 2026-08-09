@@ -9,6 +9,21 @@ import { PANEL_LG } from '../lib/panelStyles'
 
 const ADMIN_PASSWORD = 'Rioluxray171216'
 
+async function hardRefresh() {
+  try {
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations()
+      await Promise.all(registrations.map((reg) => reg.unregister()))
+    }
+    if ('caches' in window) {
+      const keys = await caches.keys()
+      await Promise.all(keys.map((key) => caches.delete(key)))
+    }
+  } finally {
+    window.location.reload()
+  }
+}
+
 interface Props {
   player: Player | null
   isAdmin: boolean
@@ -27,6 +42,7 @@ export function SettingsPopup({ player, isAdmin, notificationsAvailable, onReque
   const [adminPassword, setAdminPassword] = useState('')
   const [adminMsg, setAdminMsg] = useState<{ text: string; error: boolean } | null>(null)
   const [showAdminLogoutConfirm, setShowAdminLogoutConfirm] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
   const handleToggleNotifications = async () => {
     if (subscribed) {
@@ -82,6 +98,18 @@ export function SettingsPopup({ player, isAdmin, notificationsAvailable, onReque
             className={`text-xs px-2.5 py-1.5 rounded-md font-bold ${isFullscreen ? BUTTON_STYLE.green : BUTTON_STYLE.gray}`}
           >
             {isFullscreen ? 'Activé' : 'Désactivé'}
+          </button>
+        </div>
+
+        {/* Rafraîchissement complet */}
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-sm">🔄 Rafraîchir l'appli</span>
+          <button
+            onClick={() => { setRefreshing(true); void hardRefresh() }}
+            disabled={refreshing}
+            className={`text-xs px-2.5 py-1.5 rounded-md font-bold ${BUTTON_STYLE.gray}`}
+          >
+            {refreshing ? '...' : 'Actualiser'}
           </button>
         </div>
 

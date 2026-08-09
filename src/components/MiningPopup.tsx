@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import type { Player, Item } from '../types'
 import { TICKET_MINING_ITEM_NAME, POKEDOLLAR_ITEM_NAME } from '../types'
 import { usePlayerItems } from '../hooks/usePlayerItems'
@@ -7,7 +7,7 @@ import { useMiningPlayerState } from '../hooks/useMiningPlayerState'
 import { useMiningItemDefs } from '../hooks/useMiningItemDefs'
 import { useMiningActiveGrid } from '../hooks/useMiningActiveGrid'
 import { usePlayers } from '../hooks/usePlayers'
-import { computeTicketRegen, isPurchaseCapReached, localDateString, formatCountdownHM } from '../lib/casino'
+import { isPurchaseCapReached, localDateString, formatCountdownHM } from '../lib/casino'
 import { GameBanner } from './CasinoGameCard'
 import { MiningGridGame } from './MiningGridGame'
 import { MiningItemFoundPopup } from './MiningItemFoundPopup'
@@ -48,33 +48,13 @@ export function MiningPopup({ player, playerItems, itemsByName, pokedollarImageU
   const ticketRow = playerItems.inventory.find((r) => r.item_nom === TICKET_MINING_ITEM_NAME)
   const ticketCount = ticketRow?.quantity ?? 0
 
-  // Rattrape/avance le minuteur des tickets gratuits toutes les secondes tant que le popup est ouvert.
-  const tickRegen = useCallback(async () => {
-    if (!state) return
-    const result = computeTicketRegen(state.next_ticket_at, ticketCount, config, new Date())
-    if (result.ticketsGranted > 0) {
-      await playerItems.addItems(TICKET_MINING_ITEM_NAME, result.ticketsGranted)
-      void logHistoryEvent('inventory', 'item_add', player.id, {
-        item_nom: TICKET_MINING_ITEM_NAME,
-        delta: result.ticketsGranted,
-        total: ticketCount + result.ticketsGranted,
-        source: 'la recharge de tickets',
-      })
-    }
-    if (result.nextTicketAt !== state.next_ticket_at) {
-      await updateState({ next_ticket_at: result.nextTicketAt })
-    }
-  }, [state, ticketCount, config, playerItems, updateState, player.id])
-
+  // La régénération des tickets (octroi + minuteur) tourne en tâche de fond
+  // dans HomeTab dès que le jeu est débloqué — ce popup ne fait qu'afficher
+  // le compte à rebours, il ne crédite plus rien lui-même.
   useEffect(() => {
-    tickRegen()
-    const interval = window.setInterval(() => {
-      setNow(Date.now())
-      tickRegen()
-    }, 1000)
+    const interval = window.setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(interval)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- tickRegen intentionally excluded: it's rebuilt every render and only state?.next_ticket_at / ticketCount should restart the interval
-  }, [state?.next_ticket_at, ticketCount])
+  }, [])
 
   const handleBuyTicket = async () => {
     if (!state) return
@@ -165,7 +145,7 @@ export function MiningPopup({ player, playerItems, itemsByName, pokedollarImageU
       >
         <button
           onClick={onClose}
-          className="absolute right-3 top-3 z-10 w-8 h-8 rounded-full flex items-center justify-center text-ink hover:bg-black/10"
+          className="absolute right-3 top-3 z-10 w-8 h-8 rounded-full border-2 border-ink bg-cream shadow-[var(--shadow-pixel)] flex items-center justify-center text-ink hover:bg-black/10 active:shadow-none active:translate-x-[1px] active:translate-y-[1px] transition-all"
         >
           <CloseIcon className="w-4 h-4" />
         </button>

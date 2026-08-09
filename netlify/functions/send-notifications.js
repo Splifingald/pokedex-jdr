@@ -90,6 +90,35 @@ exports.handler = async () => {
     await supabase.from('safari_sessions').update({ notified: true }).eq('id', newSafariSession.id)
   }
 
+  // ── Chat : nouveaux messages joueurs (hors PNJ) depuis le dernier passage ──
+  // Les messages PNJ envoyés depuis Admin → Chat ont leur propre push instantané
+  // (netlify/functions/send-chat-notification.js) et ne repassent pas ici.
+  // Diffusion à tous les joueurs (comme Safari ci-dessus), pas de ciblage par
+  // destinataire — inutile de savoir qui a déjà lu quoi côté serveur.
+  const { data: adminParams, error: adminParamsError } = await supabase
+    .from('admin_parameters').select('chat_last_notified_at').eq('id', 1).single()
+  if (adminParamsError) {
+    console.error('Erreur lecture admin_parameters (chat) :', adminParamsError.message)
+  } else {
+    let chatQuery = supabase.from('chat_messages').select('id, created_at').eq('is_npc', false).order('created_at', { ascending: false }).limit(1)
+    if (adminParams.chat_last_notified_at) chatQuery = chatQuery.gt('created_at', adminParams.chat_last_notified_at)
+    const { data: newestChat, error: chatError } = await chatQuery.maybeSingle()
+    if (chatError) {
+      console.error('Erreur lecture chat_messages :', chatError.message)
+    } else if (newestChat) {
+      const { data: activePlayers } = await supabase.from('players').select('id').eq('is_npc', false)
+      for (const p of activePlayers || []) {
+        notifications.push({
+          playerId: p.id,
+          title: 'Pokémon JDR : Chat',
+          body: 'De nouveaux messages sont arrivés dans le chat !',
+          icon: absoluteUrl(siteUrl, POKEDOLLAR_ICON_PATH),
+        })
+      }
+      await supabase.from('admin_parameters').update({ chat_last_notified_at: newestChat.created_at }).eq('id', 1)
+    }
+  }
+
   // ── Cadeaux pokémon prêts ────────────────────────────────────────────────
   // Prêts, mais pas encore réclamés : soit jamais notifiés, soit notifiés il y
   // a plus de 72h (relance tant que le cadeau n'est pas ouvert).

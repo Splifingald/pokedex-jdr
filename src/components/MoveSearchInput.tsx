@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import type { Attack } from '../types'
 import { TypeBadge } from './TypeBadge'
 import { PixelIcon } from './icons/PixelIcon'
-import { STAT_ICON } from '../lib/icons'
+import { STAT_ICON, DICE_GENERIC_ICON } from '../lib/icons'
 import { normalizeSearch } from '../lib/normalizeSearch'
 
 interface Props {
@@ -58,9 +58,17 @@ export function MoveSearchInput({ options, disabled, onSelect, showDamage = fals
                 <TypeBadge type={a.type} small />
                 <span className="flex-1 text-ink text-sm truncate">{a.nom}</span>
                 {showDamage && (
-                  <span className="flex items-center gap-1 shrink-0">
-                    <PixelIcon src={STAT_ICON.damage} size={14} colored className="text-ink" />
-                    <span className="text-ink text-xs font-bold">{a.degats_base ?? 0}</span>
+                  <span className="flex items-center gap-2 shrink-0">
+                    <span className="flex items-center gap-1">
+                      <PixelIcon src={STAT_ICON.damage} size={14} colored className="text-ink" />
+                      <span className="text-ink text-xs font-bold">{a.degats_base ?? 0}</span>
+                    </span>
+                    {a.degats_de != null && (
+                      <span className="flex items-center gap-1">
+                        <PixelIcon src={DICE_GENERIC_ICON} size={14} colored className="text-ink" />
+                        <span className="text-ink text-xs font-bold">{a.degats_de}</span>
+                      </span>
+                    )}
                   </span>
                 )}
               </button>

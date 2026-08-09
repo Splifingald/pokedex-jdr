@@ -175,6 +175,15 @@ export const PLAYER_COLORS: string[] = [
   '#84CC16', // citron vert
 ]
 
+// ── Chat (canal de discussion global) ────────────────────────
+export interface ChatMessage {
+  id: number
+  player_id: number
+  content: string
+  is_npc: boolean
+  created_at: string
+}
+
 export interface PlayerPokemon {
   id: number
   player_id: number
@@ -222,6 +231,10 @@ export interface AdminParameters {
   feature_pension_enabled: boolean
   feature_safari_enabled: boolean
   feature_autobattle_enabled: boolean
+  feature_chat_enabled: boolean
+  chat_max_message_length: number
+  chat_spam_limit_per_minute: number
+  chat_last_notified_at: string | null
   stat_points_base: number
   stat_min: number
   stat_max: number
@@ -706,6 +719,16 @@ export interface SafariBallAttempt {
   created_at: string
 }
 
+// Tirage forcé par l'admin pour la PROCHAINE session (au plus 3 lignes, une
+// par slot) — consommé une seule fois puis vidé, voir
+// safari_ensure_active_session() côté SQL.
+export interface SafariForcedPokemon {
+  slot: number
+  group_id: number
+  pokemon_nom: string
+  created_at: string
+}
+
 export interface SafariPlayerState {
   player_id: number
   next_berry_at: string | null
@@ -803,6 +826,14 @@ export interface AutoBattlePlayerLevelState {
   created_at: string
 }
 
+// Capacité bannie du Combat Auto (trop puissante pour ce mode), gérée
+// librement par l'admin — exclut la capacité du choix du joueur ET de celui
+// de l'adversaire.
+export interface AutoBattleBannedAttack {
+  attack_nom: string
+  created_at: string
+}
+
 // Un tour du journal de combat renvoyé par le RPC autobattle_resolve_battle —
 // le client se contente de rejouer cette séquence (jamais recalculée côté client).
 export interface AutoBattleTurn {
@@ -842,8 +873,8 @@ export interface AutoBattleResolveResult {
   coin_toss_first?: 'player' | 'opponent'
   player_max_hp?: number
   opponent_hp?: number
-  player_damage_per_hit?: number
-  opponent_damage_per_hit?: number
+  player_damage_per_hit?: number // dégâts de base, dé exclu (le dé est retiré au sort à chaque coup, voir turns[].damage)
+  opponent_damage_per_hit?: number // idem
   player_type_bonus?: boolean
   opponent_type_bonus?: boolean
   turns?: AutoBattleTurn[]
@@ -947,7 +978,7 @@ export const EMPTY_CHAPTER_CONTENT: import('@tiptap/core').JSONContent = {
 }
 
 // ── Historique (journal des actions joueurs) ──────────────────
-export type HistoryCategory = 'inventory' | 'pokedex' | 'team' | 'combat' | 'minigame' | 'daycare' | 'safari' | 'autobattle'
+export type HistoryCategory = 'inventory' | 'pokedex' | 'team' | 'combat' | 'minigame' | 'daycare' | 'safari' | 'autobattle' | 'chat'
 
 export type HistoryActionType =
   | 'item_add'          // ajout générique (Sac, achat de ticket, recharge de tickets)
@@ -977,6 +1008,7 @@ export type HistoryActionType =
   | 'pokemon_evolve'    // Pokémon existant a évolué vers une nouvelle espèce
   | 'ko'                // K.O. / sortie de K.O.
   | 'status_change'     // statut appliqué / retiré
+  | 'chat_message'      // message envoyé dans le chat global
 
 // Sur une ligne brute en base, `delta` est signé (négatif pour un retrait).
 // Le regroupement à la lecture (src/lib/historyGrouping.ts) le normalise en
@@ -1056,6 +1088,11 @@ export interface HistoryAutoBattlePayload {
   variant_completed?: boolean // action_type === 'autobattle_variant_completed' uniquement
 }
 
+export interface HistoryChatPayload {
+  content: string
+  is_npc: boolean
+}
+
 export type HistoryPayload =
   | HistoryInventoryPayload
   | HistoryPokedexPayload
@@ -1066,6 +1103,7 @@ export type HistoryPayload =
   | HistoryDaycarePayload
   | HistorySafariPayload
   | HistoryAutoBattlePayload
+  | HistoryChatPayload
 
 export interface HistoryEvent {
   id: number

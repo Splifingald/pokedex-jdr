@@ -1,67 +1,61 @@
-import type { Attack, PlayerPokemon, AutoBattleLevelReward } from '../types'
+import type { Attack, Item, PlayerPokemon, AutoBattleLevelReward } from '../types'
 
-// Une capacité "offensive" est une capacité avec des dégâts de base strictement
-// positifs (case vide en CSV = capacité de statut/effet, voir types.ts
-// Attack.degats_base ; une capacité à 0 dégâts n'apporte rien en Combat Auto).
+// Une capacité "offensive" est une capacité qui inflige quelque chose : soit
+// des dégâts de base, soit un dé (voire les deux) — une capacité à 0 dégâts
+// de base mais avec un dé reste utilisable, seule une capacité totalement
+// sans dégâts (case vide/0 partout en CSV, capacité de statut/effet pur) est
+// exclue.
 export function isDamagingAbility(attack: Attack): boolean {
-  return attack.degats_base != null && attack.degats_base > 0
+  const hasBase = attack.degats_base != null && attack.degats_base > 0
+  const hasDice = attack.degats_de != null && attack.degats_de > 0
+  return hasBase || hasDice
 }
 
 // Capacités offensives effectivement apprises par cette instance
-// (playerPokemon.moves) — seules celles-ci sont sélectionnables en Combat
-// Auto (voir AutoBattleAbilityPicker). Note : moves n'est PAS restreint au
-// pool attaque_1..10 de l'espèce (voir PokemonDetailSheet.tsx où
-// addableMoves propose tout le catalogue d'attaques, pas seulement celles de
-// l'espèce) — il ne faut donc jamais recroiser avec ce pool ici.
+// (playerPokemon.moves), hors capacités bannies (trop puissantes pour ce
+// mode, voir autobattle_banned_attacks / AdminAutoBattleBannedAttacksPanel)
+// — seules celles-ci sont sélectionnables en Combat Auto (voir
+// AutoBattleAbilityPicker). Note : moves n'est PAS restreint au pool
+// attaque_1..10 de l'espèce (voir PokemonDetailSheet.tsx où addableMoves
+// propose tout le catalogue d'attaques, pas seulement celles de l'espèce) —
+// il ne faut donc jamais recroiser avec ce pool ici.
 export function getEligibleAbilities(
   playerMoves: string[],
-  attacksByName: Map<string, Attack>
+  attacksByName: Map<string, Attack>,
+  bannedAttacks: Set<string> = new Set()
 ): Attack[] {
   return playerMoves
     .map((nom) => attacksByName.get(nom))
-    .filter((a): a is Attack => a != null && isDamagingAbility(a))
+    .filter((a): a is Attack => a != null && isDamagingAbility(a) && !bannedAttacks.has(a.nom))
 }
 
 // Pokémon du joueur pouvant participer à un combat : ni en pension, ni sans
 // capacité offensive apprise (voir requirement #6/#9 du cahier des charges).
 export function getEligiblePlayerPokemon(
   roster: PlayerPokemon[],
-  attacksByName: Map<string, Attack>
+  attacksByName: Map<string, Attack>,
+  bannedAttacks: Set<string> = new Set()
 ): PlayerPokemon[] {
-  return roster.filter((pp) => !pp.in_daycare && getEligibleAbilities(pp.moves, attacksByName).length > 0)
+  return roster.filter((pp) => !pp.in_daycare && getEligibleAbilities(pp.moves, attacksByName, bannedAttacks).length > 0)
 }
 
-const REWARD_RANK: Record<AutoBattleLevelReward['reward_type'], number> = {
-  badge: 0,
-  item: 1,
-  xp: 2,
-}
-
-// Ordonne les récompenses d'un niveau par importance décroissante (badge >
-// objet > XP — les badges sont les plus rares/marquants, l'XP la plus
-// "courante") : sert à choisir laquelle prévisualiser sur la bannière de
-// progression quand un niveau a plusieurs récompenses (voir requirement #31).
-export function rankRewardsBySignificance(rewards: AutoBattleLevelReward[]): AutoBattleLevelReward[] {
-  return [...rewards].sort((a, b) => {
-    const rankDiff = REWARD_RANK[a.reward_type] - REWARD_RANK[b.reward_type]
-    if (rankDiff !== 0) return rankDiff
-    return a.sort_order - b.sort_order
-  })
-}
-
-export function pickBannerPreviewReward(rewards: AutoBattleLevelReward[]): AutoBattleLevelReward | null {
-  const ranked = rankRewardsBySignificance(rewards)
-  return ranked[0] ?? null
-}
-
-// Fenêtre de niveaux affichée sur la jauge de progression (niveau courant +
-// les 3 suivants), recentrée automatiquement s'il reste moins de 4 niveaux à
-// venir — voir requirement #16/#29.
-export function buildMilestoneWindow(currentIndex: number, totalLevels: number, windowSize = 4): number[] {
-  if (totalLevels <= 0) return []
-  const clampedSize = Math.min(windowSize, totalLevels)
-  const start = Math.max(0, Math.min(currentIndex, totalLevels - clampedSize))
-  return Array.from({ length: clampedSize }, (_, i) => start + i)
+// Récompense à prévisualiser sous un niveau donné de la bannière de
+// progression (voir requirement #31) : s'il y a un ou plusieurs objets
+// (item/badge — mécaniquement identiques, voir types.ts), on affiche celui
+// de plus haute valeur (prix d'achat) ; sinon on retombe sur la récompense XP.
+export function pickLevelBannerReward(
+  rewards: AutoBattleLevelReward[],
+  itemsByName: Map<string, Item>
+): AutoBattleLevelReward | null {
+  const itemRewards = rewards.filter((r) => r.reward_type === 'item' || r.reward_type === 'badge')
+  if (itemRewards.length > 0) {
+    return [...itemRewards].sort((a, b) => {
+      const va = itemsByName.get(a.item_nom ?? '')?.achat ?? 0
+      const vb = itemsByName.get(b.item_nom ?? '')?.achat ?? 0
+      return vb - va
+    })[0]
+  }
+  return rewards.find((r) => r.reward_type === 'xp') ?? null
 }
 
 // crypto.randomUUID() n'existe que dans un contexte sécurisé (HTTPS ou

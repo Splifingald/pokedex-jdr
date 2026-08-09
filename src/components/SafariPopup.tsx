@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import type { Player, Item } from '../types'
 import { BERRY_SAFARI_ITEM_NAME, BALL_SAFARI_ITEM_NAME, POKEDOLLAR_ITEM_NAME } from '../types'
 import { usePlayerItems } from '../hooks/usePlayerItems'
@@ -10,7 +10,7 @@ import { useSafariSession } from '../hooks/useSafariSession'
 import { useSafariBallAttempts } from '../hooks/useSafariBallAttempts'
 import { usePlayers } from '../hooks/usePlayers'
 import { usePokemon } from '../hooks/usePokemon'
-import { computeTicketRegen, formatCountdownHM, formatCountdown } from '../lib/casino'
+import { formatCountdownHM, formatCountdown } from '../lib/casino'
 import { GameBanner } from './CasinoGameCard'
 import { SafariBoard } from './SafariBoard'
 import { SafariMoveFeed } from './SafariMoveFeed'
@@ -31,7 +31,7 @@ interface Props {
 
 export function SafariPopup({ player, playerItems, itemsByName, pokedollarImageUrl, onRequestPokemonDetail, onClose }: Props) {
   const { config, loading: configLoading } = useSafariConfig()
-  const { state, updateState } = useSafariPlayerState(player.id)
+  const { state } = useSafariPlayerState(player.id)
   const { areasByGroup, loading: groupsLoading } = useSafariGroups()
   const { session, sessionPokemon, moves, loading: sessionLoading, throwBerry, throwBall } = useSafariSession(player.id)
   const { hasAttempted } = useSafariBallAttempts(player.id)
@@ -68,48 +68,13 @@ export function SafariPopup({ player, playerItems, itemsByName, pokedollarImageU
   const berryCount = berryRow?.quantity ?? 0
   const ballCount = ballRow?.quantity ?? 0
 
-  // Rattrape/avance les deux minuteurs de récompense automatique (Baie/Ball)
-  // toutes les secondes tant que le popup est ouvert — même principe que
-  // MiningPopup::tickRegen, dédoublé pour deux objets indépendants.
-  const tickRegen = useCallback(async () => {
-    if (!state) return
-    const berryResult = computeTicketRegen(
-      state.next_berry_at, berryCount,
-      { ticket_max: config.berry_reward_max, ticket_regen_amount: config.berry_reward_interval_amount, ticket_regen_unit: config.berry_reward_interval_unit },
-      new Date()
-    )
-    const ballResult = computeTicketRegen(
-      state.next_ball_at, ballCount,
-      { ticket_max: config.ball_reward_max, ticket_regen_amount: config.ball_reward_interval_amount, ticket_regen_unit: config.ball_reward_interval_unit },
-      new Date()
-    )
-    if (config.berry_reward_interval_amount > 0 && berryResult.ticketsGranted > 0) {
-      await playerItems.addItems(BERRY_SAFARI_ITEM_NAME, berryResult.ticketsGranted)
-      void logHistoryEvent('inventory', 'item_add', player.id, {
-        item_nom: BERRY_SAFARI_ITEM_NAME, delta: berryResult.ticketsGranted, total: berryCount + berryResult.ticketsGranted, source: 'la recharge automatique',
-      })
-    }
-    if (config.ball_reward_interval_amount > 0 && ballResult.ticketsGranted > 0) {
-      await playerItems.addItems(BALL_SAFARI_ITEM_NAME, ballResult.ticketsGranted)
-      void logHistoryEvent('inventory', 'item_add', player.id, {
-        item_nom: BALL_SAFARI_ITEM_NAME, delta: ballResult.ticketsGranted, total: ballCount + ballResult.ticketsGranted, source: 'la recharge automatique',
-      })
-    }
-    const patch: { next_berry_at?: string | null; next_ball_at?: string | null } = {}
-    if (config.berry_reward_interval_amount > 0 && berryResult.nextTicketAt !== state.next_berry_at) patch.next_berry_at = berryResult.nextTicketAt
-    if (config.ball_reward_interval_amount > 0 && ballResult.nextTicketAt !== state.next_ball_at) patch.next_ball_at = ballResult.nextTicketAt
-    if (Object.keys(patch).length > 0) await updateState(patch)
-  }, [state, berryCount, ballCount, config, playerItems, updateState, player.id])
-
+  // La régénération des Baies/Balls (octroi + minuteurs) tourne en tâche de
+  // fond dans HomeTab dès que le jeu est débloqué — ce popup ne fait
+  // qu'afficher le compte à rebours, il ne crédite plus rien lui-même.
   useEffect(() => {
-    tickRegen()
-    const interval = window.setInterval(() => {
-      setNow(Date.now())
-      tickRegen()
-    }, 1000)
+    const interval = window.setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(interval)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- ne doit redémarrer que sur les minuteurs/compteurs, pas à chaque nouvelle référence de tickRegen
-  }, [state?.next_berry_at, state?.next_ball_at, berryCount, ballCount])
+  }, [])
 
   const handleBuyBerry = async () => {
     if (!berryItem || playerItems.pokedollars < berryItem.achat) return
@@ -188,7 +153,7 @@ export function SafariPopup({ player, playerItems, itemsByName, pokedollarImageU
       >
         <button
           onClick={onClose}
-          className="absolute right-3 top-3 z-10 w-8 h-8 rounded-full flex items-center justify-center text-ink hover:bg-black/10"
+          className="absolute right-3 top-3 z-10 w-8 h-8 rounded-full border-2 border-ink bg-cream shadow-[var(--shadow-pixel)] flex items-center justify-center text-ink hover:bg-black/10 active:shadow-none active:translate-x-[1px] active:translate-y-[1px] transition-all"
         >
           <CloseIcon className="w-4 h-4" />
         </button>
@@ -220,7 +185,7 @@ export function SafariPopup({ player, playerItems, itemsByName, pokedollarImageU
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 sm:p-5">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-5">
           {loading ? (
             <p className="text-ink-muted-2 text-sm text-center py-6">Chargement…</p>
           ) : (

@@ -41,7 +41,7 @@ export function SafariBoard({
       {/* Rangée du haut : toujours les 3 pokémon en ordre naturel, gabarit
           compact — le pokémon sélectionné n'y est plus recentré/agrandi, il
           ne fait que se surligner (voir le panneau détaillé ci-dessous). */}
-      <div className="flex flex-wrap justify-center items-start gap-4 py-2">
+      <div className="flex flex-wrap justify-center items-start gap-2 sm:gap-4 py-2">
         {[0, 1, 2].map((slot) => {
           const sp = sessionPokemon.find((r) => r.slot === slot)
           if (!sp) return null
@@ -78,15 +78,15 @@ export function SafariBoard({
             onSelect={() => onSelectSlot(selected.slot)}
           />
 
-          <div className="flex gap-8 justify-center items-start">
-            <div className="flex flex-col items-center gap-1.5 w-36">
+          <div className="flex gap-4 sm:gap-8 justify-center items-start w-full px-2">
+            <div className="flex flex-col items-center gap-1.5 w-28 sm:w-36 min-w-0">
               {/* Une baie ne peut plus rien changer une fois la jauge au maximum
                   (100) — inutile de laisser le joueur en lancer (ou en acheter)
                   à ce stade, seule la Safari Ball reste pertinente. */}
               {gaugeMaxed ? (
-                <div className="w-20 h-20 shrink-0 rounded-full border-[3px] border-ink bg-cream-secondary opacity-50 flex items-center justify-center">
+                <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-full border-[3px] border-ink bg-cream-secondary opacity-50 flex items-center justify-center">
                   {berryItem?.image_url ? (
-                    <img src={berryItem.image_url} alt="" className="w-10 h-10 object-contain pixelated grayscale" />
+                    <img src={berryItem.image_url} alt="" className="w-8 h-8 sm:w-10 sm:h-10 object-contain pixelated grayscale" />
                   ) : (
                     <span className="text-3xl grayscale">🍇</span>
                   )}
@@ -95,10 +95,10 @@ export function SafariBoard({
                 <button
                   onClick={onThrowBerry}
                   title={`Lancer une Baie (${berryCount})`}
-                  className="w-20 h-20 shrink-0 rounded-full border-[3px] border-ink bg-yellow-300 flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+                  className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-full border-[3px] border-ink bg-yellow-300 flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
                 >
                   {berryItem?.image_url ? (
-                    <img src={berryItem.image_url} alt="" className="w-10 h-10 object-contain pixelated" />
+                    <img src={berryItem.image_url} alt="" className="w-8 h-8 sm:w-10 sm:h-10 object-contain pixelated" />
                   ) : (
                     <span className="text-3xl">🍇</span>
                   )}
@@ -107,27 +107,27 @@ export function SafariBoard({
                 <button
                   onClick={onBuyBerry}
                   title="Acheter une Baie"
-                  className={`w-20 h-20 shrink-0 rounded-full flex items-center justify-center text-xs font-bold text-center leading-tight ${BUTTON_STYLE.green}`}
+                  className={`w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-full flex items-center justify-center text-xs font-bold text-center leading-tight ${BUTTON_STYLE.green}`}
                 >
                   Acheter<br /><PokedollarIcon imageUrl={pokedollarImageUrl} size={13} className="align-[-2px]" />{berryItem?.achat ?? 0}
                 </button>
               )}
-              <p className="text-ink text-sm font-bold text-center">Lancer une Baie{berryCount > 0 ? ` (${berryCount})` : ''}</p>
-              <p className="text-ink-muted-2 text-xs text-center">
+              <p className="text-ink text-xs sm:text-sm font-bold text-center">Lancer une Baie{berryCount > 0 ? ` (${berryCount})` : ''}</p>
+              <p className="text-ink-muted-2 text-[10px] sm:text-xs text-center">
                 {gaugeMaxed ? 'jauge au maximum' : `les baies peuvent augmenter la jauge de ${berryMinIncrease} à ${berryMaxIncrease} points`}
               </p>
             </div>
 
-            <div className="flex flex-col items-center gap-1.5 w-36">
+            <div className="flex flex-col items-center gap-1.5 w-28 sm:w-36 min-w-0">
               {ballCount > 0 ? (
                 <button
                   onClick={onThrowBall}
                   disabled={alreadyAttempted}
                   title={`Tenter la capture (${ballCount})`}
-                  className="w-20 h-20 shrink-0 rounded-full border-[3px] border-ink bg-orange-300 flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+                  className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-full border-[3px] border-ink bg-orange-300 flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
                 >
                   {ballItem?.image_url ? (
-                    <img src={ballItem.image_url} alt="" className="w-10 h-10 object-contain pixelated" />
+                    <img src={ballItem.image_url} alt="" className="w-8 h-8 sm:w-10 sm:h-10 object-contain pixelated" />
                   ) : (
                     <span className="text-3xl">⚪</span>
                   )}
@@ -136,13 +136,13 @@ export function SafariBoard({
                 <button
                   onClick={onBuyBall}
                   title="Acheter une Safari Ball"
-                  className={`w-20 h-20 shrink-0 rounded-full flex items-center justify-center text-xs font-bold text-center leading-tight ${BUTTON_STYLE.green}`}
+                  className={`w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-full flex items-center justify-center text-xs font-bold text-center leading-tight ${BUTTON_STYLE.green}`}
                 >
                   Acheter<br /><PokedollarIcon imageUrl={pokedollarImageUrl} size={13} className="align-[-2px]" />{ballItem?.achat ?? 0}
                 </button>
               )}
-              <p className="text-ink text-sm font-bold text-center">Tenter la capture{ballCount > 0 ? ` (${ballCount})` : ''}</p>
-              <p className="text-ink-muted-2 text-xs text-center">
+              <p className="text-ink text-xs sm:text-sm font-bold text-center">Tenter la capture{ballCount > 0 ? ` (${ballCount})` : ''}</p>
+              <p className="text-ink-muted-2 text-[10px] sm:text-xs text-center">
                 {alreadyAttempted ? 'déjà tenté sur ce pokémon' : 'une seule tentative par pokémon'}
               </p>
             </div>

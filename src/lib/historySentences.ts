@@ -1,4 +1,4 @@
-import type { Player, Pokemon, Item, HistoryInventoryPayload, HistoryPokedexPayload, HistoryTeamPayload, HistoryCombatPayload, HistoryMinigamePayload, HistoryMiningPayload, HistoryDaycarePayload, HistorySafariPayload } from '../types'
+import type { Player, Pokemon, Item, HistoryInventoryPayload, HistoryPokedexPayload, HistoryTeamPayload, HistoryCombatPayload, HistoryMinigamePayload, HistoryMiningPayload, HistoryDaycarePayload, HistorySafariPayload, HistoryChatPayload } from '../types'
 import { POKEDOLLAR_ITEM_NAME, TICKET_CASINO_ITEM_NAME, TICKET_TREMPETTE_ITEM_NAME, TICKET_MINING_ITEM_NAME } from '../types'
 import type { ReferenceEntry } from '../hooks/useReferenceIndex'
 import { getStatusInfo } from './status'
@@ -177,6 +177,13 @@ function safariSentence(entry: DisplayHistoryEntry, ctx: SentenceContext): Sente
   return [pokemonRef, { text: ' a fui le Safari (tentative de ' }, player, { text: ')' }]
 }
 
+function chatSentence(entry: DisplayHistoryEntry, ctx: SentenceContext): SentencePart[] {
+  const payload = entry.payload as HistoryChatPayload
+  const player = playerPart(ctx, entry.player_id)
+  const prefix = payload.is_npc ? ' (PNJ) a écrit dans le chat : « ' : ' a écrit dans le chat : « '
+  return [player, { text: prefix }, { text: payload.content }, { text: ' »' }]
+}
+
 export function buildSentenceParts(entry: DisplayHistoryEntry, ctx: SentenceContext): SentencePart[] {
   switch (entry.category) {
     case 'inventory':
@@ -193,6 +200,8 @@ export function buildSentenceParts(entry: DisplayHistoryEntry, ctx: SentenceCont
       return daycareSentence(entry, ctx)
     case 'safari':
       return safariSentence(entry, ctx)
+    case 'chat':
+      return chatSentence(entry, ctx)
     default:
       return [{ text: '' }]
   }

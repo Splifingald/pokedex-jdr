@@ -146,7 +146,7 @@ export function PensionPopup({
       >
         <button
           onClick={onClose}
-          className="absolute right-3 top-3 z-10 w-8 h-8 rounded-full flex items-center justify-center text-ink hover:bg-black/10"
+          className="absolute right-3 top-3 z-10 w-8 h-8 rounded-full border-2 border-ink bg-cream shadow-[var(--shadow-pixel)] flex items-center justify-center text-ink hover:bg-black/10 active:shadow-none active:translate-x-[1px] active:translate-y-[1px] transition-all"
         >
           <CloseIcon className="w-4 h-4" />
         </button>

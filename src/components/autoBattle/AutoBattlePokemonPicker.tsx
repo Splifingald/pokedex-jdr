@@ -9,17 +9,19 @@ interface Props {
   roster: PlayerPokemon[]
   pokemonByName: Map<string, Pokemon>
   attacksByName: Map<string, Attack>
+  bannedAttacks: Set<string>
   onSelect: (pp: PlayerPokemon) => void
   onBack: () => void
 }
 
 // Sélection du pokémon combattant — même structure de grille de cartes que
 // PensionPlacementList (Équipe + PC, pension exclue), filtrée aux pokémon
-// ayant au moins une capacité offensive apprise (voir requirement #6/#9).
-export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, onSelect, onBack }: Props) {
+// ayant au moins une capacité offensive apprise (voir requirement #6/#9),
+// bannies exclues.
+export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, bannedAttacks, onSelect, onBack }: Props) {
   const eligible = useMemo(
-    () => getEligiblePlayerPokemon(roster, attacksByName),
-    [roster, attacksByName]
+    () => getEligiblePlayerPokemon(roster, attacksByName, bannedAttacks),
+    [roster, attacksByName, bannedAttacks]
   )
 
   if (eligible.length === 0) {
