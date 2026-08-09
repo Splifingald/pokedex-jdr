@@ -390,6 +390,7 @@ export function AutoBattlePopup({
               playerPokemon={selectedPokemon}
               attacksByName={attacksByName}
               bannedAttacks={bannedNames}
+              precisionEnabled={config.precision_enabled}
               onSelect={(ability) => void handleSelectAbility(selectedPokemon, ability)}
               onBack={() => setView('pick-pokemon')}
             />

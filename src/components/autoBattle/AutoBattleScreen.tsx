@@ -3,6 +3,8 @@ import type { Pokemon, PlayerPokemon } from '../../types'
 import { ownedPokemonName } from '../../types'
 import { HpGauge } from '../HpGauge'
 import { AutoBattleDamageNumber } from './AutoBattleDamageNumber'
+import { AutoBattleFloatingText } from './AutoBattleFloatingText'
+import { AutoBattleHealEffect } from './AutoBattleHealEffect'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 import type { AutoBattleTurn } from '../../types'
 
@@ -26,7 +28,10 @@ const COUNTDOWN_STEP_MS = 600
 
 // Durées des phases d'attaque (voir AttackPhase ci-dessous) — les dégâts sont
 // appliqués au moment de l'impact (atterrissage, fin de 'strike-land'), pas
-// au début du tour. GAP_MS est le temps mort après le retour avant le tour suivant.
+// au début du tour. GAP_MS est le temps mort après le retour avant le tour
+// suivant. Un tour raté (système de précision) ou passé (effet spécial
+// 'skip') garde la même durée totale TURN_MS pour que le rythme reste
+// prévisible, mais saute les phases de saut.
 const ANTICIPATION_MS = 150
 const LUNGE_MS = 100
 const STRIKE_RISE_MS = 140
@@ -35,9 +40,11 @@ const RETURN_MS = 250
 const GAP_MS = 150
 const IMPACT_OFFSET_MS = ANTICIPATION_MS + LUNGE_MS + STRIKE_RISE_MS + STRIKE_LAND_MS
 const TURN_MS = IMPACT_OFFSET_MS + RETURN_MS + GAP_MS
+const HEAL_DELAY_MS = 250 // le soin apparaît après les dégâts, pas en même temps
 
 type AttackPhase = 'anticipation' | 'lunge' | 'strike-rise' | 'strike-land' | 'return'
 interface AttackState { side: 'player' | 'opponent'; phase: AttackPhase }
+type Side = 'player' | 'opponent'
 
 // Style de transform du pokémon attaquant selon la phase en cours, combinant
 // les axes X (avance vers l'adversaire) et Y (arc de saut) : petit recul
@@ -45,8 +52,10 @@ interface AttackState { side: 'player' | 'opponent'; phase: AttackPhase }
 // couvrant l'essentiel de la distance (strike-rise), puis retombe tout près
 // de/sur l'adversaire (strike-land — c'est à la fin de cette phase que les
 // dégâts sont appliqués, "quand le pokémon atteint la cible"), puis retour à
-// la position de départ (return). `sign` vaut +1 pour le joueur (avance vers
-// la droite, l'adversaire) et -1 pour l'adversaire (avance vers la gauche).
+// la position de départ (return). Sur un tour raté, seules 'anticipation'
+// puis 'return' sont jouées (petit mouvement sur place, jamais de saut).
+// `sign` vaut +1 pour le joueur (avance vers la droite, l'adversaire) et -1
+// pour l'adversaire (avance vers la gauche).
 function attackTransform(phase: AttackPhase, sign: 1 | -1): React.CSSProperties {
   switch (phase) {
     case 'anticipation':
@@ -67,10 +76,14 @@ function attackTransform(phase: AttackPhase, sign: 1 | -1): React.CSSProperties 
 // adversaire à droite. Chaque tour joue une petite séquence d'attaque
 // (anticipation → bond → grand saut sur l'adversaire → retour), les dégâts
 // n'étant appliqués (flash rouge + secousse + nombre flottant) qu'au moment
-// de l'impact plutôt qu'au début du tour. Les deux pokémon sont déjà visibles
-// (pièce jouée) pendant le compte à rebours 3-2-1-GO avant le premier coup.
-// Une fois le combat terminé, reste affiché avec un bouton "Continuer"
-// plutôt que d'enchaîner automatiquement sur les récompenses/l'écran de défaite.
+// de l'impact plutôt qu'au début du tour. Un tour raté (précision) affiche
+// "MANQUÉ" et ne joue qu'un petit mouvement sur place ; un tour passé (effet
+// spécial) affiche un texte dédié sans aucune animation d'attaque ; un soin
+// (effet spécial) affiche des bulles vertes + le montant sur l'attaquant
+// lui-même, après les dégâts. Les deux pokémon sont déjà visibles (pièce
+// jouée) pendant le compte à rebours 3-2-1-GO avant le premier coup. Une
+// fois le combat terminé, reste affiché avec un bouton "Continuer" plutôt
+// que d'enchaîner automatiquement sur les récompenses/l'écran de défaite.
 export function AutoBattleScreen({
   playerPokemon, playerSpecies, playerMaxHp, opponentSpecies, opponentMaxHp, opponentNom, turns,
   playerTypeBonus, opponentTypeBonus, onContinue,
@@ -81,10 +94,17 @@ export function AutoBattleScreen({
   const [opponentHp, setOpponentHp] = useState(opponentMaxHp)
   const [shownTurnIndex, setShownTurnIndex] = useState(-1)
   const [attackState, setAttackState] = useState<AttackState | null>(null)
-  const [shakeSide, setShakeSide] = useState<'player' | 'opponent' | null>(null)
-  const [flashSide, setFlashSide] = useState<'player' | 'opponent' | null>(null)
+  const [shakeSide, setShakeSide] = useState<Side | null>(null)
+  const [flashSide, setFlashSide] = useState<Side | null>(null)
   const [hitKey, setHitKey] = useState(0)
-  const [lastDamage, setLastDamage] = useState<{ side: 'player' | 'opponent'; damage: number; superEffective: boolean } | null>(null)
+  const [lastDamage, setLastDamage] = useState<{ side: Side; damage: number; superEffective: boolean } | null>(null)
+  const [missSide, setMissSide] = useState<Side | null>(null)
+  const [missKey, setMissKey] = useState(0)
+  const [skipSide, setSkipSide] = useState<Side | null>(null)
+  const [skipKey, setSkipKey] = useState(0)
+  const [healSide, setHealSide] = useState<Side | null>(null)
+  const [healKey, setHealKey] = useState(0)
+  const [lastHeal, setLastHeal] = useState<{ side: Side; amount: number } | null>(null)
   const [battleDone, setBattleDone] = useState(turns.length === 0)
 
   // Compte à rebours 3…2…1…GO ! avant le premier coup, même idiome que
@@ -103,24 +123,57 @@ export function AutoBattleScreen({
     turns.forEach((turn, i) => {
       const turnStart = i * TURN_MS
       const attackerSide = turn.attacker
-      const hitSide = attackerSide === 'player' ? 'opponent' : 'player'
+      const hitSide: Side = attackerSide === 'player' ? 'opponent' : 'player'
+
+      if (turn.skipped) {
+        timers.push(window.setTimeout(() => {
+          setShownTurnIndex(i)
+          setSkipSide(attackerSide)
+          setSkipKey((k) => k + 1)
+        }, turnStart + ANTICIPATION_MS))
+        timers.push(window.setTimeout(() => setSkipSide(null), turnStart + TURN_MS - GAP_MS))
+        return
+      }
 
       timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'anticipation' }), turnStart))
-      timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'lunge' }), turnStart + ANTICIPATION_MS))
-      timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'strike-rise' }), turnStart + ANTICIPATION_MS + LUNGE_MS))
-      timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'strike-land' }), turnStart + ANTICIPATION_MS + LUNGE_MS + STRIKE_RISE_MS))
+      if (!turn.missed) {
+        timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'lunge' }), turnStart + ANTICIPATION_MS))
+        timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'strike-rise' }), turnStart + ANTICIPATION_MS + LUNGE_MS))
+        timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'strike-land' }), turnStart + ANTICIPATION_MS + LUNGE_MS + STRIKE_RISE_MS))
+      }
+
       const isSuperEffective = attackerSide === 'player' ? playerTypeBonus : opponentTypeBonus
       timers.push(window.setTimeout(() => {
         setShownTurnIndex(i)
+        setAttackState({ side: attackerSide, phase: 'return' })
+
+        if (turn.missed) {
+          setMissSide(attackerSide)
+          setMissKey((k) => k + 1)
+          window.setTimeout(() => setMissSide(null), 700)
+          return
+        }
+
         if (hitSide === 'player') setPlayerHp(turn.defender_hp_after)
         else setOpponentHp(turn.defender_hp_after)
         setShakeSide(hitSide)
         setFlashSide(hitSide)
         setLastDamage({ side: hitSide, damage: turn.damage, superEffective: isSuperEffective })
         setHitKey((k) => k + 1)
-        setAttackState({ side: attackerSide, phase: 'return' })
         window.setTimeout(() => setShakeSide(null), 300)
         window.setTimeout(() => setFlashSide(null), 220)
+
+        if (turn.heal != null && turn.attacker_hp_after != null) {
+          const healAmount = turn.heal
+          const attackerHpAfter = turn.attacker_hp_after
+          window.setTimeout(() => {
+            if (attackerSide === 'player') setPlayerHp(attackerHpAfter)
+            else setOpponentHp(attackerHpAfter)
+            setHealSide(attackerSide)
+            setLastHeal({ side: attackerSide, amount: healAmount })
+            setHealKey((k) => k + 1)
+          }, HEAL_DELAY_MS)
+        }
       }, turnStart + IMPACT_OFFSET_MS))
       timers.push(window.setTimeout(() => setAttackState(null), turnStart + IMPACT_OFFSET_MS + RETURN_MS))
     })
@@ -159,6 +212,15 @@ export function AutoBattleScreen({
             {lastDamage?.side === 'player' && (
               <AutoBattleDamageNumber damage={lastDamage.damage} animKey={hitKey} superEffective={lastDamage.superEffective} />
             )}
+            {missSide === 'player' && (
+              <AutoBattleFloatingText text="MANQUÉ" animKey={missKey} className="text-ink-muted-2" />
+            )}
+            {skipSide === 'player' && (
+              <AutoBattleFloatingText text="Tour passé !" animKey={skipKey} className="text-white" />
+            )}
+            {healSide === 'player' && lastHeal?.side === 'player' && (
+              <AutoBattleHealEffect amount={lastHeal.amount} animKey={healKey} />
+            )}
           </div>
           <div className="w-full max-w-[160px]">
             <HpGauge current={Math.max(0, playerHp)} max={playerMaxHp} />
@@ -185,6 +247,15 @@ export function AutoBattleScreen({
             )}
             {lastDamage?.side === 'opponent' && (
               <AutoBattleDamageNumber damage={lastDamage.damage} animKey={hitKey} superEffective={lastDamage.superEffective} />
+            )}
+            {missSide === 'opponent' && (
+              <AutoBattleFloatingText text="MANQUÉ" animKey={missKey} className="text-ink-muted-2" />
+            )}
+            {skipSide === 'opponent' && (
+              <AutoBattleFloatingText text="Tour passé !" animKey={skipKey} className="text-white" />
+            )}
+            {healSide === 'opponent' && lastHeal?.side === 'opponent' && (
+              <AutoBattleHealEffect amount={lastHeal.amount} animKey={healKey} />
             )}
           </div>
           <div className="w-full max-w-[160px]">

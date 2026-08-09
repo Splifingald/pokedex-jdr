@@ -2,21 +2,30 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { Extension } from '@tiptap/core'
-import type { Player, Pokemon, Attack, Item } from '../../types'
+import type { Player, Pokemon, Attack, Item, PlayerItem, PlayerPokemon, Trade } from '../../types'
 import type { useChatMessages } from '../../hooks/useChatMessages'
 import { useCarteLocations } from '../../hooks/useCarteLocations'
+import { useTrades } from '../../hooks/useTrades'
 import { useReferenceIndex, type ReferenceEntry } from '../../hooks/useReferenceIndex'
 import { ReferenceHighlight, forceReferenceRecompute } from '../../lib/referenceExtension'
 import { chatCooldownSeconds } from '../../lib/chatSpam'
 import { ChatMessageBubble } from './ChatMessageBubble'
 import { ChatReferenceDispatcher } from './ChatReferenceDispatcher'
+import { TradePopup } from './TradePopup'
+import { TradeSwapAnimation } from './TradeSwapAnimation'
+import { ChatEmojiButton } from './ChatEmojiButton'
+import { buildSwapAnimProps } from '../../lib/trade'
 import { CloseIcon } from '../icons/CloseIcon'
+import { PixelIcon } from '../icons/PixelIcon'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
+import { CHAT_ICON } from '../../lib/icons'
 
 interface Props {
   player: Player
   players: Player[]
   chat: ReturnType<typeof useChatMessages>
+  inventory: PlayerItem[]
+  roster: PlayerPokemon[]
   pokemonByName: Map<string, Pokemon>
   discoveredPokemon: Set<string>
   attacksByName: Map<string, Attack>
@@ -39,9 +48,12 @@ const SubmitOnEnter = Extension.create<{ getOnSubmit: () => () => void }>({
   },
 })
 
-export function ChatPopup({ player, players, chat, pokemonByName, discoveredPokemon, attacksByName, itemsByName, maxMessageLength, spamLimitPerMinute, onClose }: Props) {
+export function ChatPopup({ player, players, chat, inventory, roster, pokemonByName, discoveredPokemon, attacksByName, itemsByName, maxMessageLength, spamLimitPerMinute, onClose }: Props) {
   const { locations } = useCarteLocations()
+  const trades = useTrades()
   const [activeReference, setActiveReference] = useState<ReferenceEntry | null>(null)
+  const [tradePopup, setTradePopup] = useState<{ trade?: Trade } | null>(null)
+  const [replayTrade, setReplayTrade] = useState<Trade | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -71,6 +83,11 @@ export function ChatPopup({ player, players, chat, pokemonByName, discoveredPoke
   }, [cooldown])
 
   const handleSendRef = useRef<() => void>(() => {})
+  // Suivi explicite du texte via onUpdate plutôt que editor.getText() lu en direct
+  // au rendu : le rerender automatique de useEditor sur transaction peut accuser
+  // un léger retard aux tout premiers caractères tapés, ce qui laissait le bouton
+  // "Envoyer" désactivé un instant après le début de la frappe.
+  const [text, setText] = useState('')
 
   const editor = useEditor({
     content: '',
@@ -88,13 +105,13 @@ export function ChatPopup({ player, players, chat, pokemonByName, discoveredPoke
       // eslint-disable-next-line react-hooks/refs
       SubmitOnEnter.configure({ getOnSubmit: () => handleSendRef.current }),
     ],
+    onUpdate: ({ editor }) => setText(editor.getText()),
   })
 
   useEffect(() => {
     if (editor) forceReferenceRecompute(editor)
   }, [editor, referenceIndex])
 
-  const text = editor?.getText() ?? ''
   const trimmed = text.trim()
   const overLimit = text.length > maxMessageLength
   const canSend = trimmed.length > 0 && !overLimit && cooldown <= 0
@@ -103,6 +120,7 @@ export function ChatPopup({ player, players, chat, pokemonByName, discoveredPoke
     if (!canSend || !editor) return
     void chat.sendMessage(player.id, trimmed, false)
     editor.commands.clearContent()
+    setText('')
     setNow(Date.now())
   }
   useEffect(() => { handleSendRef.current = handleSend })
@@ -116,7 +134,7 @@ export function ChatPopup({ player, players, chat, pokemonByName, discoveredPoke
         sm:h-auto sm:max-w-md sm:max-h-[85vh] sm:rounded-[var(--radius-pixel)] sm:border-[3px] sm:border-ink sm:shadow-[var(--shadow-pixel-lg)]"
       >
         <div className="flex items-center gap-2 p-3 border-b-2 border-[#cfc7a8] shrink-0">
-          <span className="text-xl">💬</span>
+          <PixelIcon src={CHAT_ICON} size={24} colored className="text-ink" />
           <h3 className="text-ink font-bold flex-1">Chat</h3>
           <button onClick={onClose} className={`w-8 h-8 rounded-md text-sm font-bold ${BUTTON_STYLE.gray}`}>
             <CloseIcon className="w-4 h-4 mx-auto" />
@@ -135,6 +153,12 @@ export function ChatPopup({ player, players, chat, pokemonByName, discoveredPoke
               mine={message.player_id === player.id && !message.is_npc}
               referenceIndex={referenceIndex}
               onReferenceClick={setActiveReference}
+              trades={trades.trades}
+              players={players}
+              itemsByName={itemsByName}
+              pokemonByName={pokemonByName}
+              onOpenTrade={(trade) => setTradePopup({ trade })}
+              onReplayTrade={(trade) => setReplayTrade(trade)}
             />
           ))}
         </div>
@@ -149,6 +173,7 @@ export function ChatPopup({ player, players, chat, pokemonByName, discoveredPoke
             <div className="flex-1 bg-white border-2 border-ink rounded-lg px-3 py-2 max-h-24 overflow-y-auto">
               <EditorContent editor={editor} className="chat-input text-ink text-sm outline-none" />
             </div>
+            <ChatEmojiButton onSelect={(emoji) => editor?.chain().focus().insertContent(emoji).run()} />
             <button
               onClick={handleSend}
               disabled={!canSend}
@@ -160,8 +185,30 @@ export function ChatPopup({ player, players, chat, pokemonByName, discoveredPoke
           <p className={`text-[10px] mt-1 text-right ${overLimit ? 'text-hp-red font-bold' : 'text-ink-muted-2'}`}>
             {text.length} / {maxMessageLength}
           </p>
+          <button
+            onClick={() => setTradePopup({})}
+            className={`w-full mt-2 px-3 py-1.5 rounded-lg text-xs font-bold ${BUTTON_STYLE.yellow}`}
+          >
+            🔄 Proposer un échange
+          </button>
         </div>
       </div>
+
+      {tradePopup && (
+        <TradePopup
+          player={player}
+          players={players}
+          inventory={inventory}
+          roster={roster}
+          itemsByName={itemsByName}
+          pokemonByName={pokemonByName}
+          attacksByName={attacksByName}
+          trades={trades}
+          chat={chat}
+          existingTrade={tradePopup.trade}
+          onClose={() => setTradePopup(null)}
+        />
+      )}
 
       <ChatReferenceDispatcher
         activeReference={activeReference}
@@ -171,6 +218,11 @@ export function ChatPopup({ player, players, chat, pokemonByName, discoveredPoke
         locationsByName={locationsByName}
         onClose={() => setActiveReference(null)}
       />
+
+      {replayTrade && (() => {
+        const anim = buildSwapAnimProps(replayTrade, players, pokemonByName)
+        return anim ? <TradeSwapAnimation {...anim} onDone={() => setReplayTrade(null)} /> : null
+      })()}
     </div>
   )
 }

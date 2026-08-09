@@ -2378,9 +2378,15 @@ CREATE TABLE IF NOT EXISTS autobattle_config (
   -- Affichage du widget d'accueil partagé (liste des variantes)
   nom                         text NOT NULL DEFAULT 'Combat Auto',
   icon_url                    text NOT NULL DEFAULT '',
+  -- Système de précision (voir attacks.precision, 1-10, NULL = 10 par
+  -- défaut) : désactivable globalement, auquel cas toute capacité touche
+  -- systématiquement (comme précision = 10), voir autobattle_resolve_battle.
+  precision_enabled           boolean NOT NULL DEFAULT true,
   CONSTRAINT single_row CHECK (id = 1)
 );
 INSERT INTO autobattle_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+-- Si autobattle_config existe déjà (migration précédente déjà appliquée) :
+ALTER TABLE autobattle_config ADD COLUMN IF NOT EXISTS precision_enabled boolean NOT NULL DEFAULT true;
 
 -- Une variante = un parcours indépendant (propre bannière/icône/nom/niveaux/état).
 CREATE TABLE IF NOT EXISTS autobattle_variants (
@@ -2552,6 +2558,57 @@ CREATE POLICY "Public read autobattle_banned_attacks" ON autobattle_banned_attac
 CREATE POLICY "Public insert autobattle_banned_attacks" ON autobattle_banned_attacks FOR INSERT TO anon WITH CHECK (true);
 CREATE POLICY "Public delete autobattle_banned_attacks" ON autobattle_banned_attacks FOR DELETE TO anon USING (true);
 
+-- Effets spéciaux d'une capacité (une ligne par capacité concernée, les deux
+-- familles d'effet sont indépendantes et optionnelles) : effet sur le rythme
+-- des tours (passe son tour, joue plusieurs fois de suite — reroll à chaque
+-- activation pour 'play_random') et/ou effet de soin (montant fixe, ou % des
+-- dégâts infligés ce tour-là — soigne l'utilisateur lui-même, après les
+-- dégâts, voir autobattle_resolve_battle). Référencée par nom (pas de FK,
+-- même convention que tout le schéma).
+CREATE TABLE IF NOT EXISTS autobattle_ability_rules (
+  attack_nom        text PRIMARY KEY,
+  turn_effect       text CHECK (turn_effect IS NULL OR turn_effect IN ('skip', 'play_twice', 'play_three', 'play_random', 'repeat_until_fail')),
+  turn_random_min   integer,
+  turn_random_max   integer,
+  -- 'repeat_until_fail' : la capacité continue de s'utiliser tant qu'elle
+  -- touche, s'arrête au premier raté (ou à repeat_max_iterations activations
+  -- si aucun raté avant), voir autobattle_resolve_battle. 6 par défaut côté
+  -- admin (AdminAutoBattleAbilityRulesPanel), pas de défaut SQL forcé.
+  repeat_max_iterations integer,
+  -- 'use_stats' : pas de montant/pourcentage à configurer, le soin utilise
+  -- directement les dégâts de base + un dé de la capacité elle-même (rerollé
+  -- indépendamment du dé de dégâts), voir autobattle_resolve_battle.
+  heal_type         text CHECK (heal_type IS NULL OR heal_type IN ('static', 'percent_damage', 'use_stats')),
+  heal_amount       integer,
+  heal_percent      integer,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT autobattle_ability_rules_random_fields CHECK (
+    turn_effect <> 'play_random' OR (turn_random_min IS NOT NULL AND turn_random_max IS NOT NULL AND turn_random_min >= 1 AND turn_random_max >= turn_random_min)
+  ),
+  CONSTRAINT autobattle_ability_rules_repeat_fields CHECK (
+    turn_effect <> 'repeat_until_fail' OR (repeat_max_iterations IS NOT NULL AND repeat_max_iterations >= 1)
+  ),
+  CONSTRAINT autobattle_ability_rules_heal_fields CHECK (
+    heal_type IS NULL
+    OR heal_type = 'use_stats'
+    OR (heal_type = 'static' AND heal_amount IS NOT NULL AND heal_amount > 0)
+    OR (heal_type = 'percent_damage' AND heal_percent IS NOT NULL AND heal_percent > 0)
+  )
+);
+ALTER TABLE autobattle_ability_rules ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public read autobattle_ability_rules" ON autobattle_ability_rules FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert autobattle_ability_rules" ON autobattle_ability_rules FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update autobattle_ability_rules" ON autobattle_ability_rules FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete autobattle_ability_rules" ON autobattle_ability_rules FOR DELETE TO anon USING (true);
+-- Si autobattle_ability_rules existe déjà (migration précédente déjà appliquée) :
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS repeat_max_iterations integer;
+ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_turn_effect_check;
+ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_turn_effect_check
+  CHECK (turn_effect IS NULL OR turn_effect IN ('skip', 'play_twice', 'play_three', 'play_random', 'repeat_until_fail'));
+ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_repeat_fields;
+ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_repeat_fields
+  CHECK (turn_effect <> 'repeat_until_fail' OR (repeat_max_iterations IS NOT NULL AND repeat_max_iterations >= 1));
+
 -- Ticket Combat : catalogue seedé une fois (RLS bloque l'écriture anon
 -- sur items, donc à exécuter manuellement via l'éditeur SQL Supabase — même
 -- caveat que "Ticket Fouille" plus haut dans ce fichier).
@@ -2599,6 +2656,36 @@ AS $$
   WHERE p.nom = p_pokemon_nom AND trim(COALESCE(t.cell, '')) <> ''
 $$;
 
+-- Nombre d'attaques consécutives qu'un côté joue avant que le tour ne passe à
+-- l'autre, pour la capacité donnée : 1 par défaut (aucune règle configurée
+-- ou 'skip' — 'skip' est géré séparément dans autobattle_resolve_battle via
+-- v_player_skip_pending/v_opponent_skip_pending, PAS ici, car il s'agit d'une
+-- alternance attaque/passe et non d'un nombre d'attaques consécutives), 2/3
+-- pour 'play_twice'/'play_three', ou un tirage entre turn_random_min/max pour
+-- 'play_random' — retiré au sort à CHAQUE nouvelle activation (pas une seule
+-- fois pour tout le combat), voir autobattle_resolve_battle.
+CREATE OR REPLACE FUNCTION autobattle_ability_burst(p_attack_nom text)
+RETURNS integer
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_rule record;
+BEGIN
+  SELECT * INTO v_rule FROM autobattle_ability_rules WHERE attack_nom = p_attack_nom;
+  IF v_rule IS NULL OR v_rule.turn_effect IS NULL THEN
+    RETURN 1;
+  END IF;
+  CASE v_rule.turn_effect
+    WHEN 'play_twice' THEN RETURN 2;
+    WHEN 'play_three' THEN RETURN 3;
+    WHEN 'play_random' THEN RETURN v_rule.turn_random_min + floor(random() * (v_rule.turn_random_max - v_rule.turn_random_min + 1))::integer;
+    ELSE RETURN 1;
+  END CASE;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION autobattle_ability_burst(text) TO anon, authenticated;
+
 -- Résout un combat Combat Auto de bout en bout, de façon atomique et
 -- autoritaire côté serveur (rien n'est fait confiance côté client hormis les
 -- 4 identifiants passés en argument — stats, dégâts, avantage de type, coup
@@ -2645,6 +2732,25 @@ DECLARE
   v_hit_damage          integer;
   v_player_hp           integer;
   v_opponent_hp         integer;
+  v_player_heal_type    text;
+  v_player_heal_amount  integer;
+  v_player_heal_percent integer;
+  v_opponent_heal_type    text;
+  v_opponent_heal_amount  integer;
+  v_opponent_heal_percent integer;
+  v_heal_amt            integer;
+  v_heal_dice           integer;
+  v_precision_enabled   boolean;
+  v_hit_chance          integer;
+  v_missed              boolean;
+  v_block_remaining     integer;
+  v_player_turn_effect    text;
+  v_opponent_turn_effect  text;
+  v_player_skip_pending   boolean := false;
+  v_opponent_skip_pending boolean := false;
+  v_player_repeat_max     integer;
+  v_opponent_repeat_max   integer;
+  v_turn_entry          jsonb;
   v_coin_player_first   boolean;
   v_attacker            text;
   v_turn_no             integer := 0;
@@ -2759,38 +2865,190 @@ BEGIN
   v_opponent_damage := v_level.opponent_base_damage * (CASE WHEN v_opponent_type_bonus THEN 2 ELSE 1 END)
     + COALESCE(v_opponent_ability.degats_base, 0);
 
+  -- Effet de soin éventuel de chaque capacité (statique, % des dégâts
+  -- infligés ce tour-là, ou "utilise ses propres stats" — dégâts de base +
+  -- un dé indépendant de la capacité elle-même) — indépendant de l'effet sur
+  -- le rythme des tours, voir autobattle_ability_rules. NULL si aucune règle
+  -- configurée.
+  SELECT heal_type, heal_amount, heal_percent, turn_effect, repeat_max_iterations
+    INTO v_player_heal_type, v_player_heal_amount, v_player_heal_percent, v_player_turn_effect, v_player_repeat_max
+    FROM autobattle_ability_rules WHERE attack_nom = p_ability_nom;
+  SELECT heal_type, heal_amount, heal_percent, turn_effect, repeat_max_iterations
+    INTO v_opponent_heal_type, v_opponent_heal_amount, v_opponent_heal_percent, v_opponent_turn_effect, v_opponent_repeat_max
+    FROM autobattle_ability_rules WHERE attack_nom = v_level.opponent_ability_nom;
+
+  -- Système de précision (requirement : attacks.precision 1-10, NULL = 10 =
+  -- 100%, désactivable globalement via autobattle_config.precision_enabled,
+  -- auquel cas toute capacité touche systématiquement).
+  SELECT precision_enabled INTO v_precision_enabled FROM autobattle_config WHERE id = 1;
+  v_precision_enabled := COALESCE(v_precision_enabled, true);
+
   v_player_hp := GREATEST(1, v_player_max_hp);
   v_opponent_hp := v_level.opponent_hp;
   v_coin_player_first := random() < 0.5;
   v_attacker := CASE WHEN v_coin_player_first THEN 'player' ELSE 'opponent' END;
+  v_block_remaining := NULL;
 
+  -- Boucle de tours : par défaut chaque côté joue un coup puis cède la main,
+  -- mais une capacité peut porter un effet spécial. 'play_twice'/'play_three'/
+  -- 'play_random' (via autobattle_ability_burst) font jouer son utilisateur
+  -- plusieurs fois d'affilée avant que le tour ne passe à l'autre côté.
+  -- 'skip' est différent : ce n'est PAS "ne jamais attaquer" mais une
+  -- alternance — la capacité s'utilise normalement, puis le PROCHAIN tour de
+  -- ce même côté est passé (v_*_skip_pending), avant de reprendre un cycle
+  -- attaque/passe. Suivi indépendamment par côté puisque seul un côté peut
+  -- avoir une capacité à effet 'skip'. 'repeat_until_fail' initialise
+  -- v_block_remaining à repeat_max_iterations (comme 'play_random'), mais le
+  -- PREMIER raté (v_missed, voir plus bas) force v_block_remaining à 1 pour
+  -- interrompre la série immédiatement au lieu d'épuiser le compteur.
   LOOP
     v_turn_no := v_turn_no + 1;
-    IF v_attacker = 'player' THEN
-      v_hit_dice := CASE WHEN v_ability.degats_de IS NOT NULL AND v_ability.degats_de > 0
-        THEN 1 + floor(random() * v_ability.degats_de)::integer ELSE 0 END;
-      v_hit_damage := GREATEST(0, v_player_damage + v_hit_dice);
-      v_opponent_hp := v_opponent_hp - v_hit_damage;
-      v_turns := v_turns || jsonb_build_array(jsonb_build_object(
-        'turn', v_turn_no, 'attacker', 'player', 'damage', v_hit_damage,
-        'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', v_opponent_hp <= 0
-      ));
-      IF v_opponent_hp <= 0 THEN v_outcome := 'win'; EXIT; END IF;
-      v_attacker := 'opponent';
-    ELSE
-      v_hit_dice := CASE WHEN v_opponent_ability.degats_de IS NOT NULL AND v_opponent_ability.degats_de > 0
-        THEN 1 + floor(random() * v_opponent_ability.degats_de)::integer ELSE 0 END;
-      v_hit_damage := GREATEST(0, v_opponent_damage + v_hit_dice);
-      v_player_hp := v_player_hp - v_hit_damage;
-      v_turns := v_turns || jsonb_build_array(jsonb_build_object(
-        'turn', v_turn_no, 'attacker', 'opponent', 'damage', v_hit_damage,
-        'defender_hp_after', GREATEST(0, v_player_hp), 'ko', v_player_hp <= 0
-      ));
-      IF v_player_hp <= 0 THEN v_outcome := 'lose'; EXIT; END IF;
-      v_attacker := 'player';
+
+    IF v_block_remaining IS NULL THEN
+      IF v_attacker = 'player' AND v_player_turn_effect = 'skip' THEN
+        IF v_player_skip_pending THEN
+          v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+            'turn', v_turn_no, 'attacker', 'player', 'damage', 0, 'skipped', true,
+            'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', false
+          ));
+          v_player_skip_pending := false;
+          v_attacker := 'opponent';
+          IF v_turn_no > 200 THEN v_outcome := 'lose'; EXIT; END IF;
+          CONTINUE;
+        ELSE
+          v_block_remaining := 1;
+          v_player_skip_pending := true;
+        END IF;
+      ELSIF v_attacker = 'opponent' AND v_opponent_turn_effect = 'skip' THEN
+        IF v_opponent_skip_pending THEN
+          v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+            'turn', v_turn_no, 'attacker', 'opponent', 'damage', 0, 'skipped', true,
+            'defender_hp_after', GREATEST(0, v_player_hp), 'ko', false
+          ));
+          v_opponent_skip_pending := false;
+          v_attacker := 'player';
+          IF v_turn_no > 200 THEN v_outcome := 'lose'; EXIT; END IF;
+          CONTINUE;
+        ELSE
+          v_block_remaining := 1;
+          v_opponent_skip_pending := true;
+        END IF;
+      ELSIF v_attacker = 'player' AND v_player_turn_effect = 'repeat_until_fail' THEN
+        v_block_remaining := GREATEST(1, COALESCE(v_player_repeat_max, 6));
+      ELSIF v_attacker = 'opponent' AND v_opponent_turn_effect = 'repeat_until_fail' THEN
+        v_block_remaining := GREATEST(1, COALESCE(v_opponent_repeat_max, 6));
+      ELSE
+        v_block_remaining := autobattle_ability_burst(CASE WHEN v_attacker = 'player' THEN p_ability_nom ELSE v_level.opponent_ability_nom END);
+        IF v_block_remaining = 0 THEN
+          v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+            'turn', v_turn_no, 'attacker', v_attacker, 'damage', 0, 'skipped', true,
+            'defender_hp_after', CASE WHEN v_attacker = 'player' THEN GREATEST(0, v_opponent_hp) ELSE GREATEST(0, v_player_hp) END,
+            'ko', false
+          ));
+          v_attacker := CASE WHEN v_attacker = 'player' THEN 'opponent' ELSE 'player' END;
+          v_block_remaining := NULL;
+          IF v_turn_no > 200 THEN v_outcome := 'lose'; EXIT; END IF;
+          CONTINUE;
+        END IF;
+      END IF;
     END IF;
-    -- Filet de sécurité : si les deux côtés infligent 0 dégât (mauvaise
-    -- configuration admin), on force une défaite plutôt qu'une boucle infinie.
+
+    IF v_attacker = 'player' THEN
+      v_hit_chance := CASE WHEN v_precision_enabled THEN COALESCE(v_ability.precision, 10) ELSE 10 END * 10;
+      v_missed := random() >= (v_hit_chance / 100.0);
+
+      IF v_missed THEN
+        v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+          'turn', v_turn_no, 'attacker', 'player', 'damage', 0, 'missed', true,
+          'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', false
+        ));
+        -- 'repeat_until_fail' : le premier raté met fin à la série en cours,
+        -- même s'il reste des activations dans v_block_remaining — on force
+        -- le passage de tour via la décrémentation générique ci-dessous.
+        IF v_player_turn_effect = 'repeat_until_fail' THEN
+          v_block_remaining := 1;
+        END IF;
+      ELSE
+        v_hit_dice := CASE WHEN v_ability.degats_de IS NOT NULL AND v_ability.degats_de > 0
+          THEN 1 + floor(random() * v_ability.degats_de)::integer ELSE 0 END;
+        v_hit_damage := GREATEST(0, v_player_damage + v_hit_dice);
+        v_opponent_hp := v_opponent_hp - v_hit_damage;
+
+        v_heal_amt := NULL;
+        IF v_player_heal_type = 'static' THEN
+          v_heal_amt := COALESCE(v_player_heal_amount, 0);
+        ELSIF v_player_heal_type = 'percent_damage' THEN
+          v_heal_amt := floor(v_hit_damage * COALESCE(v_player_heal_percent, 0) / 100.0)::integer;
+        ELSIF v_player_heal_type = 'use_stats' THEN
+          v_heal_dice := CASE WHEN v_ability.degats_de IS NOT NULL AND v_ability.degats_de > 0
+            THEN 1 + floor(random() * v_ability.degats_de)::integer ELSE 0 END;
+          v_heal_amt := COALESCE(v_ability.degats_base, 0) + v_heal_dice;
+        END IF;
+
+        v_turn_entry := jsonb_build_object(
+          'turn', v_turn_no, 'attacker', 'player', 'damage', v_hit_damage,
+          'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', v_opponent_hp <= 0
+        );
+        IF v_heal_amt IS NOT NULL AND v_heal_amt > 0 THEN
+          v_player_hp := LEAST(v_player_max_hp, v_player_hp + v_heal_amt);
+          v_turn_entry := v_turn_entry || jsonb_build_object('heal', v_heal_amt, 'attacker_hp_after', v_player_hp);
+        END IF;
+        v_turns := v_turns || jsonb_build_array(v_turn_entry);
+
+        IF v_opponent_hp <= 0 THEN v_outcome := 'win'; EXIT; END IF;
+      END IF;
+    ELSE
+      v_hit_chance := CASE WHEN v_precision_enabled THEN COALESCE(v_opponent_ability.precision, 10) ELSE 10 END * 10;
+      v_missed := random() >= (v_hit_chance / 100.0);
+
+      IF v_missed THEN
+        v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+          'turn', v_turn_no, 'attacker', 'opponent', 'damage', 0, 'missed', true,
+          'defender_hp_after', GREATEST(0, v_player_hp), 'ko', false
+        ));
+        IF v_opponent_turn_effect = 'repeat_until_fail' THEN
+          v_block_remaining := 1;
+        END IF;
+      ELSE
+        v_hit_dice := CASE WHEN v_opponent_ability.degats_de IS NOT NULL AND v_opponent_ability.degats_de > 0
+          THEN 1 + floor(random() * v_opponent_ability.degats_de)::integer ELSE 0 END;
+        v_hit_damage := GREATEST(0, v_opponent_damage + v_hit_dice);
+        v_player_hp := v_player_hp - v_hit_damage;
+
+        v_heal_amt := NULL;
+        IF v_opponent_heal_type = 'static' THEN
+          v_heal_amt := COALESCE(v_opponent_heal_amount, 0);
+        ELSIF v_opponent_heal_type = 'percent_damage' THEN
+          v_heal_amt := floor(v_hit_damage * COALESCE(v_opponent_heal_percent, 0) / 100.0)::integer;
+        ELSIF v_opponent_heal_type = 'use_stats' THEN
+          v_heal_dice := CASE WHEN v_opponent_ability.degats_de IS NOT NULL AND v_opponent_ability.degats_de > 0
+            THEN 1 + floor(random() * v_opponent_ability.degats_de)::integer ELSE 0 END;
+          v_heal_amt := COALESCE(v_opponent_ability.degats_base, 0) + v_heal_dice;
+        END IF;
+
+        v_turn_entry := jsonb_build_object(
+          'turn', v_turn_no, 'attacker', 'opponent', 'damage', v_hit_damage,
+          'defender_hp_after', GREATEST(0, v_player_hp), 'ko', v_player_hp <= 0
+        );
+        IF v_heal_amt IS NOT NULL AND v_heal_amt > 0 THEN
+          v_opponent_hp := LEAST(v_level.opponent_hp, v_opponent_hp + v_heal_amt);
+          v_turn_entry := v_turn_entry || jsonb_build_object('heal', v_heal_amt, 'attacker_hp_after', v_opponent_hp);
+        END IF;
+        v_turns := v_turns || jsonb_build_array(v_turn_entry);
+
+        IF v_player_hp <= 0 THEN v_outcome := 'lose'; EXIT; END IF;
+      END IF;
+    END IF;
+
+    v_block_remaining := v_block_remaining - 1;
+    IF v_block_remaining = 0 THEN
+      v_attacker := CASE WHEN v_attacker = 'player' THEN 'opponent' ELSE 'player' END;
+      v_block_remaining := NULL;
+    END IF;
+
+    -- Filet de sécurité : si les deux côtés infligent 0 dégât, ou s'ils sont
+    -- tous deux configurés en 'skip' (aucun ne peut jamais gagner), on force
+    -- une défaite plutôt qu'une boucle infinie.
     IF v_turn_no > 200 THEN v_outcome := 'lose'; EXIT; END IF;
   END LOOP;
 
@@ -2880,7 +3138,7 @@ BEGIN
   FOREACH t IN ARRAY ARRAY[
     'autobattle_config', 'autobattle_variants', 'autobattle_levels', 'autobattle_level_rewards',
     'autobattle_player_state', 'autobattle_player_variant_progress', 'autobattle_player_level_state',
-    'autobattle_battles', 'autobattle_banned_attacks'
+    'autobattle_battles', 'autobattle_banned_attacks', 'autobattle_ability_rules'
   ]
   LOOP
     IF NOT EXISTS (
@@ -2944,3 +3202,288 @@ ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS chat_last_notified_at time
 ALTER TABLE history_events DROP CONSTRAINT IF EXISTS history_events_category_check;
 ALTER TABLE history_events ADD CONSTRAINT history_events_category_check
   CHECK (category IN ('inventory', 'pokedex', 'team', 'combat', 'minigame', 'daycare', 'safari', 'autobattle', 'chat'));
+
+-- ============================================================
+-- Échanges entre joueurs (proposés/acceptés depuis une carte dans le Chat)
+-- ============================================================
+
+-- Une offre d'échange publique (n'importe quel joueur peut l'accepter, pas de
+-- destinataire fixé). offer = ce que le proposeur donne, request = ce qu'il
+-- demande en retour. Forme de offer/request selon kind (voir src/types.ts) :
+--   kind = 'item'    : {"items": [{"item_nom": text, "quantity": int}, ...]} (max 3 côté client)
+--   kind = 'pokemon' : offer = {"player_pokemon_id": int}
+--                      request = {"pokemon_nom": text}  -- espèce précise demandée
+--                             ou {"pokemon_nom": null}   -- "N'importe quel Pokémon non possédé"
+-- La création est un simple INSERT client (pas de RPC : aucune contrainte
+-- d'atomicité à ce stade, juste une proposition). L'acceptation/l'annulation
+-- passent par les fonctions ci-dessous, qui revalident tout côté serveur.
+CREATE TABLE IF NOT EXISTS trades (
+  id           bigserial PRIMARY KEY,
+  kind         text NOT NULL CHECK (kind IN ('item', 'pokemon')),
+  proposer_id  bigint NOT NULL,
+  status       text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'cancelled')),
+  offer        jsonb NOT NULL,
+  request      jsonb NOT NULL,
+  accepted_by  bigint,
+  resolved_at  timestamptz,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
+
+ALTER TABLE trades ENABLE ROW LEVEL SECURITY;
+
+-- Lecture + écriture publiques (app sans vraie sécurité, comme le reste du
+-- schéma) — trade_accept/trade_cancel ci-dessous tournent en tant qu'invoker
+-- (anon), d'où la policy UPDATE : ce sont les vérifications internes aux
+-- fonctions (propriété, quantités, statut 'pending') qui protègent l'intégrité
+-- des échanges, pas RLS.
+CREATE POLICY "Public read trades" ON trades FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert trades" ON trades FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update trades" ON trades FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'trades'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE trades;
+  END IF;
+END $$;
+
+-- Carte d'échange dans le Chat : un message peut référencer un échange (au lieu
+-- de porter du texte libre) — la carte se met à jour en suivant trades.status
+-- en temps réel côté client, le message lui-même ne change jamais après envoi.
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS message_type text NOT NULL DEFAULT 'text' CHECK (message_type IN ('text', 'trade'));
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS trade_id bigint;
+
+-- Accepte un échange en attente : revalide que le proposeur possède toujours
+-- l'offre et que l'acceptant possède bien ce qui est demandé, puis effectue le
+-- transfert des deux côtés dans la même transaction. p_chosen_player_pokemon_id
+-- n'est utilisé que pour kind = 'pokemon' : l'instance précise (avec son
+-- surnom/XP/capacités) que l'acceptant cède en retour.
+CREATE OR REPLACE FUNCTION trade_accept(p_trade_id bigint, p_player_id bigint, p_chosen_player_pokemon_id bigint DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_trade trades%ROWTYPE;
+  v_item jsonb;
+  v_have integer;
+  v_offer_owner bigint;
+  v_chosen_owner bigint;
+  v_chosen_nom text;
+  v_requested_nom text;
+  v_already_owned integer;
+BEGIN
+  SELECT * INTO v_trade FROM trades WHERE id = p_trade_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN jsonb_build_object('status', 'not_found'); END IF;
+  IF v_trade.status <> 'pending' THEN RETURN jsonb_build_object('status', 'already_resolved'); END IF;
+  IF v_trade.proposer_id = p_player_id THEN RETURN jsonb_build_object('status', 'cannot_accept_own'); END IF;
+
+  IF v_trade.kind = 'item' THEN
+    FOR v_item IN SELECT * FROM jsonb_array_elements(v_trade.offer->'items') LOOP
+      SELECT quantity INTO v_have FROM player_items
+        WHERE player_id = v_trade.proposer_id AND item_nom = v_item->>'item_nom' FOR UPDATE;
+      IF COALESCE(v_have, 0) < (v_item->>'quantity')::integer THEN
+        RETURN jsonb_build_object('status', 'offer_no_longer_available');
+      END IF;
+    END LOOP;
+    FOR v_item IN SELECT * FROM jsonb_array_elements(v_trade.request->'items') LOOP
+      SELECT quantity INTO v_have FROM player_items
+        WHERE player_id = p_player_id AND item_nom = v_item->>'item_nom' FOR UPDATE;
+      IF COALESCE(v_have, 0) < (v_item->>'quantity')::integer THEN
+        RETURN jsonb_build_object('status', 'insufficient_items');
+      END IF;
+    END LOOP;
+
+    FOR v_item IN SELECT * FROM jsonb_array_elements(v_trade.offer->'items') LOOP
+      UPDATE player_items SET quantity = quantity - (v_item->>'quantity')::integer
+        WHERE player_id = v_trade.proposer_id AND item_nom = v_item->>'item_nom';
+      INSERT INTO player_items (player_id, item_nom, quantity)
+        VALUES (p_player_id, v_item->>'item_nom', (v_item->>'quantity')::integer)
+        ON CONFLICT (player_id, item_nom) DO UPDATE SET quantity = player_items.quantity + EXCLUDED.quantity;
+    END LOOP;
+    FOR v_item IN SELECT * FROM jsonb_array_elements(v_trade.request->'items') LOOP
+      UPDATE player_items SET quantity = quantity - (v_item->>'quantity')::integer
+        WHERE player_id = p_player_id AND item_nom = v_item->>'item_nom';
+      INSERT INTO player_items (player_id, item_nom, quantity)
+        VALUES (v_trade.proposer_id, v_item->>'item_nom', (v_item->>'quantity')::integer)
+        ON CONFLICT (player_id, item_nom) DO UPDATE SET quantity = player_items.quantity + EXCLUDED.quantity;
+    END LOOP;
+
+  ELSE -- kind = 'pokemon'
+    SELECT player_id INTO v_offer_owner
+      FROM player_pokemon WHERE id = (v_trade.offer->>'player_pokemon_id')::bigint FOR UPDATE;
+    IF v_offer_owner IS NULL OR v_offer_owner <> v_trade.proposer_id THEN
+      RETURN jsonb_build_object('status', 'offer_no_longer_available');
+    END IF;
+
+    IF p_chosen_player_pokemon_id IS NULL THEN
+      RETURN jsonb_build_object('status', 'no_pokemon_chosen');
+    END IF;
+    SELECT player_id, pokemon_nom INTO v_chosen_owner, v_chosen_nom
+      FROM player_pokemon WHERE id = p_chosen_player_pokemon_id FOR UPDATE;
+    IF v_chosen_owner IS NULL OR v_chosen_owner <> p_player_id THEN
+      RETURN jsonb_build_object('status', 'not_owner');
+    END IF;
+
+    v_requested_nom := v_trade.request->>'pokemon_nom';
+    IF v_requested_nom IS NOT NULL THEN
+      IF v_chosen_nom <> v_requested_nom THEN
+        RETURN jsonb_build_object('status', 'wrong_species');
+      END IF;
+    ELSE
+      SELECT count(*) INTO v_already_owned
+        FROM player_pokemon WHERE player_id = v_trade.proposer_id AND pokemon_nom = v_chosen_nom;
+      IF v_already_owned > 0 THEN
+        RETURN jsonb_build_object('status', 'already_owned');
+      END IF;
+    END IF;
+
+    UPDATE player_pokemon SET player_id = p_player_id, in_team = false
+      WHERE id = (v_trade.offer->>'player_pokemon_id')::bigint;
+    UPDATE player_pokemon SET player_id = v_trade.proposer_id, in_team = false
+      WHERE id = p_chosen_player_pokemon_id;
+  END IF;
+
+  UPDATE trades SET status = 'completed', accepted_by = p_player_id, resolved_at = now() WHERE id = p_trade_id;
+  RETURN jsonb_build_object('status', 'ok');
+END;
+$$;
+
+-- Annule un échange encore en attente (uniquement par son proposeur).
+CREATE OR REPLACE FUNCTION trade_cancel(p_trade_id bigint, p_player_id bigint)
+RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_trade trades%ROWTYPE;
+BEGIN
+  SELECT * INTO v_trade FROM trades WHERE id = p_trade_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN jsonb_build_object('status', 'not_found'); END IF;
+  IF v_trade.status <> 'pending' THEN RETURN jsonb_build_object('status', 'already_resolved'); END IF;
+  IF v_trade.proposer_id <> p_player_id THEN RETURN jsonb_build_object('status', 'not_proposer'); END IF;
+
+  UPDATE trades SET status = 'cancelled', resolved_at = now() WHERE id = p_trade_id;
+  RETURN jsonb_build_object('status', 'ok');
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION trade_accept(bigint, bigint, bigint) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION trade_cancel(bigint, bigint) TO anon, authenticated;
+
+-- ============================================================
+-- Message de conclusion d'échange (carte "Voir l'échange" + notification)
+-- ============================================================
+
+-- Espèce/surnom effectivement cédés par l'acceptant côté Pokémon — dénormalisé
+-- au moment de l'acceptation (comme trades.offer.pokemon_nom/nickname au moment
+-- de la création) pour permettre l'affichage du message de conclusion et le
+-- rejeu de l'animation d'échange sans avoir à retrouver l'instance d'origine
+-- (qui a pu changer de main depuis). NULL pour les échanges d'objets.
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS resolved_pokemon_nom text;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS resolved_pokemon_nickname text;
+
+-- chat_messages.message_type doit accepter la nouvelle valeur 'trade_completed'
+-- (message de conclusion envoyé par l'acceptant, distinct de la carte de
+-- proposition 'trade' d'origine — voir src/components/chat/TradeCompletedCard.tsx)
+ALTER TABLE chat_messages DROP CONSTRAINT IF EXISTS chat_messages_message_type_check;
+ALTER TABLE chat_messages ADD CONSTRAINT chat_messages_message_type_check
+  CHECK (message_type IN ('text', 'trade', 'trade_completed'));
+
+-- Redéfinition de trade_accept : capture en plus l'espèce/surnom cédés par
+-- l'acceptant (v_chosen_nickname) et les enregistre dans resolved_pokemon_nom/
+-- resolved_pokemon_nickname à la conclusion — reste de la fonction inchangé.
+CREATE OR REPLACE FUNCTION trade_accept(p_trade_id bigint, p_player_id bigint, p_chosen_player_pokemon_id bigint DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql AS $$
+DECLARE
+  v_trade trades%ROWTYPE;
+  v_item jsonb;
+  v_have integer;
+  v_offer_owner bigint;
+  v_chosen_owner bigint;
+  v_chosen_nom text;
+  v_chosen_nickname text;
+  v_requested_nom text;
+  v_already_owned integer;
+BEGIN
+  SELECT * INTO v_trade FROM trades WHERE id = p_trade_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN jsonb_build_object('status', 'not_found'); END IF;
+  IF v_trade.status <> 'pending' THEN RETURN jsonb_build_object('status', 'already_resolved'); END IF;
+  IF v_trade.proposer_id = p_player_id THEN RETURN jsonb_build_object('status', 'cannot_accept_own'); END IF;
+
+  IF v_trade.kind = 'item' THEN
+    FOR v_item IN SELECT * FROM jsonb_array_elements(v_trade.offer->'items') LOOP
+      SELECT quantity INTO v_have FROM player_items
+        WHERE player_id = v_trade.proposer_id AND item_nom = v_item->>'item_nom' FOR UPDATE;
+      IF COALESCE(v_have, 0) < (v_item->>'quantity')::integer THEN
+        RETURN jsonb_build_object('status', 'offer_no_longer_available');
+      END IF;
+    END LOOP;
+    FOR v_item IN SELECT * FROM jsonb_array_elements(v_trade.request->'items') LOOP
+      SELECT quantity INTO v_have FROM player_items
+        WHERE player_id = p_player_id AND item_nom = v_item->>'item_nom' FOR UPDATE;
+      IF COALESCE(v_have, 0) < (v_item->>'quantity')::integer THEN
+        RETURN jsonb_build_object('status', 'insufficient_items');
+      END IF;
+    END LOOP;
+
+    FOR v_item IN SELECT * FROM jsonb_array_elements(v_trade.offer->'items') LOOP
+      UPDATE player_items SET quantity = quantity - (v_item->>'quantity')::integer
+        WHERE player_id = v_trade.proposer_id AND item_nom = v_item->>'item_nom';
+      INSERT INTO player_items (player_id, item_nom, quantity)
+        VALUES (p_player_id, v_item->>'item_nom', (v_item->>'quantity')::integer)
+        ON CONFLICT (player_id, item_nom) DO UPDATE SET quantity = player_items.quantity + EXCLUDED.quantity;
+    END LOOP;
+    FOR v_item IN SELECT * FROM jsonb_array_elements(v_trade.request->'items') LOOP
+      UPDATE player_items SET quantity = quantity - (v_item->>'quantity')::integer
+        WHERE player_id = p_player_id AND item_nom = v_item->>'item_nom';
+      INSERT INTO player_items (player_id, item_nom, quantity)
+        VALUES (v_trade.proposer_id, v_item->>'item_nom', (v_item->>'quantity')::integer)
+        ON CONFLICT (player_id, item_nom) DO UPDATE SET quantity = player_items.quantity + EXCLUDED.quantity;
+    END LOOP;
+
+  ELSE -- kind = 'pokemon'
+    SELECT player_id INTO v_offer_owner
+      FROM player_pokemon WHERE id = (v_trade.offer->>'player_pokemon_id')::bigint FOR UPDATE;
+    IF v_offer_owner IS NULL OR v_offer_owner <> v_trade.proposer_id THEN
+      RETURN jsonb_build_object('status', 'offer_no_longer_available');
+    END IF;
+
+    IF p_chosen_player_pokemon_id IS NULL THEN
+      RETURN jsonb_build_object('status', 'no_pokemon_chosen');
+    END IF;
+    SELECT player_id, pokemon_nom, nickname INTO v_chosen_owner, v_chosen_nom, v_chosen_nickname
+      FROM player_pokemon WHERE id = p_chosen_player_pokemon_id FOR UPDATE;
+    IF v_chosen_owner IS NULL OR v_chosen_owner <> p_player_id THEN
+      RETURN jsonb_build_object('status', 'not_owner');
+    END IF;
+
+    v_requested_nom := v_trade.request->>'pokemon_nom';
+    IF v_requested_nom IS NOT NULL THEN
+      IF v_chosen_nom <> v_requested_nom THEN
+        RETURN jsonb_build_object('status', 'wrong_species');
+      END IF;
+    ELSE
+      SELECT count(*) INTO v_already_owned
+        FROM player_pokemon WHERE player_id = v_trade.proposer_id AND pokemon_nom = v_chosen_nom;
+      IF v_already_owned > 0 THEN
+        RETURN jsonb_build_object('status', 'already_owned');
+      END IF;
+    END IF;
+
+    UPDATE player_pokemon SET player_id = p_player_id, in_team = false
+      WHERE id = (v_trade.offer->>'player_pokemon_id')::bigint;
+    UPDATE player_pokemon SET player_id = v_trade.proposer_id, in_team = false
+      WHERE id = p_chosen_player_pokemon_id;
+  END IF;
+
+  UPDATE trades SET
+    status = 'completed',
+    accepted_by = p_player_id,
+    resolved_at = now(),
+    resolved_pokemon_nom = v_chosen_nom,
+    resolved_pokemon_nickname = v_chosen_nickname
+  WHERE id = p_trade_id;
+  RETURN jsonb_build_object('status', 'ok');
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION trade_accept(bigint, bigint, bigint) TO anon, authenticated;

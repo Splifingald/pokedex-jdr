@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import type { ChatMessage } from '../types'
+import type { ChatMessage, ChatMessageType } from '../types'
 import { logHistoryEvent } from '../lib/historyLog'
 
 // Salon global unique — pas de filtre par joueur, tout le monde lit le même flux.
@@ -68,6 +68,27 @@ export function useChatMessages() {
     return data as ChatMessage
   }, [])
 
+  // content = résumé texte de repli (historique/notifications) ; le rendu riche
+  // (carte de proposition ou message de conclusion) se fait via message_type + trade_id.
+  const sendTradeMessage = useCallback(async (
+    playerId: number,
+    content: string,
+    tradeId: number,
+    messageType: Extract<ChatMessageType, 'trade' | 'trade_completed'> = 'trade'
+  ): Promise<ChatMessage | null> => {
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .insert({ player_id: playerId, content, is_npc: false, message_type: messageType, trade_id: tradeId })
+      .select()
+      .single()
+    if (error) {
+      console.error("Erreur lors de l'envoi du message d'échange :", error)
+      return null
+    }
+    void logHistoryEvent('chat', 'chat_message', playerId, { content, is_npc: false })
+    return data as ChatMessage
+  }, [])
+
   const deleteMessage = useCallback(async (id: number) => {
     setMessages((prev) => prev.filter((m) => m.id !== id))
     const { error } = await supabase.from('chat_messages').delete().eq('id', id)
@@ -86,5 +107,5 @@ export function useChatMessages() {
     }
   }, [fetchAll])
 
-  return { messages, loading, error, refetch: fetchAll, sendMessage, deleteMessage, clearAll }
+  return { messages, loading, error, refetch: fetchAll, sendMessage, sendTradeMessage, deleteMessage, clearAll }
 }

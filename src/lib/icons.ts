@@ -82,3 +82,5 @@ export const SAFARI_ICON = `${BASE}/icon_safari_game.png`
 
 export const AUTOBATTLE_ICON = `${BASE}/icon_battle_game.png`
 export const AUTOBATTLE_TICKET_ICON = `${BASE}/icon_battle_ticket.png`
+
+export const CHAT_ICON = `${BASE}/icon_chat.png`

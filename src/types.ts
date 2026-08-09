@@ -176,13 +176,72 @@ export const PLAYER_COLORS: string[] = [
 ]
 
 // ── Chat (canal de discussion global) ────────────────────────
+export type ChatMessageType = 'text' | 'trade' | 'trade_completed'
+
 export interface ChatMessage {
   id: number
   player_id: number
   content: string
   is_npc: boolean
+  message_type: ChatMessageType
+  trade_id: number | null
   created_at: string
 }
+
+// ── Échanges entre joueurs (proposés/acceptés depuis le Chat) ─
+export type TradeKind = 'item' | 'pokemon'
+export type TradeStatus = 'pending' | 'completed' | 'cancelled'
+
+export interface TradeItemEntry {
+  item_nom: string
+  quantity: number
+}
+
+export interface TradeItemsPayload {
+  items: TradeItemEntry[]
+}
+
+export interface TradePokemonOfferPayload {
+  player_pokemon_id: number
+  // Dénormalisé au moment de la création (l'auteur a alors son propre roster
+  // sous la main) pour permettre l'affichage de la carte d'échange (sprite,
+  // surnom) sans avoir à charger le roster de l'autre joueur. Purement
+  // cosmétique : trade_accept revalide tout depuis player_pokemon via l'id.
+  pokemon_nom: string
+  nickname: string | null
+}
+
+export interface TradePokemonRequestPayload {
+  // null = "N'importe quel Pokémon non possédé" par le proposeur
+  pokemon_nom: string | null
+}
+
+export interface Trade {
+  id: number
+  kind: TradeKind
+  proposer_id: number
+  status: TradeStatus
+  offer: TradeItemsPayload | TradePokemonOfferPayload
+  request: TradeItemsPayload | TradePokemonRequestPayload
+  accepted_by: number | null
+  resolved_at: string | null
+  // Espèce/surnom effectivement cédés par l'acceptant côté Pokémon (voir
+  // trade_accept en base) — null pour les échanges d'objets ou tant que
+  // 'pending'. Sert à l'affichage du message de conclusion et au rejeu de
+  // l'animation d'échange sans dépendre d'une instance qui a pu re-changer de main.
+  resolved_pokemon_nom: string | null
+  resolved_pokemon_nickname: string | null
+  created_at: string
+}
+
+export type TradeAcceptStatus =
+  | 'ok' | 'not_found' | 'already_resolved' | 'cannot_accept_own'
+  | 'offer_no_longer_available' | 'insufficient_items'
+  | 'no_pokemon_chosen' | 'not_owner' | 'wrong_species' | 'already_owned' | 'error'
+
+export type TradeCancelStatus = 'ok' | 'not_found' | 'already_resolved' | 'not_proposer' | 'error'
+
+export const TRADE_MAX_ITEMS = 3
 
 export interface PlayerPokemon {
   id: number
@@ -762,6 +821,9 @@ export interface AutoBattleConfig {
   ticket_full_notify_enabled: boolean
   nom: string
   icon_url: string
+  // Système de précision (attacks.precision, 1-10, NULL = 10) désactivable
+  // globalement — désactivé, toute capacité touche systématiquement.
+  precision_enabled: boolean
 }
 
 export interface AutoBattlePlayerState {
@@ -834,14 +896,38 @@ export interface AutoBattleBannedAttack {
   created_at: string
 }
 
+// Effet spécial d'une capacité (voir autobattle_ability_rules) : effet sur le
+// rythme des tours et/ou effet de soin, indépendants et tous deux optionnels.
+export type AutoBattleTurnEffect = 'skip' | 'play_twice' | 'play_three' | 'play_random' | 'repeat_until_fail'
+export type AutoBattleHealType = 'static' | 'percent_damage' | 'use_stats'
+
+export interface AutoBattleAbilityRule {
+  attack_nom: string
+  turn_effect: AutoBattleTurnEffect | null
+  turn_random_min: number | null
+  turn_random_max: number | null
+  repeat_max_iterations: number | null
+  heal_type: AutoBattleHealType | null
+  heal_amount: number | null
+  heal_percent: number | null
+  created_at: string
+}
+
 // Un tour du journal de combat renvoyé par le RPC autobattle_resolve_battle —
-// le client se contente de rejouer cette séquence (jamais recalculée côté client).
+// le client se contente de rejouer cette séquence (jamais recalculée côté
+// client). skipped = le camp a passé son tour sans attaquer (effet spécial
+// 'skip') ; missed = l'attaque a raté (système de précision) ; heal/
+// attacker_hp_after ne sont présents que si l'attaquant s'est soigné ce tour-là.
 export interface AutoBattleTurn {
   turn: number
   attacker: 'player' | 'opponent'
   damage: number
   defender_hp_after: number
   ko: boolean
+  skipped?: boolean
+  missed?: boolean
+  heal?: number
+  attacker_hp_after?: number
 }
 
 export interface AutoBattleReward {

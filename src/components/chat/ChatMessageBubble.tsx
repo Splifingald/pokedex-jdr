@@ -1,6 +1,9 @@
 import { Fragment } from 'react'
-import type { Player, ChatMessage } from '../../types'
+import type { Player, ChatMessage, Item, Pokemon, Trade } from '../../types'
 import type { ReferenceEntry, ReferenceIndex } from '../../hooks/useReferenceIndex'
+import { findTradeForMessage } from '../../lib/trade'
+import { TradeCard } from './TradeCard'
+import { TradeCompletedCard } from './TradeCompletedCard'
 
 interface Props {
   message: ChatMessage
@@ -8,6 +11,12 @@ interface Props {
   mine: boolean
   referenceIndex: ReferenceIndex
   onReferenceClick: (entry: ReferenceEntry) => void
+  trades: Trade[]
+  players: Player[]
+  itemsByName: Map<string, Item>
+  pokemonByName: Map<string, Pokemon>
+  onOpenTrade: (trade: Trade) => void
+  onReplayTrade: (trade: Trade) => void
 }
 
 // Découpe le texte du message sur les correspondances de l'index de référence
@@ -47,9 +56,10 @@ function renderContent(content: string, index: ReferenceIndex, onReferenceClick:
   return parts
 }
 
-export function ChatMessageBubble({ message, sender, mine, referenceIndex, onReferenceClick }: Props) {
+export function ChatMessageBubble({ message, sender, mine, referenceIndex, onReferenceClick, trades, players, itemsByName, pokemonByName, onOpenTrade, onReplayTrade }: Props) {
   const color = sender?.color ?? '#a3841a'
   const name = sender?.name ?? (message.is_npc ? 'PNJ' : 'Joueur inconnu')
+  const trade = message.message_type !== 'text' ? findTradeForMessage(message, trades) : undefined
 
   return (
     <div className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
@@ -63,12 +73,18 @@ export function ChatMessageBubble({ message, sender, mine, referenceIndex, onRef
         </div>
         <span className="text-xs font-bold text-ink-muted">{name}</span>
       </div>
-      <div
-        className="max-w-[80%] rounded-lg px-3 py-2 text-sm text-ink bg-cream break-words whitespace-pre-wrap border-2"
-        style={{ borderColor: color }}
-      >
-        {renderContent(message.content, referenceIndex, onReferenceClick)}
-      </div>
+      {trade && message.message_type === 'trade_completed' ? (
+        <TradeCompletedCard trade={trade} players={players} pokemonByName={pokemonByName} onReplay={() => onReplayTrade(trade)} />
+      ) : trade ? (
+        <TradeCard trade={trade} itemsByName={itemsByName} pokemonByName={pokemonByName} onClick={() => onOpenTrade(trade)} />
+      ) : (
+        <div
+          className="max-w-[80%] rounded-lg px-3 py-2 text-sm text-ink bg-cream break-words whitespace-pre-wrap border-2"
+          style={{ borderColor: color }}
+        >
+          {renderContent(message.content, referenceIndex, onReferenceClick)}
+        </div>
+      )}
     </div>
   )
 }

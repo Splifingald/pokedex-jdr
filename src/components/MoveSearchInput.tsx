@@ -4,6 +4,7 @@ import { TypeBadge } from './TypeBadge'
 import { PixelIcon } from './icons/PixelIcon'
 import { STAT_ICON, DICE_GENERIC_ICON } from '../lib/icons'
 import { normalizeSearch } from '../lib/normalizeSearch'
+import { getPrecisionColor } from '../lib/precisionColor'
 
 interface Props {
   options: Attack[]
@@ -69,6 +70,10 @@ export function MoveSearchInput({ options, disabled, onSelect, showDamage = fals
                         <span className="text-ink text-xs font-bold">{a.degats_de}</span>
                       </span>
                     )}
+                    <span className="flex items-center gap-1">
+                      <span className="text-xs">🎯</span>
+                      <span className="text-xs font-bold" style={{ color: getPrecisionColor(a.precision ?? 10) }}>{a.precision ?? 10}</span>
+                    </span>
                   </span>
                 )}
               </button>

@@ -13,6 +13,7 @@ import { ItemSearchInput } from './ItemSearchInput'
 import { TypeBadge } from './TypeBadge'
 import { PixelIcon } from './icons/PixelIcon'
 import { STAT_ICON, DICE_GENERIC_ICON } from '../lib/icons'
+import { getPrecisionColor } from '../lib/precisionColor'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { CloseIcon } from './icons/CloseIcon'
@@ -267,6 +268,10 @@ function LevelEditor({
                     <span className="text-ink text-sm font-bold">{opponentAbility.degats_de}</span>
                   </span>
                 )}
+                <span className="flex items-center gap-1 shrink-0">
+                  <span className="text-sm">🎯</span>
+                  <span className="text-sm font-bold" style={{ color: getPrecisionColor(opponentAbility?.precision ?? 10) }}>{opponentAbility?.precision ?? 10}</span>
+                </span>
                 <button onClick={() => onUpdate(level.id, { opponent_ability_nom: '' })} className={`text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>Changer</button>
               </div>
             ) : (

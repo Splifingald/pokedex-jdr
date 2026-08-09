@@ -12,6 +12,7 @@ const DEFAULTS: AutoBattleConfig = {
   ticket_full_notify_enabled: false,
   nom: 'Combat Auto',
   icon_url: '',
+  precision_enabled: true,
 }
 
 export function useAutoBattleConfig() {

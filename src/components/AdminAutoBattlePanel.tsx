@@ -1,5 +1,6 @@
 import { AdminAutoBattleEconomyPanel } from './AdminAutoBattleEconomyPanel'
 import { AdminAutoBattleBannedAttacksPanel } from './AdminAutoBattleBannedAttacksPanel'
+import { AdminAutoBattleAbilityRulesPanel } from './AdminAutoBattleAbilityRulesPanel'
 import { AdminAutoBattleVariantsPanel } from './AdminAutoBattleVariantsPanel'
 
 export function AdminAutoBattlePanel() {
@@ -9,6 +10,7 @@ export function AdminAutoBattlePanel() {
         <AdminAutoBattleEconomyPanel />
         <AdminAutoBattleBannedAttacksPanel />
       </div>
+      <AdminAutoBattleAbilityRulesPanel />
       <AdminAutoBattleVariantsPanel />
     </div>
   )

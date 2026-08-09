@@ -1,10 +1,18 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { usePlayers } from '../hooks/usePlayers'
 import { useChatMessages } from '../hooks/useChatMessages'
 import { useAdminParameters } from '../hooks/useAdminParameters'
-import type { Player } from '../types'
+import { usePokemon } from '../hooks/usePokemon'
+import { useAttacks } from '../hooks/useAttacks'
+import { useItems } from '../hooks/useItems'
+import { usePlayerItems } from '../hooks/usePlayerItems'
+import { usePlayerPokemon } from '../hooks/usePlayerPokemon'
+import { useTrades } from '../hooks/useTrades'
+import type { Player, Trade } from '../types'
+import { tradeFallbackText, tradeStatusLabel } from '../lib/trade'
 import { PlayerSearchInput } from './PlayerSearchInput'
 import { ConfirmPopup } from './ConfirmPopup'
+import { TradePopup } from './chat/TradePopup'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { TrashIcon } from './icons/TrashIcon'
@@ -24,16 +32,27 @@ function Avatar({ player }: { player?: Player }) {
 export function AdminChatPanel() {
   const { players } = usePlayers()
   const chat = useChatMessages()
+  const trades = useTrades()
   const { parameters, updateParameters } = useAdminParameters()
+  const { pokemon } = usePokemon()
+  const { byName: attacksByName } = useAttacks()
+  const { byName: itemsByName } = useItems()
   const [confirmClear, setConfirmClear] = useState(false)
   const [npc, setNpc] = useState<Player | null>(null)
   const [text, setText] = useState('')
   const [notify, setNotify] = useState(true)
   const [sending, setSending] = useState(false)
+  const [actingPlayer, setActingPlayer] = useState<Player | null>(null)
+  const [tradeSimPopup, setTradeSimPopup] = useState<{ trade?: Trade } | null>(null)
 
   const playersById = new Map(players.map((p) => [p.id, p]))
   const npcOptions = players.filter((p) => p.is_npc)
   const overLimit = text.length > parameters.chat_max_message_length
+  const pokemonByName = useMemo(() => new Map(pokemon.map((p) => [p.nom, p])), [pokemon])
+  const pendingTrades = useMemo(() => trades.trades.filter((t) => t.status === 'pending').sort((a, b) => b.created_at.localeCompare(a.created_at)), [trades.trades])
+
+  const actingPlayerItems = usePlayerItems(actingPlayer?.id ?? null)
+  const actingRoster = usePlayerPokemon(actingPlayer?.id ?? null)
 
   const handleSend = async () => {
     const trimmed = text.trim()
@@ -123,6 +142,55 @@ export function AdminChatPanel() {
       </div>
 
       <div className={`p-4 rounded-lg ${PIXEL_BORDER_SM} bg-cream-secondary`}>
+        <h3 className="text-ink font-bold mb-3">Simuler un échange</h3>
+        <div className="space-y-2">
+          {actingPlayer ? (
+            <div className="flex items-center gap-2 bg-white border-2 border-ink rounded-lg px-3 py-2">
+              <Avatar player={actingPlayer} />
+              <span className="text-ink text-sm font-bold flex-1">{actingPlayer.name}</span>
+              <button onClick={() => setActingPlayer(null)} className={`px-2 py-1 rounded text-xs ${BUTTON_STYLE.gray}`}>Changer</button>
+            </div>
+          ) : (
+            <PlayerSearchInput options={players} onSelect={setActingPlayer} placeholder="Agir en tant que…" />
+          )}
+
+          {actingPlayer && (
+            <>
+              <button
+                onClick={() => setTradeSimPopup({})}
+                className={`px-4 py-2 rounded-lg text-sm font-bold ${BUTTON_STYLE.blue}`}
+              >
+                🔄 Nouvel échange
+              </button>
+
+              <div>
+                <p className="text-ink-muted text-xs font-bold mt-2 mb-1">Échanges en attente ({pendingTrades.length})</p>
+                {pendingTrades.length === 0 ? (
+                  <p className="text-ink-muted-2 text-xs italic">Aucun échange en attente</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {pendingTrades.map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => setTradeSimPopup({ trade: t })}
+                        className="w-full flex items-center gap-2 bg-white border-2 border-ink rounded-lg px-3 py-2 text-left hover:bg-cream-secondary transition-colors"
+                      >
+                        <Avatar player={playersById.get(t.proposer_id)} />
+                        <span className="flex-1 min-w-0 text-ink text-xs truncate">
+                          {tradeFallbackText(t.kind, t.offer, t.request, itemsByName)}
+                        </span>
+                        <span className="text-[10px] font-bold text-[#a3841a] shrink-0">{tradeStatusLabel(t.status)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className={`p-4 rounded-lg ${PIXEL_BORDER_SM} bg-cream-secondary`}>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-ink font-bold">Messages ({chat.messages.length})</h3>
           <button onClick={() => setConfirmClear(true)} className={`px-3 py-1.5 rounded text-xs font-bold ${BUTTON_STYLE.red}`}>
@@ -158,6 +226,22 @@ export function AdminChatPanel() {
           danger
           onConfirm={() => { setConfirmClear(false); chat.clearAll() }}
           onCancel={() => setConfirmClear(false)}
+        />
+      )}
+
+      {tradeSimPopup && actingPlayer && (
+        <TradePopup
+          player={actingPlayer}
+          players={players}
+          inventory={actingPlayerItems.inventory}
+          roster={actingRoster.roster}
+          itemsByName={itemsByName}
+          pokemonByName={pokemonByName}
+          attacksByName={attacksByName}
+          trades={trades}
+          chat={chat}
+          existingTrade={tradeSimPopup.trade}
+          onClose={() => setTradeSimPopup(null)}
         />
       )}
     </div>

@@ -19,6 +19,7 @@ import { AutoBattlePopup } from './AutoBattlePopup'
 import { ChatPopup } from './chat/ChatPopup'
 import { useChatMessages } from '../hooks/useChatMessages'
 import { useChatUnread } from '../hooks/useChatUnread'
+import { CHAT_ICON } from '../lib/icons'
 import { useMinigamesConfig } from '../hooks/useMinigamesConfig'
 import { useMinigamesPlayerState } from '../hooks/useMinigamesPlayerState'
 import { useCasinoConfig } from '../hooks/useCasinoConfig'
@@ -302,7 +303,7 @@ export function HomeTab({ player, players, isAdmin, pokemonByName, discoveredPok
           title="Chat"
           className="absolute left-2 sm:left-3 bottom-3 z-[35] w-10 h-10 sm:w-14 sm:h-14 rounded-full border-2 sm:border-[3px] border-ink bg-gradient-to-br from-[#3ea0e0] to-[#0f4a7a] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
         >
-          <span className="text-xl sm:text-2xl">💬</span>
+          <img src={CHAT_ICON} alt="Chat" className="pixelated w-6 h-6 sm:w-9 sm:h-9 object-contain" />
           {unreadCount > 0 && (
             <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-hp-red border-2 border-ink text-white text-[10px] font-bold flex items-center justify-center">
               {unreadCount > 9 ? '9+' : unreadCount}
@@ -500,6 +501,8 @@ export function HomeTab({ player, players, isAdmin, pokemonByName, discoveredPok
           player={player}
           players={players}
           chat={chat}
+          inventory={playerItems.inventory}
+          roster={roster}
           pokemonByName={pokemonByName}
           discoveredPokemon={discoveredPokemon}
           attacksByName={attacksByName}

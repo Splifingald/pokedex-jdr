@@ -110,6 +110,18 @@ export function AdminAutoBattleEconomyPanel() {
           />
           <span>Notifier les joueurs quand leurs tickets sont pleins</span>
         </label>
+
+        <div className="border-t-2 border-[#cfc7a8] pt-3">
+          <label className="flex items-center gap-2 text-sm text-ink-muted">
+            <input
+              type="checkbox"
+              checked={config.precision_enabled}
+              onChange={(e) => updateConfig({ precision_enabled: e.target.checked })}
+              className="w-4 h-4"
+            />
+            <span>Activer le système de précision (désactivé, toute capacité touche à coup sûr)</span>
+          </label>
+        </div>
       </div>
     </div>
   )
