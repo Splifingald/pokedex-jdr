@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react'
 import type { Player, PlayerPokemon, Pokemon, PokemonEvolution, Item, PlayerItem, MinigamesConfig, MinigamesPlayerState } from '../../types'
 import { ownedPokemonName } from '../../types'
 import { computeStars, xpForStars, type StarCount } from '../../lib/magikarpGame'
@@ -69,6 +69,9 @@ export function MagikarpGame({
   const [evolutionEligible, setEvolutionEligible] = useState(false)
   const [showEvolvePrompt, setShowEvolvePrompt] = useState(false)
   const hasCommittedRef = useRef(false)
+  // Pointeurs actuellement pressés — évite de compter un doigt fantôme (paume, second doigt)
+  // ou un pointerdown répété pour le même doigt sans pointerup intermédiaire (glitch tactile mobile).
+  const activePointersRef = useRef<Set<number>>(new Set())
 
   // Dérivés de `taps` (figé dès la fin de la partie) — pas besoin d'état séparé.
   const stars = computeStars(taps, config)
@@ -145,11 +148,27 @@ export function MagikarpGame({
 
   const handleTap = () => {
     if (phase !== 'playing') return
-    const nextTaps = taps + 1
-    const crossedThreshold = computeStars(nextTaps, config) > stars
-    setTaps(nextTaps)
-    setJumpKey((k) => k + 1)
-    setLastTapFlipped(crossedThreshold)
+    setTaps((prev) => {
+      const nextTaps = prev + 1
+      const crossedThreshold = computeStars(nextTaps, config) > computeStars(prev, config)
+      setJumpKey((k) => k + 1)
+      setLastTapFlipped(crossedThreshold)
+      return nextTaps
+    })
+  }
+
+  const handlePointerDown = (e: ReactPointerEvent) => {
+    if (phase !== 'playing') return
+    // Ignore les doigts secondaires (paume, second doigt) et les pointerdown
+    // répétés pour un même doigt sans pointerup intermédiaire.
+    if (!e.isPrimary || activePointersRef.current.has(e.pointerId)) return
+    activePointersRef.current.add(e.pointerId)
+    e.preventDefault()
+    handleTap()
+  }
+
+  const releasePointer = (e: ReactPointerEvent) => {
+    activePointersRef.current.delete(e.pointerId)
   }
 
   const handleContinue = () => {
@@ -175,7 +194,10 @@ export function MagikarpGame({
       {(phase === 'countdown' || phase === 'playing') && (
         <div
           className={`relative w-full h-64 rounded overflow-hidden mb-4 ${PIXEL_BORDER_SM} ${phase === 'playing' ? 'cursor-pointer' : ''}`}
-          onPointerDown={phase === 'playing' ? (e) => { e.preventDefault(); handleTap() } : undefined}
+          onPointerDown={phase === 'playing' ? handlePointerDown : undefined}
+          onPointerUp={phase === 'playing' ? releasePointer : undefined}
+          onPointerCancel={phase === 'playing' ? releasePointer : undefined}
+          onPointerLeave={phase === 'playing' ? releasePointer : undefined}
           style={{ touchAction: 'none' }}
         >
           <SeaBackground />

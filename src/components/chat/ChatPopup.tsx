@@ -5,6 +5,7 @@ import { Extension } from '@tiptap/core'
 import type { Player, Pokemon, Attack, Item, PlayerItem, PlayerPokemon, Trade } from '../../types'
 import type { useChatMessages } from '../../hooks/useChatMessages'
 import { useCarteLocations } from '../../hooks/useCarteLocations'
+import { useVisualViewportHeight } from '../../hooks/useVisualViewportHeight'
 import { useTrades } from '../../hooks/useTrades'
 import { useReferenceIndex, type ReferenceEntry } from '../../hooks/useReferenceIndex'
 import { ReferenceHighlight, forceReferenceRecompute } from '../../lib/referenceExtension'
@@ -50,6 +51,7 @@ const SubmitOnEnter = Extension.create<{ getOnSubmit: () => () => void }>({
 
 export function ChatPopup({ player, players, chat, inventory, roster, pokemonByName, discoveredPokemon, attacksByName, itemsByName, maxMessageLength, spamLimitPerMinute, onClose }: Props) {
   const { locations } = useCarteLocations()
+  const viewport = useVisualViewportHeight()
   const trades = useTrades()
   const [activeReference, setActiveReference] = useState<ReferenceEntry | null>(null)
   const [tradePopup, setTradePopup] = useState<{ trade?: Trade } | null>(null)
@@ -128,6 +130,7 @@ export function ChatPopup({ player, players, chat, inventory, roster, pokemonByN
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-0 sm:p-4"
+      style={viewport ? { height: viewport.height, top: viewport.offsetTop } : undefined}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div className="relative bg-cream w-full h-full overflow-hidden flex flex-col
