@@ -105,7 +105,7 @@ export function HomeTab({ player, players, isAdmin, pokemonByName, discoveredPok
   const [showAutoBattle, setShowAutoBattle] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const chat = useChatMessages()
-  const { unreadCount, markSeen } = useChatUnread(chat.messages)
+  const { unreadCount, markSeen } = useChatUnread(chat.messages, player?.id ?? null)
 
   // Régénération des tickets/ressources de mini-jeux en tâche de fond : dès
   // que l'app est ouverte et le jeu débloqué, sans avoir besoin d'ouvrir son
@@ -305,7 +305,7 @@ export function HomeTab({ player, players, isAdmin, pokemonByName, discoveredPok
         >
           <img src={CHAT_ICON} alt="Chat" className="pixelated w-6 h-6 sm:w-9 sm:h-9 object-contain" />
           {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-hp-red border-2 border-ink text-white text-[10px] font-bold flex items-center justify-center">
+            <span className="absolute -top-1.5 -right-1.5 min-w-[24px] h-[24px] px-1.5 rounded-full bg-hp-red border-2 border-ink text-white text-sm font-bold flex items-center justify-center">
               {unreadCount > 9 ? '9+' : unreadCount}
             </span>
           )}

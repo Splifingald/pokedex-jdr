@@ -108,6 +108,10 @@ export interface Attack {
   precision: number | null
   degats_moyens: number | null
   effet: string | null
+  // Statut "mini-jeu" (Combat Auto uniquement) importé depuis le CSV au même
+  // titre que le reste de l'attaque — voir AutoBattleStatusEffect plus bas.
+  status_effect: AutoBattleStatusEffect | null
+  status_chance: number | null
 }
 
 export interface AttackCsvRow {
@@ -120,6 +124,8 @@ export interface AttackCsvRow {
   'Précision': string
   'Dégâts moyens': string
   'Effet': string
+  'Mini-game status': string
+  'Status probability': string
 }
 
 export const ATTACK_CSV_REQUIRED_HEADERS: (keyof AttackCsvRow)[] = ['Attaque', 'Type']
@@ -898,8 +904,36 @@ export interface AutoBattleBannedAttack {
 
 // Effet spécial d'une capacité (voir autobattle_ability_rules) : effet sur le
 // rythme des tours et/ou effet de soin, indépendants et tous deux optionnels.
-export type AutoBattleTurnEffect = 'skip' | 'play_twice' | 'play_three' | 'play_random' | 'repeat_until_fail'
+// Le statut (voir AutoBattleStatusEffect ci-dessous) N'EST PAS ici : il vient
+// directement du CSV des attaques (Attack.status_effect/status_chance), au
+// même titre que degats_base/precision — pas une règle admin séparée (seul
+// status_reversed, un réglage propre au mode de jeu, vit ici).
+// prepare_release : la capacité se prépare au 1er tour (aucune action,
+// texte "Préparation") puis s'utilise normalement au 2e.
+export type AutoBattleTurnEffect = 'skip' | 'play_twice' | 'play_three' | 'play_random' | 'repeat_until_fail' | 'prepare_release'
 export type AutoBattleHealType = 'static' | 'percent_damage' | 'use_stats'
+// paralysis/frozen : passe le prochain tour, une seule fois. fear/confusion :
+// précision réduite de 3/5 au prochain tour, une seule fois. sleep : passe
+// son tour tant qu'un dé à 6 faces ne tombe pas sur 4/5/6 (relancé à chaque
+// tour). burn : 5 dégâts passifs par tour jusqu'à un dé à 4/5/6. poison : 3
+// dégâts passifs par tour jusqu'à ce que ce camp soit soigné, quel que soit
+// le moyen. Voir autobattle_resolve_battle pour l'implémentation complète.
+export type AutoBattleStatusEffect = 'paralysis' | 'fear' | 'confusion' | 'sleep' | 'burn' | 'poison' | 'frozen'
+// 'range' tire un montant entre min/max à chaque coup réussi (un montant
+// "fixe" est juste un range avec min=max) ; 'percent_damage' prend un % des
+// dégâts (bonus inclus) infligés ce coup-là — dans les deux cas, dégâts sur
+// l'utilisateur lui-même, après tout le reste.
+export type AutoBattleRecoilType = 'range' | 'percent_damage'
+// Dégâts additionnels appliqués après le dé si la condition associée est
+// vérifiée : 'multiply' multiplie le total, 'flat' ajoute un montant fixe,
+// 'range' ajoute un montant tiré entre min/max.
+export type AutoBattleBonusDamageType = 'multiply' | 'flat' | 'range'
+// took_damage_last_turn : ce camp a été touché par l'adversaire depuis son
+// propre dernier tour. first_use : 1ère fois que ce camp attaque dans le
+// combat. dice_equals : le dé de dégâts de CETTE capacité est tombé sur
+// bonus_damage_condition_dice_value. has_status : ce camp est actuellement
+// affecté par un statut (quel qu'il soit).
+export type AutoBattleBonusDamageCondition = 'took_damage_last_turn' | 'first_use' | 'dice_equals' | 'has_status'
 
 export interface AutoBattleAbilityRule {
   attack_nom: string
@@ -910,14 +944,42 @@ export interface AutoBattleAbilityRule {
   heal_type: AutoBattleHealType | null
   heal_amount: number | null
   heal_percent: number | null
+  status_reversed: boolean
+  recoil_type: AutoBattleRecoilType | null
+  recoil_min: number | null
+  recoil_max: number | null
+  recoil_percent: number | null
+  invulnerable_next_turn: boolean
+  bonus_damage_type: AutoBattleBonusDamageType | null
+  bonus_damage_multiplier: number | null
+  bonus_damage_flat: number | null
+  bonus_damage_min: number | null
+  bonus_damage_max: number | null
+  bonus_damage_condition: AutoBattleBonusDamageCondition | null
+  bonus_damage_condition_dice_value: number | null
   created_at: string
 }
 
 // Un tour du journal de combat renvoyé par le RPC autobattle_resolve_battle —
 // le client se contente de rejouer cette séquence (jamais recalculée côté
 // client). skipped = le camp a passé son tour sans attaquer (effet spécial
-// 'skip') ; missed = l'attaque a raté (système de précision) ; heal/
-// attacker_hp_after ne sont présents que si l'attaquant s'est soigné ce tour-là.
+// 'skip'/'prepare_release' OU statut paralysie/gel/sommeil raté) ; preparing
+// = 1er tour de 'prepare_release' (texte "Préparation", jamais de dégâts) ;
+// missed = l'attaque a raté (système de précision) ; invulnerable_miss =
+// l'attaque a raté car la cible était invulnérable ce tour-là (pas un raté
+// de précision normal, texte distinct côté client) ; heal/attacker_hp_after
+// ne sont présents que si l'attaquant s'est soigné ce tour-là ; recoil =
+// dégâts de contre-coup sur l'attaquant lui-même (attacker_hp_after reflète
+// alors l'état final, après soin ET contre-coup le cas échéant) ;
+// invulnerable_granted = ce coup a rendu son auteur invulnérable au prochain
+// tour adverse. status_applied = un coup réussi a infligé ce statut —
+// normalement à l'adversaire, à l'attaquant lui-même si
+// status_applied_reversed. status_cured_by_heal = le poison de l'attaquant a
+// été guéri par son propre soin ce tour-là. status_tick = ce tour est un
+// "tick" de statut (dé lancé pour sleep/burn — status_roll —, dégâts passifs
+// pour burn/poison dans `damage`/`attacker_hp_after`, statut levé ou non
+// dans status_cured) — toujours sur turn.attacker, le camp affecté par son
+// propre statut.
 export interface AutoBattleTurn {
   turn: number
   attacker: 'player' | 'opponent'
@@ -925,9 +987,20 @@ export interface AutoBattleTurn {
   defender_hp_after: number
   ko: boolean
   skipped?: boolean
+  preparing?: boolean
   missed?: boolean
+  invulnerable_miss?: boolean
+  invulnerable_granted?: boolean
   heal?: number
+  recoil?: number
   attacker_hp_after?: number
+  status_applied?: AutoBattleStatusEffect
+  status_applied_reversed?: boolean
+  status_cured_by_heal?: boolean
+  status_tick?: boolean
+  status?: AutoBattleStatusEffect
+  status_roll?: number | null
+  status_cured?: boolean
 }
 
 export interface AutoBattleReward {

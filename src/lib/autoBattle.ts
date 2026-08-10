@@ -1,4 +1,57 @@
-import type { Attack, Item, PlayerPokemon, AutoBattleLevelReward } from '../types'
+import type { Attack, Item, PlayerPokemon, AutoBattleLevelReward, AutoBattleStatusEffect } from '../types'
+import { getStatusInfo, type StatusId } from './status'
+
+// Libellés propres à Combat Auto (alignés sur les libellés du CSV des
+// attaques), mais couleur et icône RÉUTILISÉES du système de statut déjà
+// affiché sur la fiche Pokémon (src/lib/status.ts, StatusSelect,
+// PokemonOwnedCard) plutôt que redéfinies ici, pour rester visuellement
+// cohérent entre les deux écrans.
+export const STATUS_EFFECT_LABEL: Record<AutoBattleStatusEffect, string> = {
+  paralysis: 'Paralysie',
+  fear: 'Peur',
+  confusion: 'Confusion',
+  sleep: 'Sommeil',
+  burn: 'Brûlure',
+  poison: 'Poison',
+  frozen: 'Gel',
+}
+
+const STATUS_ID_BY_EFFECT: Record<AutoBattleStatusEffect, StatusId> = {
+  paralysis: 'paralysie',
+  fear: 'apeure',
+  confusion: 'confusion',
+  sleep: 'endormi',
+  burn: 'brule',
+  poison: 'empoisonne',
+  frozen: 'gele',
+}
+
+// Couleur + icône pixel-art (iconSrc) du statut équivalent sur la fiche
+// Pokémon — voir getStatusInfo. `label` reste celui du CSV Combat Auto
+// (STATUS_EFFECT_LABEL ci-dessus), pas celui de la fiche Pokémon. iconSrc
+// est optionnel dans StatusInfo (le statut 'aucun' n'en a pas) mais toujours
+// défini pour les 7 statuts mappés ici, d'où le non-null assertion.
+export function getStatusEffectDisplay(status: AutoBattleStatusEffect) {
+  const info = getStatusInfo(STATUS_ID_BY_EFFECT[status])
+  return { label: STATUS_EFFECT_LABEL[status], color: info.color, iconSrc: info.iconSrc! }
+}
+
+// CSV des attaques (colonne "Mini-game status") → valeur interne. Casse et
+// accents doivent correspondre exactement aux libellés du CSV.
+const STATUS_EFFECT_BY_CSV_LABEL: Record<string, AutoBattleStatusEffect> = {
+  'Paralysie': 'paralysis',
+  'Peur': 'fear',
+  'Confusion': 'confusion',
+  'Sommeil': 'sleep',
+  'Brûlure': 'burn',
+  'Poison': 'poison',
+  'Gel': 'frozen',
+}
+export function parseStatusEffectCsvLabel(label: string | undefined | null): AutoBattleStatusEffect | null {
+  const trimmed = label?.trim()
+  if (!trimmed) return null
+  return STATUS_EFFECT_BY_CSV_LABEL[trimmed] ?? null
+}
 
 // Une capacité "offensive" est une capacité qui inflige quelque chose : soit
 // des dégâts de base, soit un dé (voire les deux) — une capacité à 0 dégâts

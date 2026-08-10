@@ -1,5 +1,5 @@
 import type { PlayerPokemon, Attack } from '../../types'
-import { isDamagingAbility } from '../../lib/autoBattle'
+import { isDamagingAbility, getStatusEffectDisplay } from '../../lib/autoBattle'
 import { TypeBadge } from '../TypeBadge'
 import { PixelIcon } from '../icons/PixelIcon'
 import { STAT_ICON, DICE_GENERIC_ICON } from '../../lib/icons'
@@ -76,6 +76,18 @@ export function AutoBattleAbilityPicker({ playerPokemon, attacksByName, bannedAt
                       <span className="text-sm font-bold" style={{ color: getPrecisionColor(a.precision ?? 10) }}>{a.precision ?? 10}</span>
                     </span>
                   )}
+                  {a.status_effect && (() => {
+                    const statusDisplay = getStatusEffectDisplay(a.status_effect)
+                    return (
+                      <span
+                        className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full text-white shrink-0 whitespace-nowrap"
+                        style={{ backgroundColor: statusDisplay.color }}
+                      >
+                        <PixelIcon src={statusDisplay.iconSrc} size={14} />
+                        {statusDisplay.label} {a.status_chance ?? 0}%
+                      </span>
+                    )
+                  })()}
                 </>
               )}
             </button>

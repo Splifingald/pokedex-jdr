@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { Player, PlayerPokemon, Pokemon, Attack, PokemonEvolution, Item, AutoBattleVariant, AutoBattleLevel, AutoBattleResolveResult } from '../types'
 import { TICKET_AUTOBATTLE_ITEM_NAME, POKEDOLLAR_ITEM_NAME, ownedPokemonName } from '../types'
 import { supabase } from '../lib/supabase'
@@ -76,6 +76,13 @@ export function AutoBattlePopup({
   const [battleResult, setBattleResult] = useState<AutoBattleResolveResult | null>(null)
   const [evolutionEligible, setEvolutionEligible] = useState(false)
   const [showEvolvePrompt, setShowEvolvePrompt] = useState(false)
+  // Verrou synchrone (ref, pas de state — pas de délai de rendu) contre un
+  // double-appel de handleSelectAbility (double-tap, réseau lent laissant le
+  // temps d'un second tap avant le changement de vue) : sans lui, deux
+  // combats étaient réellement résolus côté serveur (2 tickets débités, 2
+  // RPC exécutées) alors qu'un seul restait visible à l'écran (le second
+  // résultat écrasant le premier), rendant le bug quasi invisible.
+  const submittingRef = useRef(false)
 
   const ticketRow = playerItems.inventory.find((r) => r.item_nom === TICKET_AUTOBATTLE_ITEM_NAME)
   const ticketCount = ticketRow?.quantity ?? 0
@@ -130,10 +137,12 @@ export function AutoBattlePopup({
 
   const handleSelectAbility = async (pp: PlayerPokemon, ability: Attack) => {
     if (!activeLevel) return
+    if (submittingRef.current) return
     if (ticketCount < 1 || !ticketRow) {
       showToast('Aucun ticket disponible.')
       return
     }
+    submittingRef.current = true
 
     const spentTotal = ticketRow.quantity - 1
     await playerItems.setQuantity(ticketRow, spentTotal)
@@ -172,6 +181,7 @@ export function AutoBattlePopup({
       })
       showToast(STATUS_MESSAGE[result?.status ?? ''] ?? 'Combat impossible pour le moment.')
       setView('list')
+      submittingRef.current = false
       return
     }
 
@@ -186,6 +196,7 @@ export function AutoBattlePopup({
 
     setBattleResult(result)
     setView('coin-toss')
+    submittingRef.current = false
   }
 
   const handleBattleFinished = () => {
@@ -334,7 +345,7 @@ export function AutoBattlePopup({
                     const progress = progressByVariant.get(variant.id)
                     const completed = progress?.variant_completed ?? false
                     return (
-                      <div key={variant.id} className={`p-3 rounded ${PIXEL_BORDER_SM} bg-cream-secondary flex flex-col gap-2`}>
+                      <div key={variant.id} className={`p-3 rounded ${PIXEL_BORDER_SM} bg-cream-secondary flex flex-col gap-1`}>
                         <AutoBattleVariantBanner
                           variant={variant}
                           levels={levels}
@@ -353,18 +364,20 @@ export function AutoBattlePopup({
                               <span className="text-xl">⚔️</span>
                             )}
                           </div>
-                          <div className="flex-1 min-w-0">
+                          <div className="flex-1 min-w-0 flex items-center gap-1.5">
                             <span className="block text-ink text-sm font-bold truncate">{variant.nom}</span>
-                            {completed && <span className="text-xs text-ink-muted-2 font-bold">🏆 Terminé</span>}
+                            {completed && <span className="text-sm shrink-0">✅</span>}
                           </div>
-                          <button
-                            onClick={() => handlePlayVariant(variant)}
-                            disabled={ticketCount < 1 || completed || levels.length === 0}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${BUTTON_STYLE.yellow}`}
-                          >
-                            <img src={AUTOBATTLE_TICKET_ICON} alt="" className="w-4 h-4 object-contain pixelated" />
-                            Jouer
-                          </button>
+                          {!completed && (
+                            <button
+                              onClick={() => handlePlayVariant(variant)}
+                              disabled={ticketCount < 1 || levels.length === 0}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${BUTTON_STYLE.yellow}`}
+                            >
+                              <img src={AUTOBATTLE_TICKET_ICON} alt="" className="w-4 h-4 object-contain pixelated" />
+                              Jouer
+                            </button>
+                          )}
                         </div>
                       </div>
                     )

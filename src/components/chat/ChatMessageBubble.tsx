@@ -2,6 +2,7 @@ import { Fragment } from 'react'
 import type { Player, ChatMessage, Item, Pokemon, Trade } from '../../types'
 import type { ReferenceEntry, ReferenceIndex } from '../../hooks/useReferenceIndex'
 import { findTradeForMessage } from '../../lib/trade'
+import { formatChatMessageTime } from '../../lib/chatMessageTime'
 import { TradeCard } from './TradeCard'
 import { TradeCompletedCard } from './TradeCompletedCard'
 
@@ -72,6 +73,7 @@ export function ChatMessageBubble({ message, sender, mine, referenceIndex, onRef
           )}
         </div>
         <span className="text-xs font-bold text-ink-muted">{name}</span>
+        <span className="text-[10px] text-ink-muted-2">{formatChatMessageTime(message.created_at)}</span>
       </div>
       {trade && message.message_type === 'trade_completed' ? (
         <TradeCompletedCard trade={trade} players={players} pokemonByName={pokemonByName} onReplay={() => onReplayTrade(trade)} />

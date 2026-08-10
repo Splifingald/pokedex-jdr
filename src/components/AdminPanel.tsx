@@ -3,6 +3,7 @@ import Papa from 'papaparse'
 import type { CsvRow, AttackCsvRow, CarteCsvRow, ItemCsvRow, EncounterCsvRow, DisplayAssetCsvRow, PokemonEvolutionCsvRow, PokemonEggGroupCsvRow } from '../types'
 import { CSV_REQUIRED_HEADERS, ATTACK_CSV_REQUIRED_HEADERS, CARTE_CSV_REQUIRED_HEADERS, ITEM_CSV_REQUIRED_HEADERS, ENCOUNTER_CSV_REQUIRED_HEADERS, DISPLAY_ASSET_CSV_REQUIRED_HEADERS, POKEMON_EVOLUTION_CSV_REQUIRED_HEADERS, POKEMON_EGG_GROUP_CSV_REQUIRED_HEADERS } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
+import { parseStatusEffectCsvLabel } from '../lib/autoBattle'
 
 // L'import CSV passe par une Netlify Function côté serveur
 // → la clé service_role Supabase n'est jamais exposée dans le bundle JS
@@ -69,6 +70,7 @@ function mapCsvRow(row: CsvRow) {
 }
 
 function mapAttackCsvRow(row: AttackCsvRow) {
+  const statusEffect = parseStatusEffectCsvLabel(row['Mini-game status'])
   return {
     nom:           row['Attaque']?.trim() ?? '',
     type:          row['Type']?.trim() ?? '',
@@ -79,6 +81,10 @@ function mapAttackCsvRow(row: AttackCsvRow) {
     precision:     row['Précision']?.trim() ? parseInt(row['Précision']) : null,
     degats_moyens: row['Dégâts moyens']?.trim() ? parseFloat(row['Dégâts moyens'].replace(',', '.')) : null,
     effet:         row['Effet']?.trim() || null,
+    // Statut "mini-jeu" (Combat Auto) — voir parseStatusEffectCsvLabel.
+    // status_chance ignoré si aucun statut valide n'est reconnu.
+    status_effect: statusEffect,
+    status_chance: statusEffect && row['Status probability']?.trim() ? parseInt(row['Status probability']) : null,
   }
 }
 

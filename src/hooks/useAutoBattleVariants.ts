@@ -223,11 +223,94 @@ export function useAutoBattleVariants() {
     }
   }, [fetchAll])
 
+  // Remet une variante à zéro pour TOUS les joueurs (pas seulement l'admin) :
+  // supprime la ligne de progression (le prochain combat en recrée une avec
+  // current_level_index=0/variant_completed=false, voir autobattle_resolve_battle)
+  // et les lignes d'état par niveau (adversaires redeviennent non découverts).
+  const resetVariantProgress = useCallback(async (variantId: number) => {
+    const levelIds = levels.filter((l) => l.variant_id === variantId).map((l) => l.id)
+    const [progressRes, stateRes] = await Promise.all([
+      supabase.from('autobattle_player_variant_progress').delete().eq('variant_id', variantId),
+      levelIds.length > 0
+        ? supabase.from('autobattle_player_level_state').delete().in('level_id', levelIds)
+        : Promise.resolve({ error: null }),
+    ])
+    if (progressRes.error || stateRes.error) {
+      console.error('Erreur lors de la réinitialisation de la progression Combat Auto :', progressRes.error ?? stateRes.error)
+    }
+  }, [levels])
+
+  // Copie une variante (nom + " (copie)"), tous ses niveaux et leurs
+  // récompenses — jamais la progression des joueurs. Désactivée par défaut
+  // (comme une nouvelle variante) pour laisser l'admin la relire avant
+  // publication. Séquentiel (pas Promise.all) pour rattacher chaque niveau/
+  // récompense au bon id nouvellement créé sans course.
+  const duplicateVariant = useCallback(async (variantId: number) => {
+    const source = variants.find((v) => v.id === variantId)
+    if (!source) return null
+    const sourceLevels = levelsByVariant.get(variantId) ?? []
+    try {
+      const { data: newVariant, error: variantError } = await supabase
+        .from('autobattle_variants')
+        .insert({
+          nom: `${source.nom} (copie)`,
+          enabled: false,
+          icon_url: source.icon_url,
+          banner_url: source.banner_url,
+          sort_order: variants.length,
+        })
+        .select()
+        .single()
+      if (variantError || !newVariant) throw variantError
+      const newVariantRow = newVariant as AutoBattleVariant
+
+      for (const level of sourceLevels) {
+        const { data: newLevel, error: levelError } = await supabase
+          .from('autobattle_levels')
+          .insert({
+            variant_id: newVariantRow.id,
+            level_index: level.level_index,
+            opponent_pokemon_nom: level.opponent_pokemon_nom,
+            opponent_hp: level.opponent_hp,
+            opponent_base_damage: level.opponent_base_damage,
+            opponent_ability_nom: level.opponent_ability_nom,
+          })
+          .select()
+          .single()
+        if (levelError || !newLevel) throw levelError
+        const newLevelRow = newLevel as AutoBattleLevel
+
+        const sourceRewards = rewardsByLevel.get(level.id) ?? []
+        if (sourceRewards.length > 0) {
+          const { error: rewardsError } = await supabase.from('autobattle_level_rewards').insert(
+            sourceRewards.map((r) => ({
+              level_id: newLevelRow.id,
+              reward_type: r.reward_type,
+              xp_amount: r.xp_amount,
+              item_nom: r.item_nom,
+              item_quantity: r.item_quantity,
+              sort_order: r.sort_order,
+            }))
+          )
+          if (rewardsError) throw rewardsError
+        }
+      }
+
+      await fetchAll()
+      return newVariantRow
+    } catch (err) {
+      console.error('Erreur lors de la duplication de la variante Combat Auto :', err)
+      await fetchAll()
+      return null
+    }
+  }, [variants, levelsByVariant, rewardsByLevel, fetchAll])
+
   return {
     variants, levels, rewards, levelsByVariant, rewardsByLevel, loading, error,
     addVariant, updateVariant, deleteVariant,
     addLevel, updateLevel, swapLevelOrder, deleteLevel,
     addReward, updateReward, removeReward,
+    resetVariantProgress, duplicateVariant,
     refetch: fetchAll,
   }
 }

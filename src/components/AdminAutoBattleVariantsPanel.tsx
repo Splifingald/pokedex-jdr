@@ -5,7 +5,7 @@ import { useAutoBattleBannedAttacks } from '../hooks/useAutoBattleBannedAttacks'
 import { usePokemon } from '../hooks/usePokemon'
 import { useAttacks } from '../hooks/useAttacks'
 import { useItems } from '../hooks/useItems'
-import { isDamagingAbility } from '../lib/autoBattle'
+import { isDamagingAbility, getStatusEffectDisplay } from '../lib/autoBattle'
 import { NumberInput } from './NumberInput'
 import { PokemonSearchInput } from './PokemonSearchInput'
 import { MoveSearchInput } from './MoveSearchInput'
@@ -272,6 +272,18 @@ function LevelEditor({
                   <span className="text-sm">🎯</span>
                   <span className="text-sm font-bold" style={{ color: getPrecisionColor(opponentAbility?.precision ?? 10) }}>{opponentAbility?.precision ?? 10}</span>
                 </span>
+                {opponentAbility?.status_effect && (() => {
+                  const statusDisplay = getStatusEffectDisplay(opponentAbility.status_effect)
+                  return (
+                    <span
+                      className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full text-white shrink-0 whitespace-nowrap"
+                      style={{ backgroundColor: statusDisplay.color }}
+                    >
+                      <PixelIcon src={statusDisplay.iconSrc} size={14} />
+                      {statusDisplay.label} {opponentAbility.status_chance ?? 0}%
+                    </span>
+                  )
+                })()}
                 <button onClick={() => onUpdate(level.id, { opponent_ability_nom: '' })} className={`text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>Changer</button>
               </div>
             ) : (
@@ -295,6 +307,7 @@ export function AdminAutoBattleVariantsPanel() {
     addVariant, updateVariant, deleteVariant,
     addLevel, updateLevel, swapLevelOrder, deleteLevel,
     addReward, updateReward, removeReward,
+    resetVariantProgress, duplicateVariant,
   } = useAutoBattleVariants()
   const { bannedNames } = useAutoBattleBannedAttacks()
   const { pokemon } = usePokemon()
@@ -314,6 +327,20 @@ export function AdminAutoBattleVariantsPanel() {
   const selectedVariant = variants.find((v) => v.id === selected) ?? null
   const selectedLevels = selected ? levelsByVariant.get(selected) ?? [] : []
   const canEnable = !!selectedVariant?.nom.trim() && !!selectedVariant.banner_url.trim() && !!selectedVariant.icon_url.trim() && selectedLevels.length > 0
+
+  const handleDuplicate = async (id: number) => {
+    const copy = await duplicateVariant(id)
+    if (copy) setSelected(copy.id)
+  }
+
+  const handleResetProgress = async () => {
+    if (!selectedVariant) return
+    const ok = window.confirm(
+      `Réinitialiser la progression de "${selectedVariant.nom}" pour TOUS les joueurs ? Ils repartiront du niveau 1 et la variante ne sera plus marquée comme terminée. Cette action est irréversible.`
+    )
+    if (!ok) return
+    await resetVariantProgress(selectedVariant.id)
+  }
 
   return (
     <div className="flex flex-col md:flex-row gap-4 w-full items-start">
@@ -351,6 +378,9 @@ export function AdminAutoBattleVariantsPanel() {
                 >
                   {v.nom || '(sans nom)'} {v.enabled && <span className="text-[#2f6b3f]">●</span>}
                 </button>
+                <button onClick={() => handleDuplicate(v.id)} title="Dupliquer" className={`text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>
+                  📋
+                </button>
                 <button onClick={() => deleteVariant(v.id)} className={`text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>
                   <CloseIcon className="w-3 h-3" />
                 </button>
@@ -362,6 +392,11 @@ export function AdminAutoBattleVariantsPanel() {
 
       {selectedVariant && (
         <div className="flex-1 min-w-0 bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] w-full p-6">
+          <div className="flex items-center justify-end mb-3">
+            <button onClick={handleResetProgress} className={`text-xs px-3 py-1.5 rounded font-bold ${BUTTON_STYLE.gray}`}>
+              ↺ Réinitialiser la progression (tous joueurs)
+            </button>
+          </div>
           <div className="flex flex-col gap-3 mb-4">
             <div>
               <label className="text-ink-muted-2 text-sm block mb-1">Nom</label>

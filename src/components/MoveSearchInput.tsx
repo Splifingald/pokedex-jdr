@@ -5,6 +5,7 @@ import { PixelIcon } from './icons/PixelIcon'
 import { STAT_ICON, DICE_GENERIC_ICON } from '../lib/icons'
 import { normalizeSearch } from '../lib/normalizeSearch'
 import { getPrecisionColor } from '../lib/precisionColor'
+import { getStatusEffectDisplay } from '../lib/autoBattle'
 
 interface Props {
   options: Attack[]
@@ -74,6 +75,18 @@ export function MoveSearchInput({ options, disabled, onSelect, showDamage = fals
                       <span className="text-xs">🎯</span>
                       <span className="text-xs font-bold" style={{ color: getPrecisionColor(a.precision ?? 10) }}>{a.precision ?? 10}</span>
                     </span>
+                    {a.status_effect && (() => {
+                      const statusDisplay = getStatusEffectDisplay(a.status_effect)
+                      return (
+                        <span
+                          className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full text-white whitespace-nowrap"
+                          style={{ backgroundColor: statusDisplay.color }}
+                        >
+                          <PixelIcon src={statusDisplay.iconSrc} size={14} />
+                          {statusDisplay.label} {a.status_chance ?? 0}%
+                        </span>
+                      )
+                    })()}
                   </span>
                 )}
               </button>

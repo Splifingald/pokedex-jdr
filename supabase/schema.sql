@@ -2535,10 +2535,13 @@ CREATE POLICY "Public update autobattle_player_state" ON autobattle_player_state
 CREATE POLICY "Public read autobattle_player_variant_progress" ON autobattle_player_variant_progress FOR SELECT TO anon USING (true);
 CREATE POLICY "Public insert autobattle_player_variant_progress" ON autobattle_player_variant_progress FOR INSERT TO anon WITH CHECK (true);
 CREATE POLICY "Public update autobattle_player_variant_progress" ON autobattle_player_variant_progress FOR UPDATE TO anon USING (true) WITH CHECK (true);
+-- Nécessaire pour la réinitialisation admin d'une variante (tous joueurs), voir AdminAutoBattleVariantsPanel.
+CREATE POLICY "Public delete autobattle_player_variant_progress" ON autobattle_player_variant_progress FOR DELETE TO anon USING (true);
 
 CREATE POLICY "Public read autobattle_player_level_state" ON autobattle_player_level_state FOR SELECT TO anon USING (true);
 CREATE POLICY "Public insert autobattle_player_level_state" ON autobattle_player_level_state FOR INSERT TO anon WITH CHECK (true);
 CREATE POLICY "Public update autobattle_player_level_state" ON autobattle_player_level_state FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete autobattle_player_level_state" ON autobattle_player_level_state FOR DELETE TO anon USING (true);
 
 CREATE POLICY "Public read autobattle_battles" ON autobattle_battles FOR SELECT TO anon USING (true);
 CREATE POLICY "Public insert autobattle_battles" ON autobattle_battles FOR INSERT TO anon WITH CHECK (true);
@@ -2600,14 +2603,96 @@ CREATE POLICY "Public read autobattle_ability_rules" ON autobattle_ability_rules
 CREATE POLICY "Public insert autobattle_ability_rules" ON autobattle_ability_rules FOR INSERT TO anon WITH CHECK (true);
 CREATE POLICY "Public update autobattle_ability_rules" ON autobattle_ability_rules FOR UPDATE TO anon USING (true) WITH CHECK (true);
 CREATE POLICY "Public delete autobattle_ability_rules" ON autobattle_ability_rules FOR DELETE TO anon USING (true);
+
+-- Statut "mini-jeu" infligé par une capacité (Combat Auto uniquement) —
+-- importé depuis le CSV des attaques comme precision/degats_base (colonnes
+-- "Mini-game status"/"Status probability"), PAS géré en admin comme
+-- autobattle_ability_rules : c'est une donnée propre à la capacité, au même
+-- titre que ses dégâts. Se déclenche sur l'adversaire (jamais soi-même) avec
+-- status_chance % de chance à chaque coup réussi, voir autobattle_resolve_battle.
+ALTER TABLE attacks ADD COLUMN IF NOT EXISTS status_effect text;
+ALTER TABLE attacks ADD COLUMN IF NOT EXISTS status_chance integer;
+ALTER TABLE attacks DROP CONSTRAINT IF EXISTS attacks_status_effect_check;
+ALTER TABLE attacks ADD CONSTRAINT attacks_status_effect_check
+  CHECK (status_effect IS NULL OR status_effect IN ('paralysis', 'fear', 'confusion', 'sleep', 'burn', 'poison', 'frozen'));
+ALTER TABLE attacks DROP CONSTRAINT IF EXISTS attacks_status_chance_check;
+ALTER TABLE attacks ADD CONSTRAINT attacks_status_chance_check
+  CHECK (status_effect IS NULL OR (status_chance IS NOT NULL AND status_chance >= 0 AND status_chance <= 100));
 -- Si autobattle_ability_rules existe déjà (migration précédente déjà appliquée) :
 ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS repeat_max_iterations integer;
 ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_turn_effect_check;
 ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_turn_effect_check
-  CHECK (turn_effect IS NULL OR turn_effect IN ('skip', 'play_twice', 'play_three', 'play_random', 'repeat_until_fail'));
+  CHECK (turn_effect IS NULL OR turn_effect IN ('skip', 'play_twice', 'play_three', 'play_random', 'repeat_until_fail', 'prepare_release'));
 ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_repeat_fields;
 ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_repeat_fields
   CHECK (turn_effect <> 'repeat_until_fail' OR (repeat_max_iterations IS NOT NULL AND repeat_max_iterations >= 1));
+
+-- Statut inversé (s'applique à l'utilisateur de la capacité au lieu de sa
+-- cible) — le statut lui-même (attacks.status_effect/status_chance) reste
+-- une donnée CSV de la capacité, mais ce booléen est un réglage propre au
+-- mode de jeu, géré ici comme turn_effect/heal_type (voir
+-- AdminAutoBattleAbilityRulesPanel, gated sur attack.status_effect non nul).
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS status_reversed boolean NOT NULL DEFAULT false;
+
+-- Contre-coup : dégâts infligés à l'utilisateur de la capacité lui-même,
+-- après les dégâts portés à l'adversaire. 'range' tire un montant entre
+-- recoil_min/recoil_max inclus à CHAQUE coup réussi (une valeur "fixe" est
+-- juste un 'range' avec min=max, pas de troisième type) ; 'percent_damage'
+-- prend un pourcentage des dégâts (bonus inclus) infligés ce coup-là.
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS recoil_type text;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS recoil_min integer;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS recoil_max integer;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS recoil_percent integer;
+ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_recoil_type_check;
+ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_recoil_type_check
+  CHECK (recoil_type IS NULL OR recoil_type IN ('range', 'percent_damage'));
+ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_recoil_fields;
+ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_recoil_fields
+  CHECK (
+    recoil_type IS NULL
+    OR (recoil_type = 'range' AND recoil_min IS NOT NULL AND recoil_max IS NOT NULL AND recoil_min >= 0 AND recoil_max >= recoil_min)
+    OR (recoil_type = 'percent_damage' AND recoil_percent IS NOT NULL AND recoil_percent > 0)
+  );
+
+-- Invulnérabilité : utiliser cette capacité rend son utilisateur invulnérable
+-- à la PROCHAINE attaque adverse (rate automatiquement, quelle que soit sa
+-- précision ou les statuts en cours) — consommé une fois puis retiré, voir
+-- autobattle_resolve_battle.
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS invulnerable_next_turn boolean NOT NULL DEFAULT false;
+
+-- Dégâts additionnels conditionnels : appliqués APRÈS les dégâts de base +
+-- dé, avant le contre-coup, uniquement si bonus_damage_condition est vérifiée
+-- ce coup-ci. 'multiply' multiplie le total (dégâts arrondis à l'entier
+-- inférieur) ; 'flat' ajoute un montant fixe ; 'range' ajoute un montant tiré
+-- entre bonus_damage_min/max. Une condition est requise dès qu'un type est
+-- choisi (pas de bonus inconditionnel — utiliser le dé/dégâts de base pour
+-- ça). 'dice_equals' compare au résultat du dé de CETTE capacité
+-- (bonus_damage_condition_dice_value, borné par attacks.degats_de, pas 1-6).
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS bonus_damage_type text;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS bonus_damage_multiplier numeric;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS bonus_damage_flat integer;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS bonus_damage_min integer;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS bonus_damage_max integer;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS bonus_damage_condition text;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS bonus_damage_condition_dice_value integer;
+ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_bonus_damage_type_check;
+ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_bonus_damage_type_check
+  CHECK (bonus_damage_type IS NULL OR bonus_damage_type IN ('multiply', 'flat', 'range'));
+ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_bonus_damage_condition_check;
+ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_bonus_damage_condition_check
+  CHECK (bonus_damage_condition IS NULL OR bonus_damage_condition IN ('took_damage_last_turn', 'first_use', 'dice_equals', 'has_status'));
+ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_bonus_damage_fields;
+ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_bonus_damage_fields
+  CHECK (
+    bonus_damage_type IS NULL
+    OR (
+      bonus_damage_condition IS NOT NULL
+      AND (bonus_damage_condition <> 'dice_equals' OR bonus_damage_condition_dice_value IS NOT NULL)
+      AND (bonus_damage_type <> 'multiply' OR (bonus_damage_multiplier IS NOT NULL AND bonus_damage_multiplier > 0))
+      AND (bonus_damage_type <> 'flat' OR bonus_damage_flat IS NOT NULL)
+      AND (bonus_damage_type <> 'range' OR (bonus_damage_min IS NOT NULL AND bonus_damage_max IS NOT NULL AND bonus_damage_max >= bonus_damage_min))
+    )
+  );
 
 -- Ticket Combat : catalogue seedé une fois (RLS bloque l'écriture anon
 -- sur items, donc à exécuter manuellement via l'éditeur SQL Supabase — même
@@ -2750,6 +2835,49 @@ DECLARE
   v_opponent_skip_pending boolean := false;
   v_player_repeat_max     integer;
   v_opponent_repeat_max   integer;
+  v_player_status           text;
+  v_opponent_status         text;
+  v_status_roll             integer;
+  v_status_cured            boolean;
+  v_status_precision_penalty integer := 0;
+  v_player_status_reversed  boolean;
+  v_opponent_status_reversed boolean;
+  v_player_never_miss       boolean;
+  v_opponent_never_miss     boolean;
+  v_player_preparing        boolean := false;
+  v_opponent_preparing      boolean := false;
+  v_player_invulnerable     boolean := false;
+  v_opponent_invulnerable   boolean := false;
+  v_player_invuln_grant     boolean;
+  v_opponent_invuln_grant   boolean;
+  v_player_used_ability     boolean := false;
+  v_opponent_used_ability   boolean := false;
+  v_player_took_damage      boolean := false;
+  v_opponent_took_damage    boolean := false;
+  v_player_recoil_type      text;
+  v_player_recoil_min       integer;
+  v_player_recoil_max       integer;
+  v_player_recoil_percent   integer;
+  v_opponent_recoil_type    text;
+  v_opponent_recoil_min     integer;
+  v_opponent_recoil_max     integer;
+  v_opponent_recoil_percent integer;
+  v_recoil_amt              integer;
+  v_player_bonus_type       text;
+  v_player_bonus_multiplier numeric;
+  v_player_bonus_flat       integer;
+  v_player_bonus_min        integer;
+  v_player_bonus_max        integer;
+  v_player_bonus_condition  text;
+  v_player_bonus_dice_value integer;
+  v_opponent_bonus_type       text;
+  v_opponent_bonus_multiplier numeric;
+  v_opponent_bonus_flat       integer;
+  v_opponent_bonus_min        integer;
+  v_opponent_bonus_max        integer;
+  v_opponent_bonus_condition  text;
+  v_opponent_bonus_dice_value integer;
+  v_bonus_condition_met     boolean;
   v_turn_entry          jsonb;
   v_coin_player_first   boolean;
   v_attacker            text;
@@ -2870,12 +2998,36 @@ BEGIN
   -- un dé indépendant de la capacité elle-même) — indépendant de l'effet sur
   -- le rythme des tours, voir autobattle_ability_rules. NULL si aucune règle
   -- configurée.
-  SELECT heal_type, heal_amount, heal_percent, turn_effect, repeat_max_iterations
-    INTO v_player_heal_type, v_player_heal_amount, v_player_heal_percent, v_player_turn_effect, v_player_repeat_max
+  SELECT heal_type, heal_amount, heal_percent, turn_effect, repeat_max_iterations, status_reversed,
+         recoil_type, recoil_min, recoil_max, recoil_percent, invulnerable_next_turn,
+         bonus_damage_type, bonus_damage_multiplier, bonus_damage_flat, bonus_damage_min, bonus_damage_max,
+         bonus_damage_condition, bonus_damage_condition_dice_value
+    INTO v_player_heal_type, v_player_heal_amount, v_player_heal_percent, v_player_turn_effect, v_player_repeat_max, v_player_status_reversed,
+         v_player_recoil_type, v_player_recoil_min, v_player_recoil_max, v_player_recoil_percent, v_player_invuln_grant,
+         v_player_bonus_type, v_player_bonus_multiplier, v_player_bonus_flat, v_player_bonus_min, v_player_bonus_max,
+         v_player_bonus_condition, v_player_bonus_dice_value
     FROM autobattle_ability_rules WHERE attack_nom = p_ability_nom;
-  SELECT heal_type, heal_amount, heal_percent, turn_effect, repeat_max_iterations
-    INTO v_opponent_heal_type, v_opponent_heal_amount, v_opponent_heal_percent, v_opponent_turn_effect, v_opponent_repeat_max
+  v_player_status_reversed := COALESCE(v_player_status_reversed, false);
+  v_player_invuln_grant := COALESCE(v_player_invuln_grant, false);
+
+  SELECT heal_type, heal_amount, heal_percent, turn_effect, repeat_max_iterations, status_reversed,
+         recoil_type, recoil_min, recoil_max, recoil_percent, invulnerable_next_turn,
+         bonus_damage_type, bonus_damage_multiplier, bonus_damage_flat, bonus_damage_min, bonus_damage_max,
+         bonus_damage_condition, bonus_damage_condition_dice_value
+    INTO v_opponent_heal_type, v_opponent_heal_amount, v_opponent_heal_percent, v_opponent_turn_effect, v_opponent_repeat_max, v_opponent_status_reversed,
+         v_opponent_recoil_type, v_opponent_recoil_min, v_opponent_recoil_max, v_opponent_recoil_percent, v_opponent_invuln_grant,
+         v_opponent_bonus_type, v_opponent_bonus_multiplier, v_opponent_bonus_flat, v_opponent_bonus_min, v_opponent_bonus_max,
+         v_opponent_bonus_condition, v_opponent_bonus_dice_value
     FROM autobattle_ability_rules WHERE attack_nom = v_level.opponent_ability_nom;
+  v_opponent_status_reversed := COALESCE(v_opponent_status_reversed, false);
+  v_opponent_invuln_grant := COALESCE(v_opponent_invuln_grant, false);
+
+  -- Précision "aucune" (NULL ou 0, case vide/"0" dans le CSV) = capacité qui
+  -- ne peut JAMAIS rater, immunisée contre peur/confusion ET contre le
+  -- désactivateur global précision_enabled — distinct d'une précision
+  -- explicite de 10 (100% par défaut mais toujours réductible par un statut).
+  v_player_never_miss := v_ability.precision IS NULL OR v_ability.precision = 0;
+  v_opponent_never_miss := v_opponent_ability.precision IS NULL OR v_opponent_ability.precision = 0;
 
   -- Système de précision (requirement : attacks.precision 1-10, NULL = 10 =
   -- 100%, désactivable globalement via autobattle_config.precision_enabled,
@@ -2888,6 +3040,8 @@ BEGIN
   v_coin_player_first := random() < 0.5;
   v_attacker := CASE WHEN v_coin_player_first THEN 'player' ELSE 'opponent' END;
   v_block_remaining := NULL;
+  v_player_status := NULL;
+  v_opponent_status := NULL;
 
   -- Boucle de tours : par défaut chaque côté joue un coup puis cède la main,
   -- mais une capacité peut porter un effet spécial. 'play_twice'/'play_three'/
@@ -2905,6 +3059,138 @@ BEGIN
     v_turn_no := v_turn_no + 1;
 
     IF v_block_remaining IS NULL THEN
+      v_status_precision_penalty := 0;
+
+      -- Statut actif infligé par une capacité adverse précédente (voir plus
+      -- bas "application du statut après un coup") : traité en tout premier,
+      -- avant même l'effet de tour propre à la capacité de ce côté
+      -- (turn_effect), car un statut peut annuler ce tour (paralysie/gel/
+      -- sommeil), l'affaiblir (peur/confusion) ou infliger des dégâts passifs
+      -- (brûlure/poison) indépendamment de ce que fait sa propre capacité.
+      -- Un seul statut actif à la fois par côté : en appliquer un nouveau
+      -- remplace l'ancien (voir plus bas), pas de cumul.
+      IF v_attacker = 'player' AND v_player_status IN ('paralysis', 'frozen') THEN
+        v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+          'turn', v_turn_no, 'attacker', 'player', 'damage', 0, 'skipped', true,
+          'status_tick', true, 'status', v_player_status, 'status_cured', true,
+          'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', false
+        ));
+        v_player_status := NULL;
+        v_attacker := 'opponent';
+        IF v_turn_no > 200 THEN v_outcome := 'lose'; EXIT; END IF;
+        CONTINUE;
+      ELSIF v_attacker = 'opponent' AND v_opponent_status IN ('paralysis', 'frozen') THEN
+        v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+          'turn', v_turn_no, 'attacker', 'opponent', 'damage', 0, 'skipped', true,
+          'status_tick', true, 'status', v_opponent_status, 'status_cured', true,
+          'defender_hp_after', GREATEST(0, v_player_hp), 'ko', false
+        ));
+        v_opponent_status := NULL;
+        v_attacker := 'player';
+        IF v_turn_no > 200 THEN v_outcome := 'lose'; EXIT; END IF;
+        CONTINUE;
+
+      ELSIF v_attacker = 'player' AND v_player_status = 'sleep' THEN
+        v_status_roll := 1 + floor(random() * 6)::integer;
+        v_status_cured := v_status_roll >= 4;
+        v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+          'turn', v_turn_no, 'attacker', 'player', 'damage', 0, 'skipped', NOT v_status_cured,
+          'status_tick', true, 'status', 'sleep', 'status_roll', v_status_roll, 'status_cured', v_status_cured,
+          'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', false
+        ));
+        IF v_status_cured THEN
+          v_player_status := NULL;
+          v_turn_no := v_turn_no + 1;
+        ELSE
+          v_attacker := 'opponent';
+          IF v_turn_no > 200 THEN v_outcome := 'lose'; EXIT; END IF;
+          CONTINUE;
+        END IF;
+      ELSIF v_attacker = 'opponent' AND v_opponent_status = 'sleep' THEN
+        v_status_roll := 1 + floor(random() * 6)::integer;
+        v_status_cured := v_status_roll >= 4;
+        v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+          'turn', v_turn_no, 'attacker', 'opponent', 'damage', 0, 'skipped', NOT v_status_cured,
+          'status_tick', true, 'status', 'sleep', 'status_roll', v_status_roll, 'status_cured', v_status_cured,
+          'defender_hp_after', GREATEST(0, v_player_hp), 'ko', false
+        ));
+        IF v_status_cured THEN
+          v_opponent_status := NULL;
+          v_turn_no := v_turn_no + 1;
+        ELSE
+          v_attacker := 'player';
+          IF v_turn_no > 200 THEN v_outcome := 'lose'; EXIT; END IF;
+          CONTINUE;
+        END IF;
+
+      ELSIF v_attacker = 'player' AND v_player_status = 'burn' THEN
+        v_status_roll := 1 + floor(random() * 6)::integer;
+        v_status_cured := v_status_roll >= 4;
+        v_player_hp := v_player_hp - 5;
+        v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+          'turn', v_turn_no, 'attacker', 'player', 'damage', 5, 'skipped', false,
+          'status_tick', true, 'status', 'burn', 'status_roll', v_status_roll, 'status_cured', v_status_cured,
+          'attacker_hp_after', GREATEST(0, v_player_hp), 'defender_hp_after', GREATEST(0, v_opponent_hp),
+          'ko', v_player_hp <= 0
+        ));
+        IF v_status_cured THEN v_player_status := NULL; END IF;
+        IF v_player_hp <= 0 THEN v_outcome := 'lose'; EXIT; END IF;
+        v_turn_no := v_turn_no + 1;
+      ELSIF v_attacker = 'opponent' AND v_opponent_status = 'burn' THEN
+        v_status_roll := 1 + floor(random() * 6)::integer;
+        v_status_cured := v_status_roll >= 4;
+        v_opponent_hp := v_opponent_hp - 5;
+        v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+          'turn', v_turn_no, 'attacker', 'opponent', 'damage', 5, 'skipped', false,
+          'status_tick', true, 'status', 'burn', 'status_roll', v_status_roll, 'status_cured', v_status_cured,
+          'attacker_hp_after', GREATEST(0, v_opponent_hp), 'defender_hp_after', GREATEST(0, v_player_hp),
+          'ko', v_opponent_hp <= 0
+        ));
+        IF v_status_cured THEN v_opponent_status := NULL; END IF;
+        IF v_opponent_hp <= 0 THEN v_outcome := 'win'; EXIT; END IF;
+        v_turn_no := v_turn_no + 1;
+
+      ELSIF v_attacker = 'player' AND v_player_status = 'poison' THEN
+        v_player_hp := v_player_hp - 3;
+        v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+          'turn', v_turn_no, 'attacker', 'player', 'damage', 3, 'skipped', false,
+          'status_tick', true, 'status', 'poison', 'status_cured', false,
+          'attacker_hp_after', GREATEST(0, v_player_hp), 'defender_hp_after', GREATEST(0, v_opponent_hp),
+          'ko', v_player_hp <= 0
+        ));
+        IF v_player_hp <= 0 THEN v_outcome := 'lose'; EXIT; END IF;
+        v_turn_no := v_turn_no + 1;
+      ELSIF v_attacker = 'opponent' AND v_opponent_status = 'poison' THEN
+        v_opponent_hp := v_opponent_hp - 3;
+        v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+          'turn', v_turn_no, 'attacker', 'opponent', 'damage', 3, 'skipped', false,
+          'status_tick', true, 'status', 'poison', 'status_cured', false,
+          'attacker_hp_after', GREATEST(0, v_opponent_hp), 'defender_hp_after', GREATEST(0, v_player_hp),
+          'ko', v_opponent_hp <= 0
+        ));
+        IF v_opponent_hp <= 0 THEN v_outcome := 'win'; EXIT; END IF;
+        v_turn_no := v_turn_no + 1;
+
+      ELSIF v_attacker = 'player' AND v_player_status IN ('fear', 'confusion') THEN
+        v_status_precision_penalty := CASE WHEN v_player_status = 'fear' THEN 3 ELSE 5 END;
+        v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+          'turn', v_turn_no, 'attacker', 'player', 'damage', 0, 'skipped', false,
+          'status_tick', true, 'status', v_player_status, 'status_cured', true,
+          'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', false
+        ));
+        v_player_status := NULL;
+        v_turn_no := v_turn_no + 1;
+      ELSIF v_attacker = 'opponent' AND v_opponent_status IN ('fear', 'confusion') THEN
+        v_status_precision_penalty := CASE WHEN v_opponent_status = 'fear' THEN 3 ELSE 5 END;
+        v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+          'turn', v_turn_no, 'attacker', 'opponent', 'damage', 0, 'skipped', false,
+          'status_tick', true, 'status', v_opponent_status, 'status_cured', true,
+          'defender_hp_after', GREATEST(0, v_player_hp), 'ko', false
+        ));
+        v_opponent_status := NULL;
+        v_turn_no := v_turn_no + 1;
+      END IF;
+
       IF v_attacker = 'player' AND v_player_turn_effect = 'skip' THEN
         IF v_player_skip_pending THEN
           v_turns := v_turns || jsonb_build_array(jsonb_build_object(
@@ -2937,6 +3223,39 @@ BEGIN
         v_block_remaining := GREATEST(1, COALESCE(v_player_repeat_max, 6));
       ELSIF v_attacker = 'opponent' AND v_opponent_turn_effect = 'repeat_until_fail' THEN
         v_block_remaining := GREATEST(1, COALESCE(v_opponent_repeat_max, 6));
+      -- 'prepare_release' : deux tours pour une seule attaque — le premier
+      -- ne fait rien d'autre qu'afficher "Préparation" (turn.preparing),
+      -- le second joue l'attaque normalement (block=1, comme si de rien
+      -- n'était). v_*_preparing retient où on en est d'une activation à
+      -- l'autre.
+      ELSIF v_attacker = 'player' AND v_player_turn_effect = 'prepare_release' THEN
+        IF v_player_preparing THEN
+          v_player_preparing := false;
+          v_block_remaining := 1;
+        ELSE
+          v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+            'turn', v_turn_no, 'attacker', 'player', 'damage', 0, 'skipped', true, 'preparing', true,
+            'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', false
+          ));
+          v_player_preparing := true;
+          v_attacker := 'opponent';
+          IF v_turn_no > 200 THEN v_outcome := 'lose'; EXIT; END IF;
+          CONTINUE;
+        END IF;
+      ELSIF v_attacker = 'opponent' AND v_opponent_turn_effect = 'prepare_release' THEN
+        IF v_opponent_preparing THEN
+          v_opponent_preparing := false;
+          v_block_remaining := 1;
+        ELSE
+          v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+            'turn', v_turn_no, 'attacker', 'opponent', 'damage', 0, 'skipped', true, 'preparing', true,
+            'defender_hp_after', GREATEST(0, v_player_hp), 'ko', false
+          ));
+          v_opponent_preparing := true;
+          v_attacker := 'player';
+          IF v_turn_no > 200 THEN v_outcome := 'lose'; EXIT; END IF;
+          CONTINUE;
+        END IF;
       ELSE
         v_block_remaining := autobattle_ability_burst(CASE WHEN v_attacker = 'player' THEN p_ability_nom ELSE v_level.opponent_ability_nom END);
         IF v_block_remaining = 0 THEN
@@ -2954,89 +3273,219 @@ BEGIN
     END IF;
 
     IF v_attacker = 'player' THEN
-      v_hit_chance := CASE WHEN v_precision_enabled THEN COALESCE(v_ability.precision, 10) ELSE 10 END * 10;
-      v_missed := random() >= (v_hit_chance / 100.0);
-
-      IF v_missed THEN
+      -- Invulnérabilité de l'adversaire (accordée à son propre tour
+      -- précédent, voir plus bas) : rate automatiquement, consommée une
+      -- fois, ignore précision/statuts entièrement.
+      IF v_opponent_invulnerable THEN
+        v_opponent_invulnerable := false;
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
-          'turn', v_turn_no, 'attacker', 'player', 'damage', 0, 'missed', true,
+          'turn', v_turn_no, 'attacker', 'player', 'damage', 0, 'missed', true, 'invulnerable_miss', true,
           'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', false
         ));
-        -- 'repeat_until_fail' : le premier raté met fin à la série en cours,
-        -- même s'il reste des activations dans v_block_remaining — on force
-        -- le passage de tour via la décrémentation générique ci-dessous.
         IF v_player_turn_effect = 'repeat_until_fail' THEN
           v_block_remaining := 1;
         END IF;
       ELSE
-        v_hit_dice := CASE WHEN v_ability.degats_de IS NOT NULL AND v_ability.degats_de > 0
-          THEN 1 + floor(random() * v_ability.degats_de)::integer ELSE 0 END;
-        v_hit_damage := GREATEST(0, v_player_damage + v_hit_dice);
-        v_opponent_hp := v_opponent_hp - v_hit_damage;
+        v_missed := (NOT v_player_never_miss) AND
+          random() >= ((CASE WHEN v_precision_enabled THEN GREATEST(0, COALESCE(v_ability.precision, 10) - v_status_precision_penalty) ELSE 10 END * 10) / 100.0);
 
-        v_heal_amt := NULL;
-        IF v_player_heal_type = 'static' THEN
-          v_heal_amt := COALESCE(v_player_heal_amount, 0);
-        ELSIF v_player_heal_type = 'percent_damage' THEN
-          v_heal_amt := floor(v_hit_damage * COALESCE(v_player_heal_percent, 0) / 100.0)::integer;
-        ELSIF v_player_heal_type = 'use_stats' THEN
-          v_heal_dice := CASE WHEN v_ability.degats_de IS NOT NULL AND v_ability.degats_de > 0
+        IF v_missed THEN
+          v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+            'turn', v_turn_no, 'attacker', 'player', 'damage', 0, 'missed', true,
+            'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', false
+          ));
+          -- 'repeat_until_fail' : le premier raté met fin à la série en
+          -- cours, même s'il reste des activations dans v_block_remaining —
+          -- on force le passage de tour via la décrémentation générique.
+          IF v_player_turn_effect = 'repeat_until_fail' THEN
+            v_block_remaining := 1;
+          END IF;
+        ELSE
+          v_hit_dice := CASE WHEN v_ability.degats_de IS NOT NULL AND v_ability.degats_de > 0
             THEN 1 + floor(random() * v_ability.degats_de)::integer ELSE 0 END;
-          v_heal_amt := COALESCE(v_ability.degats_base, 0) + v_heal_dice;
-        END IF;
+          v_hit_damage := GREATEST(0, v_player_damage + v_hit_dice);
 
-        v_turn_entry := jsonb_build_object(
-          'turn', v_turn_no, 'attacker', 'player', 'damage', v_hit_damage,
-          'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', v_opponent_hp <= 0
-        );
-        IF v_heal_amt IS NOT NULL AND v_heal_amt > 0 THEN
-          v_player_hp := LEAST(v_player_max_hp, v_player_hp + v_heal_amt);
-          v_turn_entry := v_turn_entry || jsonb_build_object('heal', v_heal_amt, 'attacker_hp_after', v_player_hp);
-        END IF;
-        v_turns := v_turns || jsonb_build_array(v_turn_entry);
+          -- Dégâts additionnels conditionnels (voir bonus_damage_* et les 4
+          -- conditions possibles) — appliqués après le dé, avant le
+          -- contre-coup.
+          v_bonus_condition_met := v_player_bonus_condition = 'took_damage_last_turn' AND v_player_took_damage
+            OR v_player_bonus_condition = 'first_use' AND NOT v_player_used_ability
+            OR v_player_bonus_condition = 'dice_equals' AND v_hit_dice = v_player_bonus_dice_value
+            OR v_player_bonus_condition = 'has_status' AND v_player_status IS NOT NULL;
+          IF v_player_bonus_type IS NOT NULL AND v_bonus_condition_met THEN
+            IF v_player_bonus_type = 'multiply' THEN
+              v_hit_damage := floor(v_hit_damage * COALESCE(v_player_bonus_multiplier, 1))::integer;
+            ELSIF v_player_bonus_type = 'flat' THEN
+              v_hit_damage := v_hit_damage + COALESCE(v_player_bonus_flat, 0);
+            ELSIF v_player_bonus_type = 'range' THEN
+              v_hit_damage := v_hit_damage + (v_player_bonus_min + floor(random() * (v_player_bonus_max - v_player_bonus_min + 1))::integer);
+            END IF;
+            v_hit_damage := GREATEST(0, v_hit_damage);
+          END IF;
+          v_player_used_ability := true;
+          v_player_took_damage := false;
 
-        IF v_opponent_hp <= 0 THEN v_outcome := 'win'; EXIT; END IF;
+          v_opponent_hp := v_opponent_hp - v_hit_damage;
+          v_opponent_took_damage := true;
+
+          v_heal_amt := NULL;
+          IF v_player_heal_type = 'static' THEN
+            v_heal_amt := COALESCE(v_player_heal_amount, 0);
+          ELSIF v_player_heal_type = 'percent_damage' THEN
+            v_heal_amt := floor(v_hit_damage * COALESCE(v_player_heal_percent, 0) / 100.0)::integer;
+          ELSIF v_player_heal_type = 'use_stats' THEN
+            v_heal_dice := CASE WHEN v_ability.degats_de IS NOT NULL AND v_ability.degats_de > 0
+              THEN 1 + floor(random() * v_ability.degats_de)::integer ELSE 0 END;
+            v_heal_amt := COALESCE(v_ability.degats_base, 0) + v_heal_dice;
+          END IF;
+
+          v_turn_entry := jsonb_build_object(
+            'turn', v_turn_no, 'attacker', 'player', 'damage', v_hit_damage,
+            'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', v_opponent_hp <= 0
+          );
+          IF v_heal_amt IS NOT NULL AND v_heal_amt > 0 THEN
+            v_player_hp := LEAST(v_player_max_hp, v_player_hp + v_heal_amt);
+            v_turn_entry := v_turn_entry || jsonb_build_object('heal', v_heal_amt, 'attacker_hp_after', v_player_hp);
+            -- Le poison est guéri par n'importe quel soin, quel qu'en soit le
+            -- moyen (voir status_effect 'poison') — paralysie/gel/peur/
+            -- confusion/sommeil/brûlure ne sont PAS guéris par un soin.
+            IF v_player_status = 'poison' THEN
+              v_player_status := NULL;
+              v_turn_entry := v_turn_entry || jsonb_build_object('status_cured_by_heal', true);
+            END IF;
+          END IF;
+          -- Un coup réussi a une chance (status_chance) d'infliger le statut
+          -- de la capacité — à l'adversaire normalement, à soi-même si
+          -- status_reversed (voir autobattle_ability_rules). Remplace un
+          -- statut déjà actif sur la cible le cas échéant (pas de cumul).
+          IF v_ability.status_effect IS NOT NULL AND random() * 100 < v_ability.status_chance THEN
+            IF v_player_status_reversed THEN
+              v_player_status := v_ability.status_effect;
+            ELSE
+              v_opponent_status := v_ability.status_effect;
+            END IF;
+            v_turn_entry := v_turn_entry || jsonb_build_object('status_applied', v_ability.status_effect, 'status_applied_reversed', v_player_status_reversed);
+          END IF;
+          -- Invulnérabilité accordée par cette capacité : consommée au
+          -- prochain tour adverse (voir plus haut), indépendamment du reste.
+          IF v_player_invuln_grant THEN
+            v_player_invulnerable := true;
+            v_turn_entry := v_turn_entry || jsonb_build_object('invulnerable_granted', true);
+          END IF;
+          -- Contre-coup : dégâts sur son propre utilisateur, après tout le
+          -- reste (soin/statut/invulnérabilité), basés sur les dégâts FINAUX
+          -- (bonus inclus) — voir recoil_type.
+          IF v_player_recoil_type IS NOT NULL THEN
+            v_recoil_amt := CASE WHEN v_player_recoil_type = 'range'
+              THEN v_player_recoil_min + floor(random() * (v_player_recoil_max - v_player_recoil_min + 1))::integer
+              ELSE floor(v_hit_damage * COALESCE(v_player_recoil_percent, 0) / 100.0)::integer END;
+            IF v_recoil_amt > 0 THEN
+              v_player_hp := v_player_hp - v_recoil_amt;
+              v_turn_entry := v_turn_entry || jsonb_build_object('recoil', v_recoil_amt, 'attacker_hp_after', v_player_hp);
+            END IF;
+          END IF;
+          v_turns := v_turns || jsonb_build_array(v_turn_entry);
+
+          IF v_opponent_hp <= 0 THEN v_outcome := 'win'; EXIT; END IF;
+          IF v_player_hp <= 0 THEN v_outcome := 'lose'; EXIT; END IF;
+        END IF;
       END IF;
     ELSE
-      v_hit_chance := CASE WHEN v_precision_enabled THEN COALESCE(v_opponent_ability.precision, 10) ELSE 10 END * 10;
-      v_missed := random() >= (v_hit_chance / 100.0);
-
-      IF v_missed THEN
+      IF v_player_invulnerable THEN
+        v_player_invulnerable := false;
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
-          'turn', v_turn_no, 'attacker', 'opponent', 'damage', 0, 'missed', true,
+          'turn', v_turn_no, 'attacker', 'opponent', 'damage', 0, 'missed', true, 'invulnerable_miss', true,
           'defender_hp_after', GREATEST(0, v_player_hp), 'ko', false
         ));
         IF v_opponent_turn_effect = 'repeat_until_fail' THEN
           v_block_remaining := 1;
         END IF;
       ELSE
-        v_hit_dice := CASE WHEN v_opponent_ability.degats_de IS NOT NULL AND v_opponent_ability.degats_de > 0
-          THEN 1 + floor(random() * v_opponent_ability.degats_de)::integer ELSE 0 END;
-        v_hit_damage := GREATEST(0, v_opponent_damage + v_hit_dice);
-        v_player_hp := v_player_hp - v_hit_damage;
+        v_missed := (NOT v_opponent_never_miss) AND
+          random() >= ((CASE WHEN v_precision_enabled THEN GREATEST(0, COALESCE(v_opponent_ability.precision, 10) - v_status_precision_penalty) ELSE 10 END * 10) / 100.0);
 
-        v_heal_amt := NULL;
-        IF v_opponent_heal_type = 'static' THEN
-          v_heal_amt := COALESCE(v_opponent_heal_amount, 0);
-        ELSIF v_opponent_heal_type = 'percent_damage' THEN
-          v_heal_amt := floor(v_hit_damage * COALESCE(v_opponent_heal_percent, 0) / 100.0)::integer;
-        ELSIF v_opponent_heal_type = 'use_stats' THEN
-          v_heal_dice := CASE WHEN v_opponent_ability.degats_de IS NOT NULL AND v_opponent_ability.degats_de > 0
+        IF v_missed THEN
+          v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+            'turn', v_turn_no, 'attacker', 'opponent', 'damage', 0, 'missed', true,
+            'defender_hp_after', GREATEST(0, v_player_hp), 'ko', false
+          ));
+          IF v_opponent_turn_effect = 'repeat_until_fail' THEN
+            v_block_remaining := 1;
+          END IF;
+        ELSE
+          v_hit_dice := CASE WHEN v_opponent_ability.degats_de IS NOT NULL AND v_opponent_ability.degats_de > 0
             THEN 1 + floor(random() * v_opponent_ability.degats_de)::integer ELSE 0 END;
-          v_heal_amt := COALESCE(v_opponent_ability.degats_base, 0) + v_heal_dice;
-        END IF;
+          v_hit_damage := GREATEST(0, v_opponent_damage + v_hit_dice);
 
-        v_turn_entry := jsonb_build_object(
-          'turn', v_turn_no, 'attacker', 'opponent', 'damage', v_hit_damage,
-          'defender_hp_after', GREATEST(0, v_player_hp), 'ko', v_player_hp <= 0
-        );
-        IF v_heal_amt IS NOT NULL AND v_heal_amt > 0 THEN
-          v_opponent_hp := LEAST(v_level.opponent_hp, v_opponent_hp + v_heal_amt);
-          v_turn_entry := v_turn_entry || jsonb_build_object('heal', v_heal_amt, 'attacker_hp_after', v_opponent_hp);
-        END IF;
-        v_turns := v_turns || jsonb_build_array(v_turn_entry);
+          v_bonus_condition_met := v_opponent_bonus_condition = 'took_damage_last_turn' AND v_opponent_took_damage
+            OR v_opponent_bonus_condition = 'first_use' AND NOT v_opponent_used_ability
+            OR v_opponent_bonus_condition = 'dice_equals' AND v_hit_dice = v_opponent_bonus_dice_value
+            OR v_opponent_bonus_condition = 'has_status' AND v_opponent_status IS NOT NULL;
+          IF v_opponent_bonus_type IS NOT NULL AND v_bonus_condition_met THEN
+            IF v_opponent_bonus_type = 'multiply' THEN
+              v_hit_damage := floor(v_hit_damage * COALESCE(v_opponent_bonus_multiplier, 1))::integer;
+            ELSIF v_opponent_bonus_type = 'flat' THEN
+              v_hit_damage := v_hit_damage + COALESCE(v_opponent_bonus_flat, 0);
+            ELSIF v_opponent_bonus_type = 'range' THEN
+              v_hit_damage := v_hit_damage + (v_opponent_bonus_min + floor(random() * (v_opponent_bonus_max - v_opponent_bonus_min + 1))::integer);
+            END IF;
+            v_hit_damage := GREATEST(0, v_hit_damage);
+          END IF;
+          v_opponent_used_ability := true;
+          v_opponent_took_damage := false;
 
-        IF v_player_hp <= 0 THEN v_outcome := 'lose'; EXIT; END IF;
+          v_player_hp := v_player_hp - v_hit_damage;
+          v_player_took_damage := true;
+
+          v_heal_amt := NULL;
+          IF v_opponent_heal_type = 'static' THEN
+            v_heal_amt := COALESCE(v_opponent_heal_amount, 0);
+          ELSIF v_opponent_heal_type = 'percent_damage' THEN
+            v_heal_amt := floor(v_hit_damage * COALESCE(v_opponent_heal_percent, 0) / 100.0)::integer;
+          ELSIF v_opponent_heal_type = 'use_stats' THEN
+            v_heal_dice := CASE WHEN v_opponent_ability.degats_de IS NOT NULL AND v_opponent_ability.degats_de > 0
+              THEN 1 + floor(random() * v_opponent_ability.degats_de)::integer ELSE 0 END;
+            v_heal_amt := COALESCE(v_opponent_ability.degats_base, 0) + v_heal_dice;
+          END IF;
+
+          v_turn_entry := jsonb_build_object(
+            'turn', v_turn_no, 'attacker', 'opponent', 'damage', v_hit_damage,
+            'defender_hp_after', GREATEST(0, v_player_hp), 'ko', v_player_hp <= 0
+          );
+          IF v_heal_amt IS NOT NULL AND v_heal_amt > 0 THEN
+            v_opponent_hp := LEAST(v_level.opponent_hp, v_opponent_hp + v_heal_amt);
+            v_turn_entry := v_turn_entry || jsonb_build_object('heal', v_heal_amt, 'attacker_hp_after', v_opponent_hp);
+            IF v_opponent_status = 'poison' THEN
+              v_opponent_status := NULL;
+              v_turn_entry := v_turn_entry || jsonb_build_object('status_cured_by_heal', true);
+            END IF;
+          END IF;
+          IF v_opponent_ability.status_effect IS NOT NULL AND random() * 100 < v_opponent_ability.status_chance THEN
+            IF v_opponent_status_reversed THEN
+              v_opponent_status := v_opponent_ability.status_effect;
+            ELSE
+              v_player_status := v_opponent_ability.status_effect;
+            END IF;
+            v_turn_entry := v_turn_entry || jsonb_build_object('status_applied', v_opponent_ability.status_effect, 'status_applied_reversed', v_opponent_status_reversed);
+          END IF;
+          IF v_opponent_invuln_grant THEN
+            v_opponent_invulnerable := true;
+            v_turn_entry := v_turn_entry || jsonb_build_object('invulnerable_granted', true);
+          END IF;
+          IF v_opponent_recoil_type IS NOT NULL THEN
+            v_recoil_amt := CASE WHEN v_opponent_recoil_type = 'range'
+              THEN v_opponent_recoil_min + floor(random() * (v_opponent_recoil_max - v_opponent_recoil_min + 1))::integer
+              ELSE floor(v_hit_damage * COALESCE(v_opponent_recoil_percent, 0) / 100.0)::integer END;
+            IF v_recoil_amt > 0 THEN
+              v_opponent_hp := v_opponent_hp - v_recoil_amt;
+              v_turn_entry := v_turn_entry || jsonb_build_object('recoil', v_recoil_amt, 'attacker_hp_after', v_opponent_hp);
+            END IF;
+          END IF;
+          v_turns := v_turns || jsonb_build_array(v_turn_entry);
+
+          IF v_player_hp <= 0 THEN v_outcome := 'lose'; EXIT; END IF;
+          IF v_opponent_hp <= 0 THEN v_outcome := 'win'; EXIT; END IF;
+        END IF;
       END IF;
     END IF;
 

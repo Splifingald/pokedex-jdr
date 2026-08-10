@@ -47,7 +47,7 @@ function LevelReward({
   if (reward.reward_type === 'xp') {
     return (
       <div className="w-6 h-6 shrink-0 flex items-center justify-center">
-        <span className="text-sky-300 text-xs font-bold leading-none [text-shadow:0_1px_1px_rgba(0,0,0,0.8)]">{reward.xp_amount} XP</span>
+        <span className="text-xp-blue text-xs font-bold leading-none [text-shadow:0_1px_1px_rgba(0,0,0,0.8)]">{reward.xp_amount} XP</span>
       </div>
     )
   }
@@ -140,12 +140,16 @@ export function AutoBattleVariantBanner({
               {levels.map((lvl) => {
                 const isCurrent = lvl.level_index === currentIndex
                 const isLevelCompleted = stateByLevel.get(lvl.id)?.completed ?? false
-                const borderClass = isCurrent ? 'border-[#f0e08f]' : isLevelCompleted ? 'border-[#5fd67a]' : 'border-white/60'
+                const colorClass = isCurrent
+                  ? 'bg-black text-white border-[#f0e08f]'
+                  : isLevelCompleted
+                    ? 'bg-[#5fd67a] text-black border-[#5fd67a]'
+                    : 'bg-black text-white border-white/60'
                 return (
                   <div
                     key={lvl.id}
                     ref={isCurrent ? currentDotRef : undefined}
-                    className={`relative z-10 w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-xs font-bold border-2 bg-black text-white ${borderClass} ${isCurrent ? 'scale-110' : ''}`}
+                    className={`relative z-10 w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-xs font-bold ${isCurrent ? 'border-[3px]' : 'border-2'} ${colorClass} ${isCurrent ? 'scale-110' : ''}`}
                     title={`Niveau ${lvl.level_index + 1}`}
                   >
                     {lvl.level_index + 1}
