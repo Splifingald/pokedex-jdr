@@ -279,15 +279,20 @@ export function AutoBattleScreen({
       const attackerSide = turn.attacker
       const hitSide: Side = attackerSide === 'player' ? 'opponent' : 'player'
 
-      // Le bouclier d'invulnérabilité de la CIBLE de ce tour expire dès que
-      // ce tour commence, quel qu'en soit le type (voir la déclaration de
-      // playerShieldActive/opponentShieldActive plus haut).
-      if (attackerSide === 'player' && opponentShieldActive) {
-        opponentShieldActive = false
-        timers.push(window.setTimeout(() => setOpponentInvulnerable(false), turnStart))
-      } else if (attackerSide === 'opponent' && playerShieldActive) {
+      // Le bouclier d'invulnérabilité expire EXACTEMENT 1 tour après avoir
+      // été accordé, point — quel que soit le type de ce tour suivant et quel
+      // que soit son attaquant (voir autobattle_resolve_battle : ce n'est
+      // plus conditionné à "l'adversaire attaque", une rafale du même camp
+      // qui l'a accordé le retire tout aussi bien). granted ci-dessous est
+      // affecté à la fin de CETTE itération : ce test porte donc toujours sur
+      // un bouclier accordé lors d'une itération précédente.
+      if (playerShieldActive) {
         playerShieldActive = false
         timers.push(window.setTimeout(() => setPlayerInvulnerable(false), turnStart))
+      }
+      if (opponentShieldActive) {
+        opponentShieldActive = false
+        timers.push(window.setTimeout(() => setOpponentInvulnerable(false), turnStart))
       }
       // Le suivi local (synchrone, pendant la programmation des timers) doit
       // être mis à jour ICI plutôt que dans les callbacks différés

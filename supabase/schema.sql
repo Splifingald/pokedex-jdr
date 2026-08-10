@@ -2850,6 +2850,8 @@ DECLARE
   v_opponent_invulnerable   boolean := false;
   v_player_invuln_pending_miss   boolean := false;
   v_opponent_invuln_pending_miss boolean := false;
+  v_player_invuln_granted_turn   integer;
+  v_opponent_invuln_granted_turn integer;
   v_player_invuln_grant     boolean;
   v_opponent_invuln_grant   boolean;
   v_player_used_ability     boolean := false;
@@ -3113,26 +3115,32 @@ BEGIN
   LOOP
     v_turn_no := v_turn_no + 1;
 
-    IF v_block_remaining IS NULL THEN
-      v_status_precision_penalty := 0;
-
-      -- Le bouclier d'invulnérabilité protège UN SEUL tour de l'adversaire,
-      -- qu'il s'agisse d'une vraie attaque ou non (préparation/tour passé/
-      -- tick de statut) — retiré ici, tout au début du tour adverse, AVANT
-      -- de savoir de quel type de tour il s'agit. v_*_invuln_pending_miss
-      -- retient jusqu'à la résolution d'attaque plus bas si CE tour précis
-      -- doit rater automatiquement (uniquement s'il s'avère être une vraie
-      -- attaque) ; sinon il reste simplement inutilisé et le bouclier est
-      -- tout de même consommé — sans ça, un bouclier accordé pendant qu'un
-      -- côté prépare sa propre capacité (prepare_release) pouvait survivre
-      -- plusieurs tours avant d'être testé par une vraie attaque.
-      IF v_attacker = 'player' AND v_opponent_invulnerable THEN
-        v_opponent_invulnerable := false;
-        v_opponent_invuln_pending_miss := true;
-      ELSIF v_attacker = 'opponent' AND v_player_invulnerable THEN
-        v_player_invulnerable := false;
+    -- Le bouclier d'invulnérabilité dure EXACTEMENT 1 tour, point : il est
+    -- retiré dès que v_turn_no dépasse le tour où il a été accordé, que ce
+    -- tour suivant soit une vraie attaque adverse ou non (préparation, tour
+    -- passé, tick de statut, ou même la suite d'une rafale du même côté) —
+    -- placé ici, HORS du bloc "IF v_block_remaining IS NULL", pour qu'il
+    -- s'exécute à CHAQUE itération de boucle sans exception (une rafale
+    -- play_twice/play_three/repeat_until_fail laisse v_block_remaining non
+    -- NULL sur les tours suivants, ce qui sautait cette expiration avant).
+    -- v_*_invuln_pending_miss retient jusqu'à la résolution d'attaque plus
+    -- bas si CE tour précis doit rater automatiquement (uniquement si son
+    -- attaquant est bien le camp adverse à celui protégé).
+    IF v_player_invulnerable AND v_player_invuln_granted_turn IS NOT NULL AND v_turn_no > v_player_invuln_granted_turn THEN
+      v_player_invulnerable := false;
+      IF v_attacker = 'opponent' THEN
         v_player_invuln_pending_miss := true;
       END IF;
+    END IF;
+    IF v_opponent_invulnerable AND v_opponent_invuln_granted_turn IS NOT NULL AND v_turn_no > v_opponent_invuln_granted_turn THEN
+      v_opponent_invulnerable := false;
+      IF v_attacker = 'player' THEN
+        v_opponent_invuln_pending_miss := true;
+      END IF;
+    END IF;
+
+    IF v_block_remaining IS NULL THEN
+      v_status_precision_penalty := 0;
 
       -- Statut actif infligé par une capacité adverse précédente (voir plus
       -- bas "application du statut après un coup") : traité en tout premier,
@@ -3316,6 +3324,7 @@ BEGIN
           );
           IF v_player_invuln_grant THEN
             v_player_invulnerable := true;
+            v_player_invuln_granted_turn := v_turn_no;
             v_turn_entry := v_turn_entry || jsonb_build_object('invulnerable_granted', true);
           END IF;
           v_turns := v_turns || jsonb_build_array(v_turn_entry);
@@ -3335,6 +3344,7 @@ BEGIN
           );
           IF v_opponent_invuln_grant THEN
             v_opponent_invulnerable := true;
+            v_opponent_invuln_granted_turn := v_turn_no;
             v_turn_entry := v_turn_entry || jsonb_build_object('invulnerable_granted', true);
           END IF;
           v_turns := v_turns || jsonb_build_array(v_turn_entry);
@@ -3460,6 +3470,7 @@ BEGIN
           -- libération) — ne pas la ré-accorder ici dans ce cas.
           IF v_player_invuln_grant AND v_player_turn_effect <> 'prepare_release' THEN
             v_player_invulnerable := true;
+            v_player_invuln_granted_turn := v_turn_no;
             v_turn_entry := v_turn_entry || jsonb_build_object('invulnerable_granted', true);
           END IF;
           -- Contre-coup : dégâts sur son propre utilisateur, après tout le
@@ -3560,6 +3571,7 @@ BEGIN
           END IF;
           IF v_opponent_invuln_grant AND v_opponent_turn_effect <> 'prepare_release' THEN
             v_opponent_invulnerable := true;
+            v_opponent_invuln_granted_turn := v_turn_no;
             v_turn_entry := v_turn_entry || jsonb_build_object('invulnerable_granted', true);
           END IF;
           IF v_opponent_recoil_type IS NOT NULL THEN
