@@ -83,7 +83,7 @@ export function AutoBattleAbilityPicker({ playerPokemon, attacksByName, bannedAt
                         className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full text-white shrink-0 whitespace-nowrap"
                         style={{ backgroundColor: statusDisplay.color }}
                       >
-                        <PixelIcon src={statusDisplay.iconSrc} size={14} />
+                        <PixelIcon src={statusDisplay.iconSrc} size={14} colored />
                         {statusDisplay.label} {a.status_chance ?? 0}%
                       </span>
                     )

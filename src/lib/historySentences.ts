@@ -1,4 +1,4 @@
-import type { Player, Pokemon, Item, HistoryInventoryPayload, HistoryPokedexPayload, HistoryTeamPayload, HistoryCombatPayload, HistoryMinigamePayload, HistoryMiningPayload, HistoryDaycarePayload, HistorySafariPayload, HistoryChatPayload } from '../types'
+import type { Player, Pokemon, Item, HistoryInventoryPayload, HistoryPokedexPayload, HistoryTeamPayload, HistoryCombatPayload, HistoryMinigamePayload, HistoryMiningPayload, HistoryDaycarePayload, HistorySafariPayload, HistoryAutoBattlePayload, HistoryChatPayload } from '../types'
 import { POKEDOLLAR_ITEM_NAME, TICKET_CASINO_ITEM_NAME, TICKET_TREMPETTE_ITEM_NAME, TICKET_MINING_ITEM_NAME } from '../types'
 import type { ReferenceEntry } from '../hooks/useReferenceIndex'
 import { getStatusInfo } from './status'
@@ -177,6 +177,23 @@ function safariSentence(entry: DisplayHistoryEntry, ctx: SentenceContext): Sente
   return [pokemonRef, { text: ' a fui le Safari (tentative de ' }, player, { text: ')' }]
 }
 
+function autobattleSentence(entry: DisplayHistoryEntry, ctx: SentenceContext): SentencePart[] {
+  const payload = entry.payload as HistoryAutoBattlePayload
+  const player = playerPart(ctx, entry.player_id)
+  const pokemon = pokemonPart(ctx, payload.pokemon_nom)
+  const opponent = pokemonPart(ctx, payload.opponent_pokemon_nom)
+  const levelLabel = `niveau ${payload.level_index + 1}`
+
+  if (entry.action_type === 'autobattle_variant_completed') {
+    return [player, { text: ' : ' }, pokemon, { text: ' a terminé la variante ' }, { text: payload.variant_nom }, { text: ' en Combat Auto' }]
+  }
+  if (entry.action_type === 'autobattle_lose') {
+    return [player, { text: ' : ' }, pokemon, { text: ' a perdu contre ' }, opponent, { text: ` au ${levelLabel} de Combat Auto (` }, { text: payload.variant_nom }, { text: ')' }]
+  }
+  // autobattle_win
+  return [player, { text: ' : ' }, pokemon, { text: ' a battu ' }, opponent, { text: ` au ${levelLabel} de Combat Auto (` }, { text: payload.variant_nom }, { text: ')' }]
+}
+
 function chatSentence(entry: DisplayHistoryEntry, ctx: SentenceContext): SentencePart[] {
   const payload = entry.payload as HistoryChatPayload
   const player = playerPart(ctx, entry.player_id)
@@ -200,6 +217,8 @@ export function buildSentenceParts(entry: DisplayHistoryEntry, ctx: SentenceCont
       return daycareSentence(entry, ctx)
     case 'safari':
       return safariSentence(entry, ctx)
+    case 'autobattle':
+      return autobattleSentence(entry, ctx)
     case 'chat':
       return chatSentence(entry, ctx)
     default:

@@ -13,9 +13,10 @@ interface Props {
   onSelect: (attack: Attack) => void
   /** Affiche les dégâts de base à côté de chaque résultat (défaut: masqué) */
   showDamage?: boolean
+  className?: string
 }
 
-export function MoveSearchInput({ options, disabled, onSelect, showDamage = false }: Props) {
+export function MoveSearchInput({ options, disabled, onSelect, showDamage = false, className = '' }: Props) {
   const [query, setQuery] = useState('')
 
   const matches = useMemo(() => {
@@ -31,14 +32,14 @@ export function MoveSearchInput({ options, disabled, onSelect, showDamage = fals
 
   if (disabled) {
     return (
-      <p className="text-ink-muted-2 text-sm bg-cream-secondary border-2 border-ink rounded-lg px-3 py-2">
+      <p className={`text-ink-muted-2 text-sm bg-cream-secondary border-2 border-ink rounded-lg px-3 py-2 ${className}`}>
         Nombre maximum de capacités atteint.
       </p>
     )
   }
 
   return (
-    <div className="relative">
+    <div className={`relative ${className}`}>
       <input
         type="text"
         value={query}
@@ -82,7 +83,7 @@ export function MoveSearchInput({ options, disabled, onSelect, showDamage = fals
                           className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full text-white whitespace-nowrap"
                           style={{ backgroundColor: statusDisplay.color }}
                         >
-                          <PixelIcon src={statusDisplay.iconSrc} size={14} />
+                          <PixelIcon src={statusDisplay.iconSrc} size={14} colored />
                           {statusDisplay.label} {a.status_chance ?? 0}%
                         </span>
                       )

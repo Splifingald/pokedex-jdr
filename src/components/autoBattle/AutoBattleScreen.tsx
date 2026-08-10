@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Pokemon, PlayerPokemon, AutoBattleStatusEffect } from '../../types'
 import { ownedPokemonName } from '../../types'
@@ -7,6 +7,7 @@ import { AutoBattleDamageNumber } from './AutoBattleDamageNumber'
 import { AutoBattleFloatingText } from './AutoBattleFloatingText'
 import { AutoBattleHealEffect } from './AutoBattleHealEffect'
 import { AutoBattleDiceRoll } from './AutoBattleDiceRoll'
+import { AutoBattleHistoryLog, type AutoBattleHistoryEntryData } from './AutoBattleHistoryLog'
 import { getStatusEffectDisplay } from '../../lib/autoBattle'
 import { PixelIcon } from '../icons/PixelIcon'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
@@ -26,9 +27,13 @@ interface Props {
   playerPokemon: PlayerPokemon
   playerSpecies: Pokemon | undefined
   playerMaxHp: number
+  playerAbilityNom: string
+  /** Cas Métamorph : sprite de l'adversaire copié pour ce combat (voir autobattle_resolve_battle) — remplace playerSpecies.image_miniature partout où le sprite du joueur est affiché. */
+  playerImageOverride?: string
   opponentSpecies: Pokemon | undefined
   opponentMaxHp: number
   opponentNom: string
+  opponentAbilityNom: string
   turns: AutoBattleTurn[]
   /** Le pokémon du joueur est-il super efficace contre le type de l'adversaire (voir requirement #17) */
   playerTypeBonus: boolean
@@ -162,7 +167,7 @@ function statusOverlayStyle(status: AutoBattleStatusEffect, spriteUrl: string): 
 // fois le combat terminé, reste affiché avec un bouton "Continuer" plutôt
 // que d'enchaîner automatiquement sur les récompenses/l'écran de défaite.
 export function AutoBattleScreen({
-  playerPokemon, playerSpecies, playerMaxHp, opponentSpecies, opponentMaxHp, opponentNom, turns,
+  playerPokemon, playerSpecies, playerMaxHp, playerAbilityNom, playerImageOverride, opponentSpecies, opponentMaxHp, opponentNom, opponentAbilityNom, turns,
   playerTypeBonus, opponentTypeBonus, onContinue,
 }: Props) {
   const [countdownStep, setCountdownStep] = useState(-1)
@@ -177,9 +182,14 @@ export function AutoBattleScreen({
   const [lastDamage, setLastDamage] = useState<{ side: Side; damage: number; superEffective: boolean; color?: string } | null>(null)
   const [missSide, setMissSide] = useState<Side | null>(null)
   const [missKey, setMissKey] = useState(0)
+  const [missLabel, setMissLabel] = useState('MANQUÉ')
   const [skipSide, setSkipSide] = useState<Side | null>(null)
   const [skipKey, setSkipKey] = useState(0)
   const [skipLabel, setSkipLabel] = useState('Tour passé !')
+  const [recoilFx, setRecoilFx] = useState<{ side: Side; amount: number } | null>(null)
+  const [recoilKey, setRecoilKey] = useState(0)
+  const [playerInvulnerable, setPlayerInvulnerable] = useState(false)
+  const [opponentInvulnerable, setOpponentInvulnerable] = useState(false)
   const [playerStatus, setPlayerStatus] = useState<AutoBattleStatusEffect | null>(null)
   const [opponentStatus, setOpponentStatus] = useState<AutoBattleStatusEffect | null>(null)
   const [diceRoll, setDiceRoll] = useState<{ side: Side; value: number } | null>(null)
@@ -188,6 +198,14 @@ export function AutoBattleScreen({
   const [healKey, setHealKey] = useState(0)
   const [lastHeal, setLastHeal] = useState<{ side: Side; amount: number } | null>(null)
   const [battleDone, setBattleDone] = useState(turns.length === 0)
+  // Historique du combat (requirement : liste locale, jamais persistée en
+  // base — voir AutoBattleHistoryLog) : construit en direct pendant la
+  // relecture des tours, pas dérivé de `turns` a posteriori, pour que
+  // l'horodatage de chaque entrée reflète le moment réel où l'évènement est
+  // révélé à l'écran plutôt qu'un timestamp serveur inexistant ici.
+  const [historyEntries, setHistoryEntries] = useState<AutoBattleHistoryEntryData[]>([])
+  const [historyOpen, setHistoryOpen] = useState(true)
+  const historyIdRef = useRef(0)
 
   // Compte à rebours 3…2…1…GO ! avant le premier coup, même idiome que
   // MagikarpGame — les deux pokémon sont déjà affichés pendant ce temps.
@@ -205,6 +223,35 @@ export function AutoBattleScreen({
     let cursor = 0
     let streak = 0
     let prevStreakAttacker: Side | null = null
+    const battleStart = Date.now()
+
+    // Nom/icône/capacité affichés dans l'historique pour un côté donné — voir
+    // AutoBattleHistoryLog (la bordure colorée de la carte suffit à distinguer
+    // les deux camps, pas besoin d'un suffixe sur le nom).
+    const sideInfo = (side: Side) => side === 'player'
+      ? { name: ownedPokemonName(playerPokemon), iconSrc: playerImageOverride ?? playerSpecies?.image_miniature, ability: playerAbilityNom }
+      : { name: opponentNom, iconSrc: opponentSpecies?.image_miniature, ability: opponentAbilityNom }
+
+    const pushHistory = (
+      side: Side,
+      content: string | { before: string; status: AutoBattleStatusEffect; after: string },
+      extra?: { damage?: number; heal?: number }
+    ) => {
+      const info = sideInfo(side)
+      historyIdRef.current += 1
+      const entry: AutoBattleHistoryEntryData = {
+        id: historyIdRef.current, elapsedMs: Date.now() - battleStart, side, pokemonName: info.name, iconSrc: info.iconSrc,
+        text: typeof content === 'string' ? content : undefined,
+        statusText: typeof content === 'string' ? undefined : (() => {
+          const display = getStatusEffectDisplay(content.status)
+          return { before: content.before, statusLabel: display.label, statusColor: display.color, after: content.after }
+        })(),
+        damage: extra?.damage && extra.damage > 0 ? extra.damage : undefined,
+        heal: extra?.heal && extra.heal > 0 ? extra.heal : undefined,
+      }
+      setHistoryEntries((prev) => [entry, ...prev])
+    }
+
     turns.forEach((turn, i) => {
       const turnStart = cursor
       const attackerSide = turn.attacker
@@ -259,6 +306,16 @@ export function AutoBattleScreen({
             if (attackerSide === 'player') setPlayerStatus(null)
             else setOpponentStatus(null)
           }
+          if (status) {
+            if (turn.skipped) {
+              pushHistory(attackerSide, { before: 'ne peut pas agir (', status, after: ')' }, { damage: turn.damage })
+            } else if (turn.status_cured) {
+              if (status === 'sleep') pushHistory(attackerSide, 'se réveille !', { damage: turn.damage })
+              else pushHistory(attackerSide, { before: "n'est plus affecté par ", status, after: '' }, { damage: turn.damage })
+            } else {
+              pushHistory(attackerSide, { before: 'souffre de ', status, after: '' }, { damage: turn.damage })
+            }
+          }
           if (turn.skipped && status) {
             setSkipSide(attackerSide)
             setSkipLabel(STATUS_SKIP_LABEL[status] ?? 'Tour passé !')
@@ -276,8 +333,17 @@ export function AutoBattleScreen({
         timers.push(window.setTimeout(() => {
           setShownTurnIndex(i)
           setSkipSide(attackerSide)
-          setSkipLabel('Tour passé !')
+          setSkipLabel(turn.preparing ? 'Préparation' : 'Tour passé !')
           setSkipKey((k) => k + 1)
+          pushHistory(attackerSide, turn.preparing ? `se prépare à attaquer avec ${sideInfo(attackerSide).ability}` : 'passe son tour')
+          // Invulnérabilité accordée dès la préparation (prepare_release +
+          // invulnerable_next_turn combinés, voir autobattle_resolve_battle) —
+          // protège le tour adverse qui suit immédiatement, pas celui après
+          // la libération.
+          if (turn.invulnerable_granted) {
+            if (attackerSide === 'player') setPlayerInvulnerable(true)
+            else setOpponentInvulnerable(true)
+          }
         }, turnStart + durations.anticipation))
         timers.push(window.setTimeout(() => setSkipSide(null), turnStart + durations.anticipation + FLYING_TEXT_MS))
         cursor += turnDuration
@@ -298,7 +364,15 @@ export function AutoBattleScreen({
 
         if (turn.missed) {
           setMissSide(attackerSide)
+          setMissLabel(turn.invulnerable_miss ? 'Invulnérable !' : 'MANQUÉ')
           setMissKey((k) => k + 1)
+          if (turn.invulnerable_miss) {
+            // Le bouclier protège le CAMP VISÉ par cette attaque, pas
+            // l'attaquant lui-même (hitSide = celui qui vient d'esquiver).
+            if (hitSide === 'player') setPlayerInvulnerable(false)
+            else setOpponentInvulnerable(false)
+          }
+          pushHistory(attackerSide, `a manqué son attaque ${sideInfo(attackerSide).ability}`)
           window.setTimeout(() => setMissSide(null), FLYING_TEXT_MS)
           return
         }
@@ -311,6 +385,7 @@ export function AutoBattleScreen({
         setHitKey((k) => k + 1)
         window.setTimeout(() => setShakeSide(null), 300)
         window.setTimeout(() => setFlashSide(null), 220)
+        pushHistory(attackerSide, `a utilisé ${sideInfo(attackerSide).ability}`, { damage: turn.damage, heal: turn.heal })
 
         if (turn.heal != null && turn.attacker_hp_after != null) {
           const healAmount = turn.heal
@@ -328,11 +403,38 @@ export function AutoBattleScreen({
           }, durations.healDelay)
         }
 
-        // Coup réussi ayant infligé un statut à l'adversaire (hitSide) — voir
-        // autobattle_resolve_battle, jamais à l'attaquant lui-même.
+        // Coup réussi ayant infligé un statut — à l'adversaire (hitSide)
+        // normalement, à l'attaquant lui-même si status_applied_reversed
+        // (voir autobattle_ability_rules.status_reversed).
         if (turn.status_applied) {
-          if (hitSide === 'player') setPlayerStatus(turn.status_applied)
+          const statusTarget = turn.status_applied_reversed ? attackerSide : hitSide
+          if (statusTarget === 'player') setPlayerStatus(turn.status_applied)
           else setOpponentStatus(turn.status_applied)
+          pushHistory(statusTarget, { before: 'est affecté par ', status: turn.status_applied, after: '' })
+        }
+
+        // Invulnérabilité accordée par ce coup à son auteur (voir
+        // autobattle_ability_rules.invulnerable_next_turn) — silencieux ici,
+        // le bouclier ne se révèle que quand il rate l'attaque adverse
+        // suivante (turn.invulnerable_miss ci-dessus).
+        if (turn.invulnerable_granted) {
+          if (attackerSide === 'player') setPlayerInvulnerable(true)
+          else setOpponentInvulnerable(true)
+        }
+
+        // Contre-coup : dégâts self-inflicted sur l'attaquant, après le
+        // reste — attacker_hp_after reflète l'état final (soin ET
+        // contre-coup combinés si les deux sont configurés sur la même
+        // capacité, voir autobattle_resolve_battle).
+        if (turn.recoil != null && turn.attacker_hp_after != null) {
+          const recoilAmount = turn.recoil
+          const attackerHpAfter = turn.attacker_hp_after
+          window.setTimeout(() => {
+            if (attackerSide === 'player') setPlayerHp(attackerHpAfter)
+            else setOpponentHp(attackerHpAfter)
+            setRecoilFx({ side: attackerSide, amount: recoilAmount })
+            setRecoilKey((k) => k + 1)
+          }, durations.healDelay)
         }
       }, turnStart + impactOffset))
       timers.push(window.setTimeout(() => setAttackState(null), turnStart + impactOffset + durations.return))
@@ -345,6 +447,10 @@ export function AutoBattleScreen({
 
   const playerKo = shownTurnIndex >= 0 && playerHp <= 0
   const opponentKo = shownTurnIndex >= 0 && opponentHp <= 0
+  // Cas Métamorph : sprite de l'adversaire copié pour ce combat (voir
+  // autobattle_resolve_battle) — remplace le sprite réel de Métamorph
+  // partout où il est affiché sur cet écran.
+  const playerSpriteSrc = playerImageOverride ?? playerSpecies?.image_miniature
 
   const playerAttackStyle = attackState?.side === 'player' ? attackTransform(attackState.phase, 1, attackState.durations) : undefined
   const opponentAttackStyle = attackState?.side === 'opponent' ? attackTransform(attackState.phase, -1, attackState.durations) : undefined
@@ -362,27 +468,28 @@ export function AutoBattleScreen({
                   className="flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full text-white shrink-0"
                   style={{ backgroundColor: statusDisplay.color }}
                 >
-                  <PixelIcon src={statusDisplay.iconSrc} size={12} />
+                  <PixelIcon src={statusDisplay.iconSrc} size={12} colored />
                   {statusDisplay.label}
                 </span>
               )
             })()}
+            {playerInvulnerable && <span className="text-xs shrink-0" title="Invulnérable au prochain coup adverse">🛡️</span>}
           </p>
           <div
             className="relative w-24 h-24 flex items-center justify-center"
             style={{ ...playerAttackStyle, animation: shakeSide === 'player' ? 'hit-shake 0.3s ease-in-out' : undefined }}
           >
-            {playerSpecies?.image_miniature ? (
+            {playerSpriteSrc ? (
               <img
-                src={playerSpecies.image_miniature}
+                src={playerSpriteSrc}
                 alt=""
-                className={`pixelated w-full h-full object-contain ${playerKo ? 'grayscale opacity-40' : ''}`}
+                className={`pixelated w-full h-full object-contain transition-opacity duration-500 ${playerKo ? 'grayscale opacity-40' : playerInvulnerable ? 'opacity-10' : ''}`}
               />
             ) : (
               <span className="text-4xl">?</span>
             )}
-            {playerStatus && playerSpecies?.image_miniature && (
-              <div className="absolute inset-0 pointer-events-none" style={statusOverlayStyle(playerStatus, playerSpecies.image_miniature)} />
+            {playerStatus && playerSpriteSrc && (
+              <div className="absolute inset-0 pointer-events-none" style={statusOverlayStyle(playerStatus, playerSpriteSrc)} />
             )}
             {flashSide === 'player' && (
               <div className="absolute inset-0 bg-hp-red rounded-full pointer-events-none" style={{ animation: 'hit-flash 0.22s ease-out' }} />
@@ -390,8 +497,11 @@ export function AutoBattleScreen({
             {lastDamage?.side === 'player' && (
               <AutoBattleDamageNumber damage={lastDamage.damage} animKey={hitKey} superEffective={lastDamage.superEffective} color={lastDamage.color} />
             )}
+            {recoilFx?.side === 'player' && (
+              <AutoBattleDamageNumber damage={recoilFx.amount} animKey={recoilKey} color="#dc2626" />
+            )}
             {missSide === 'player' && (
-              <AutoBattleFloatingText text="MANQUÉ" animKey={missKey} className="text-ink-muted-2" />
+              <AutoBattleFloatingText text={missLabel} animKey={missKey} className="text-ink-muted-2" />
             )}
             {skipSide === 'player' && (
               <AutoBattleFloatingText text={skipLabel} animKey={skipKey} className="text-white" />
@@ -418,11 +528,12 @@ export function AutoBattleScreen({
                   className="flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full text-white shrink-0"
                   style={{ backgroundColor: statusDisplay.color }}
                 >
-                  <PixelIcon src={statusDisplay.iconSrc} size={12} />
+                  <PixelIcon src={statusDisplay.iconSrc} size={12} colored />
                   {statusDisplay.label}
                 </span>
               )
             })()}
+            {opponentInvulnerable && <span className="text-xs shrink-0" title="Invulnérable au prochain coup adverse">🛡️</span>}
           </p>
           <div
             className="relative w-24 h-24 flex items-center justify-center"
@@ -432,7 +543,7 @@ export function AutoBattleScreen({
               <img
                 src={opponentSpecies.image_miniature}
                 alt=""
-                className={`pixelated w-full h-full object-contain ${opponentKo ? 'grayscale opacity-40' : ''}`}
+                className={`pixelated w-full h-full object-contain transition-opacity duration-500 ${opponentKo ? 'grayscale opacity-40' : opponentInvulnerable ? 'opacity-10' : ''}`}
               />
             ) : (
               <span className="text-4xl">?</span>
@@ -446,8 +557,11 @@ export function AutoBattleScreen({
             {lastDamage?.side === 'opponent' && (
               <AutoBattleDamageNumber damage={lastDamage.damage} animKey={hitKey} superEffective={lastDamage.superEffective} color={lastDamage.color} />
             )}
+            {recoilFx?.side === 'opponent' && (
+              <AutoBattleDamageNumber damage={recoilFx.amount} animKey={recoilKey} color="#dc2626" />
+            )}
             {missSide === 'opponent' && (
-              <AutoBattleFloatingText text="MANQUÉ" animKey={missKey} className="text-ink-muted-2" />
+              <AutoBattleFloatingText text={missLabel} animKey={missKey} className="text-ink-muted-2" />
             )}
             {skipSide === 'opponent' && (
               <AutoBattleFloatingText text={skipLabel} animKey={skipKey} className="text-white" />
@@ -476,12 +590,29 @@ export function AutoBattleScreen({
       )}
 
       {battleDone && (
-        <button
-          onClick={onContinue}
-          className={`self-center mt-1 px-6 py-2.5 rounded-lg text-sm font-bold ${BUTTON_STYLE.yellow}`}
-        >
-          Continuer
-        </button>
+        <div className="flex items-center justify-center gap-2 mt-1">
+          <button
+            onClick={onContinue}
+            className={`px-6 py-2.5 rounded-lg text-sm font-bold ${BUTTON_STYLE.yellow}`}
+          >
+            Continuer
+          </button>
+          {!historyOpen && (
+            <button
+              onClick={() => setHistoryOpen(true)}
+              className={`px-4 py-2.5 rounded-lg text-sm font-bold ${BUTTON_STYLE.gray}`}
+            >
+              Voir l'historique
+            </button>
+          )}
+        </div>
+      )}
+
+      {fighting && historyOpen && (
+        <AutoBattleHistoryLog
+          entries={historyEntries}
+          onHide={() => setHistoryOpen(false)}
+        />
       )}
     </div>
   )

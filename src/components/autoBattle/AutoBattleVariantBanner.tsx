@@ -5,6 +5,7 @@ import type {
 } from '../../types'
 import { pickLevelBannerReward } from '../../lib/autoBattle'
 import { PokedollarIcon } from '../PokedollarIcon'
+import { TypeBadge } from '../TypeBadge'
 
 interface Props {
   variant: AutoBattleVariant
@@ -110,6 +111,12 @@ export function AutoBattleVariantBanner({
             <span className="text-white text-xs font-bold [text-shadow:0_1px_2px_rgba(0,0,0,0.6)]">
               {displayedCurrent} / {levels.length}
             </span>
+          </div>
+        )}
+
+        {!completed && discovered && currentLevelSpecies?.type && (
+          <div className="absolute bottom-1.5 right-1.5 z-10">
+            <TypeBadge type={currentLevelSpecies.type} small />
           </div>
         )}
 

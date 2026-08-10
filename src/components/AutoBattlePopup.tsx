@@ -73,6 +73,7 @@ export function AutoBattlePopup({
   const [activeVariant, setActiveVariant] = useState<AutoBattleVariant | null>(null)
   const [activeLevel, setActiveLevel] = useState<AutoBattleLevel | null>(null)
   const [selectedPokemon, setSelectedPokemon] = useState<PlayerPokemon | null>(null)
+  const [selectedAbilityNom, setSelectedAbilityNom] = useState('')
   const [battleResult, setBattleResult] = useState<AutoBattleResolveResult | null>(null)
   const [evolutionEligible, setEvolutionEligible] = useState(false)
   const [showEvolvePrompt, setShowEvolvePrompt] = useState(false)
@@ -143,6 +144,7 @@ export function AutoBattlePopup({
       return
     }
     submittingRef.current = true
+    setSelectedAbilityNom(ability.nom)
 
     const spentTotal = ticketRow.quantity - 1
     await playerItems.setQuantity(ticketRow, spentTotal)
@@ -422,9 +424,12 @@ export function AutoBattlePopup({
               playerPokemon={selectedPokemon}
               playerSpecies={activeSpecies}
               playerMaxHp={battleResult.player_max_hp ?? 1}
+              playerAbilityNom={battleResult.player_ability_nom_override ?? selectedAbilityNom}
+              playerImageOverride={battleResult.player_image_override ?? undefined}
               opponentSpecies={opponentSpecies}
               opponentMaxHp={battleResult.opponent_hp ?? 1}
               opponentNom={battleResult.opponent_pokemon_nom ?? ''}
+              opponentAbilityNom={battleResult.opponent_ability_nom ?? ''}
               turns={battleResult.turns}
               playerTypeBonus={battleResult.player_type_bonus ?? false}
               opponentTypeBonus={battleResult.opponent_type_bonus ?? false}

@@ -2878,6 +2878,15 @@ DECLARE
   v_opponent_bonus_condition  text;
   v_opponent_bonus_dice_value integer;
   v_bonus_condition_met     boolean;
+  -- Cas très spécial : Métamorph copie l'adversaire au début du combat
+  -- (visuel, dégâts, capacité, type — jamais les PV, voir requirement dédié).
+  -- v_effective_ability_nom remplace p_ability_nom pour tout ce qui suit la
+  -- validation d'éligibilité (le joueur doit quand même choisir une capacité
+  -- valide dans son propre movepool pour lancer le combat, mais celle
+  -- réellement utilisée devient celle de l'adversaire une fois transformé).
+  v_is_metamorph          boolean;
+  v_effective_ability_nom text;
+  v_player_image_override text;
   v_turn_entry          jsonb;
   v_coin_player_first   boolean;
   v_attacker            text;
@@ -2970,25 +2979,46 @@ BEGIN
     RETURN jsonb_build_object('status', 'no_ticket');
   END IF;
 
+  -- Métamorph : copie le visuel/les dégâts/la capacité/le type de
+  -- l'adversaire pour tout le combat, jamais ses PV (v_player_max_hp
+  -- ci-dessous reste calculé sur les VRAIES stats de Métamorph). La
+  -- capacité choisie par le joueur (p_ability_nom) doit rester valide pour
+  -- lancer le combat (vérifiée plus haut), mais celle réellement jouée
+  -- devient celle de l'adversaire.
+  v_is_metamorph := v_player_species.nom = 'Métamorph';
+  v_effective_ability_nom := p_ability_nom;
+  v_player_image_override := NULL;
+  IF v_is_metamorph THEN
+    v_effective_ability_nom := v_level.opponent_ability_nom;
+    SELECT * INTO v_ability FROM attacks WHERE nom = v_effective_ability_nom;
+    v_player_image_override := v_opponent_species.image_miniature;
+  END IF;
+
   v_player_max_hp := COALESCE(v_player_species.pv_base, 0) + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'PV');
   v_player_type_bonus := EXISTS (
     SELECT 1 FROM (VALUES
-      (v_player_species.super_efficace_1), (v_player_species.super_efficace_2),
-      (v_player_species.super_efficace_3), (v_player_species.super_efficace_4)
+      (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_1 ELSE v_player_species.super_efficace_1 END),
+      (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_2 ELSE v_player_species.super_efficace_2 END),
+      (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_3 ELSE v_player_species.super_efficace_3 END),
+      (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_4 ELSE v_player_species.super_efficace_4 END)
     ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_opponent_species.type))
   );
   -- Dégâts de base (avant dé) : bonus de type inclus, jamais redoublé par le
   -- dé. Le dé (attacks.degats_de) est retiré au sort à CHAQUE coup dans la
   -- boucle ci-dessous (1..degats_de inclus), pas une seule fois pour tout le
   -- combat — c'est ce qui lui donne son côté aléatoire "à chaque attaque".
-  v_player_damage := (COALESCE(v_player_species.degats_base, 0) + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'DMG'))
+  -- Métamorph part du dégât de BASE de l'adversaire (celui configuré pour ce
+  -- niveau) plutôt que du sien, mais garde son propre bonus XP (l'XP reste
+  -- une progression personnelle, pas quelque chose "copié").
+  v_player_damage := (COALESCE(CASE WHEN v_is_metamorph THEN v_level.opponent_base_damage ELSE v_player_species.degats_base END, 0)
+    + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'DMG'))
     * (CASE WHEN v_player_type_bonus THEN 2 ELSE 1 END) + COALESCE(v_ability.degats_base, 0);
 
   v_opponent_type_bonus := EXISTS (
     SELECT 1 FROM (VALUES
       (v_opponent_species.super_efficace_1), (v_opponent_species.super_efficace_2),
       (v_opponent_species.super_efficace_3), (v_opponent_species.super_efficace_4)
-    ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_player_species.type))
+    ) AS s(val) WHERE lower(trim(val)) = lower(trim(CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END))
   );
   v_opponent_damage := v_level.opponent_base_damage * (CASE WHEN v_opponent_type_bonus THEN 2 ELSE 1 END)
     + COALESCE(v_opponent_ability.degats_base, 0);
@@ -3006,7 +3036,7 @@ BEGIN
          v_player_recoil_type, v_player_recoil_min, v_player_recoil_max, v_player_recoil_percent, v_player_invuln_grant,
          v_player_bonus_type, v_player_bonus_multiplier, v_player_bonus_flat, v_player_bonus_min, v_player_bonus_max,
          v_player_bonus_condition, v_player_bonus_dice_value
-    FROM autobattle_ability_rules WHERE attack_nom = p_ability_nom;
+    FROM autobattle_ability_rules WHERE attack_nom = v_effective_ability_nom;
   v_player_status_reversed := COALESCE(v_player_status_reversed, false);
   v_player_invuln_grant := COALESCE(v_player_invuln_grant, false);
 
@@ -3227,16 +3257,25 @@ BEGIN
       -- ne fait rien d'autre qu'afficher "Préparation" (turn.preparing),
       -- le second joue l'attaque normalement (block=1, comme si de rien
       -- n'était). v_*_preparing retient où on en est d'une activation à
-      -- l'autre.
+      -- l'autre. Si la capacité rend aussi invulnérable (invulnerable_next_
+      -- turn), le bouclier est accordé DÈS la préparation (protège le tour
+      -- adverse qui suit immédiatement), pas à la libération — voir plus bas
+      -- où l'octroi normal à l'attaque est sauté pour 'prepare_release'
+      -- (déjà accordé ici, ne pas le refaire/le repousser à la libération).
       ELSIF v_attacker = 'player' AND v_player_turn_effect = 'prepare_release' THEN
         IF v_player_preparing THEN
           v_player_preparing := false;
           v_block_remaining := 1;
         ELSE
-          v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+          v_turn_entry := jsonb_build_object(
             'turn', v_turn_no, 'attacker', 'player', 'damage', 0, 'skipped', true, 'preparing', true,
             'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', false
-          ));
+          );
+          IF v_player_invuln_grant THEN
+            v_player_invulnerable := true;
+            v_turn_entry := v_turn_entry || jsonb_build_object('invulnerable_granted', true);
+          END IF;
+          v_turns := v_turns || jsonb_build_array(v_turn_entry);
           v_player_preparing := true;
           v_attacker := 'opponent';
           IF v_turn_no > 200 THEN v_outcome := 'lose'; EXIT; END IF;
@@ -3247,17 +3286,22 @@ BEGIN
           v_opponent_preparing := false;
           v_block_remaining := 1;
         ELSE
-          v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+          v_turn_entry := jsonb_build_object(
             'turn', v_turn_no, 'attacker', 'opponent', 'damage', 0, 'skipped', true, 'preparing', true,
             'defender_hp_after', GREATEST(0, v_player_hp), 'ko', false
-          ));
+          );
+          IF v_opponent_invuln_grant THEN
+            v_opponent_invulnerable := true;
+            v_turn_entry := v_turn_entry || jsonb_build_object('invulnerable_granted', true);
+          END IF;
+          v_turns := v_turns || jsonb_build_array(v_turn_entry);
           v_opponent_preparing := true;
           v_attacker := 'player';
           IF v_turn_no > 200 THEN v_outcome := 'lose'; EXIT; END IF;
           CONTINUE;
         END IF;
       ELSE
-        v_block_remaining := autobattle_ability_burst(CASE WHEN v_attacker = 'player' THEN p_ability_nom ELSE v_level.opponent_ability_nom END);
+        v_block_remaining := autobattle_ability_burst(CASE WHEN v_attacker = 'player' THEN v_effective_ability_nom ELSE v_level.opponent_ability_nom END);
         IF v_block_remaining = 0 THEN
           v_turns := v_turns || jsonb_build_array(jsonb_build_object(
             'turn', v_turn_no, 'attacker', v_attacker, 'damage', 0, 'skipped', true,
@@ -3368,7 +3412,10 @@ BEGIN
           END IF;
           -- Invulnérabilité accordée par cette capacité : consommée au
           -- prochain tour adverse (voir plus haut), indépendamment du reste.
-          IF v_player_invuln_grant THEN
+          -- Pour 'prepare_release', déjà accordée à la préparation (protège
+          -- le tour adverse qui suit immédiatement, pas celui après la
+          -- libération) — ne pas la ré-accorder ici dans ce cas.
+          IF v_player_invuln_grant AND v_player_turn_effect <> 'prepare_release' THEN
             v_player_invulnerable := true;
             v_turn_entry := v_turn_entry || jsonb_build_object('invulnerable_granted', true);
           END IF;
@@ -3468,7 +3515,7 @@ BEGIN
             END IF;
             v_turn_entry := v_turn_entry || jsonb_build_object('status_applied', v_opponent_ability.status_effect, 'status_applied_reversed', v_opponent_status_reversed);
           END IF;
-          IF v_opponent_invuln_grant THEN
+          IF v_opponent_invuln_grant AND v_opponent_turn_effect <> 'prepare_release' THEN
             v_opponent_invulnerable := true;
             v_turn_entry := v_turn_entry || jsonb_build_object('invulnerable_granted', true);
           END IF;
@@ -3565,7 +3612,9 @@ BEGIN
     'variant_completed', v_variant_completed,
     'next_level_index', v_next_level_index,
     'opponent_pokemon_nom', v_level.opponent_pokemon_nom,
-    'opponent_ability_nom', v_level.opponent_ability_nom
+    'opponent_ability_nom', v_level.opponent_ability_nom,
+    'player_image_override', v_player_image_override,
+    'player_ability_nom_override', CASE WHEN v_is_metamorph THEN v_effective_ability_nom ELSE NULL END
   );
 END;
 $$;
@@ -3936,3 +3985,13 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION trade_accept(bigint, bigint, bigint) TO anon, authenticated;
+
+-- history_events n'avait pas de policy DELETE (journal pensé immuable côté
+-- client) — mais Admin → Historique expose un bouton "Vider l'historique"
+-- (useHistoryEvents.clearAll) qui appelle .delete().neq('id', 0). Sans policy,
+-- RLS filtre silencieusement toutes les lignes de la suppression : la requête
+-- réussit (aucune erreur renvoyée) mais supprime 0 ligne, donc les données
+-- reviennent au prochain fetchAll/rechargement alors que l'UI les affichait
+-- comme supprimées.
+CREATE POLICY "Public delete history_events"
+  ON history_events FOR DELETE TO anon USING (true);

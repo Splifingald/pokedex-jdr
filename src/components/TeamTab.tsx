@@ -7,6 +7,7 @@ import { useAdminParameters } from '../hooks/useAdminParameters'
 import { useGiftLootboxes } from '../hooks/useGiftLootboxes'
 import { useToast } from '../context/ToastContext'
 import { restoreLocalHp, getLocalHp } from '../hooks/useLocalHp'
+import { restoreLocalStatus } from '../hooks/useLocalStatus'
 import { logHistoryEvent } from '../lib/historyLog'
 import { getMaxHp } from '../lib/maxHp'
 import { maybeResetGiftTimerOnEntry } from '../lib/gifting'
@@ -146,6 +147,7 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
     sortedRoster.forEach((pp) => {
       const wasKo = (getLocalHp(pp.id) ?? getMaxHp(pp, pokemonByName.get(pp.pokemon_nom))) <= 0
       restoreLocalHp(pp.id, getMaxHp(pp, pokemonByName.get(pp.pokemon_nom)))
+      restoreLocalStatus(pp.id)
       if (wasKo) {
         void logHistoryEvent('combat', 'ko', player.id, {
           pokemon_nom: pp.pokemon_nom,

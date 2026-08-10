@@ -1043,6 +1043,10 @@ export interface AutoBattleResolveResult {
   next_level_index?: number
   opponent_pokemon_nom?: string
   opponent_ability_nom?: string
+  /** Cas Métamorph : sprite de l'adversaire copié pour ce combat (voir autobattle_resolve_battle) — jamais présent sinon. */
+  player_image_override?: string | null
+  /** Cas Métamorph : capacité réellement jouée (celle de l'adversaire, copiée), différente de celle choisie dans le picker. */
+  player_ability_nom_override?: string | null
 }
 
 // ── Notifications Push ───────────────────────────────────────

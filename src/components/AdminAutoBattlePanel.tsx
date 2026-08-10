@@ -10,8 +10,8 @@ export function AdminAutoBattlePanel() {
         <AdminAutoBattleEconomyPanel />
         <AdminAutoBattleBannedAttacksPanel />
       </div>
-      <AdminAutoBattleAbilityRulesPanel />
       <AdminAutoBattleVariantsPanel />
+      <AdminAutoBattleAbilityRulesPanel />
     </div>
   )
 }
