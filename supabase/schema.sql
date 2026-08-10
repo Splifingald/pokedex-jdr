@@ -2848,6 +2848,8 @@ DECLARE
   v_opponent_preparing      boolean := false;
   v_player_invulnerable     boolean := false;
   v_opponent_invulnerable   boolean := false;
+  v_player_invuln_pending_miss   boolean := false;
+  v_opponent_invuln_pending_miss boolean := false;
   v_player_invuln_grant     boolean;
   v_opponent_invuln_grant   boolean;
   v_player_used_ability     boolean := false;
@@ -2885,8 +2887,13 @@ DECLARE
   -- valide dans son propre movepool pour lancer le combat, mais celle
   -- réellement utilisée devient celle de l'adversaire une fois transformé).
   v_is_metamorph          boolean;
+  v_is_opponent_metamorph boolean;
   v_effective_ability_nom text;
+  v_effective_opponent_ability_nom text;
   v_player_image_override text;
+  v_opponent_image_override text;
+  v_player_base_damage_component   integer;
+  v_opponent_base_damage_component integer;
   v_turn_entry          jsonb;
   v_coin_player_first   boolean;
   v_attacker            text;
@@ -2980,12 +2987,13 @@ BEGIN
   END IF;
 
   -- Métamorph : copie le visuel/les dégâts/la capacité/le type de
-  -- l'adversaire pour tout le combat, jamais ses PV (v_player_max_hp
-  -- ci-dessous reste calculé sur les VRAIES stats de Métamorph). La
-  -- capacité choisie par le joueur (p_ability_nom) doit rester valide pour
-  -- lancer le combat (vérifiée plus haut), mais celle réellement jouée
-  -- devient celle de l'adversaire.
+  -- l'ADVERSAIRE pour tout le combat, jamais ses PV — dans UN SENS COMME
+  -- DANS L'AUTRE (Métamorph peut être le pokémon du joueur OU celui
+  -- configuré comme adversaire d'un niveau). v_player_max_hp/v_level.
+  -- opponent_hp restent toujours calculés sur les VRAIES stats du camp
+  -- Métamorph, jamais copiés.
   v_is_metamorph := v_player_species.nom = 'Métamorph';
+  v_is_opponent_metamorph := v_opponent_species.nom = 'Métamorph';
   v_effective_ability_nom := p_ability_nom;
   v_player_image_override := NULL;
   IF v_is_metamorph THEN
@@ -2993,15 +3001,30 @@ BEGIN
     SELECT * INTO v_ability FROM attacks WHERE nom = v_effective_ability_nom;
     v_player_image_override := v_opponent_species.image_miniature;
   END IF;
+  -- Camp adverse Métamorph : copie la capacité RÉELLEMENT jouée par le
+  -- joueur (v_effective_ability_nom, déjà résolue ci-dessus si le joueur
+  -- est lui-même Métamorph) plutôt que p_ability_nom, pour un
+  -- comportement cohérent même dans le cas absurde d'un double Métamorph.
+  v_effective_opponent_ability_nom := v_level.opponent_ability_nom;
+  v_opponent_image_override := NULL;
+  IF v_is_opponent_metamorph THEN
+    v_effective_opponent_ability_nom := v_effective_ability_nom;
+    SELECT * INTO v_opponent_ability FROM attacks WHERE nom = v_effective_opponent_ability_nom;
+    v_opponent_image_override := COALESCE(v_player_image_override, v_player_species.image_miniature);
+  END IF;
 
   v_player_max_hp := COALESCE(v_player_species.pv_base, 0) + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'PV');
+  -- Dégâts de base "espèce" de chaque camp (avant dé/capacité/XP) — celui de
+  -- Métamorph est remplacé par celui de l'AUTRE camp le cas échéant.
+  v_player_base_damage_component := CASE WHEN v_is_metamorph THEN v_level.opponent_base_damage ELSE v_player_species.degats_base END;
+  v_opponent_base_damage_component := CASE WHEN v_is_opponent_metamorph THEN v_player_base_damage_component ELSE v_level.opponent_base_damage END;
   v_player_type_bonus := EXISTS (
     SELECT 1 FROM (VALUES
       (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_1 ELSE v_player_species.super_efficace_1 END),
       (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_2 ELSE v_player_species.super_efficace_2 END),
       (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_3 ELSE v_player_species.super_efficace_3 END),
       (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_4 ELSE v_player_species.super_efficace_4 END)
-    ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_opponent_species.type))
+    ) AS s(val) WHERE lower(trim(val)) = lower(trim(CASE WHEN v_is_opponent_metamorph THEN v_player_species.type ELSE v_opponent_species.type END))
   );
   -- Dégâts de base (avant dé) : bonus de type inclus, jamais redoublé par le
   -- dé. Le dé (attacks.degats_de) est retiré au sort à CHAQUE coup dans la
@@ -3010,17 +3033,19 @@ BEGIN
   -- Métamorph part du dégât de BASE de l'adversaire (celui configuré pour ce
   -- niveau) plutôt que du sien, mais garde son propre bonus XP (l'XP reste
   -- une progression personnelle, pas quelque chose "copié").
-  v_player_damage := (COALESCE(CASE WHEN v_is_metamorph THEN v_level.opponent_base_damage ELSE v_player_species.degats_base END, 0)
+  v_player_damage := (COALESCE(v_player_base_damage_component, 0)
     + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'DMG'))
     * (CASE WHEN v_player_type_bonus THEN 2 ELSE 1 END) + COALESCE(v_ability.degats_base, 0);
 
   v_opponent_type_bonus := EXISTS (
     SELECT 1 FROM (VALUES
-      (v_opponent_species.super_efficace_1), (v_opponent_species.super_efficace_2),
-      (v_opponent_species.super_efficace_3), (v_opponent_species.super_efficace_4)
+      (CASE WHEN v_is_opponent_metamorph THEN v_player_species.super_efficace_1 ELSE v_opponent_species.super_efficace_1 END),
+      (CASE WHEN v_is_opponent_metamorph THEN v_player_species.super_efficace_2 ELSE v_opponent_species.super_efficace_2 END),
+      (CASE WHEN v_is_opponent_metamorph THEN v_player_species.super_efficace_3 ELSE v_opponent_species.super_efficace_3 END),
+      (CASE WHEN v_is_opponent_metamorph THEN v_player_species.super_efficace_4 ELSE v_opponent_species.super_efficace_4 END)
     ) AS s(val) WHERE lower(trim(val)) = lower(trim(CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END))
   );
-  v_opponent_damage := v_level.opponent_base_damage * (CASE WHEN v_opponent_type_bonus THEN 2 ELSE 1 END)
+  v_opponent_damage := COALESCE(v_opponent_base_damage_component, 0) * (CASE WHEN v_opponent_type_bonus THEN 2 ELSE 1 END)
     + COALESCE(v_opponent_ability.degats_base, 0);
 
   -- Effet de soin éventuel de chaque capacité (statique, % des dégâts
@@ -3048,7 +3073,7 @@ BEGIN
          v_opponent_recoil_type, v_opponent_recoil_min, v_opponent_recoil_max, v_opponent_recoil_percent, v_opponent_invuln_grant,
          v_opponent_bonus_type, v_opponent_bonus_multiplier, v_opponent_bonus_flat, v_opponent_bonus_min, v_opponent_bonus_max,
          v_opponent_bonus_condition, v_opponent_bonus_dice_value
-    FROM autobattle_ability_rules WHERE attack_nom = v_level.opponent_ability_nom;
+    FROM autobattle_ability_rules WHERE attack_nom = v_effective_opponent_ability_nom;
   v_opponent_status_reversed := COALESCE(v_opponent_status_reversed, false);
   v_opponent_invuln_grant := COALESCE(v_opponent_invuln_grant, false);
 
@@ -3090,6 +3115,24 @@ BEGIN
 
     IF v_block_remaining IS NULL THEN
       v_status_precision_penalty := 0;
+
+      -- Le bouclier d'invulnérabilité protège UN SEUL tour de l'adversaire,
+      -- qu'il s'agisse d'une vraie attaque ou non (préparation/tour passé/
+      -- tick de statut) — retiré ici, tout au début du tour adverse, AVANT
+      -- de savoir de quel type de tour il s'agit. v_*_invuln_pending_miss
+      -- retient jusqu'à la résolution d'attaque plus bas si CE tour précis
+      -- doit rater automatiquement (uniquement s'il s'avère être une vraie
+      -- attaque) ; sinon il reste simplement inutilisé et le bouclier est
+      -- tout de même consommé — sans ça, un bouclier accordé pendant qu'un
+      -- côté prépare sa propre capacité (prepare_release) pouvait survivre
+      -- plusieurs tours avant d'être testé par une vraie attaque.
+      IF v_attacker = 'player' AND v_opponent_invulnerable THEN
+        v_opponent_invulnerable := false;
+        v_opponent_invuln_pending_miss := true;
+      ELSIF v_attacker = 'opponent' AND v_player_invulnerable THEN
+        v_player_invulnerable := false;
+        v_player_invuln_pending_miss := true;
+      END IF;
 
       -- Statut actif infligé par une capacité adverse précédente (voir plus
       -- bas "application du statut après un coup") : traité en tout premier,
@@ -3301,7 +3344,7 @@ BEGIN
           CONTINUE;
         END IF;
       ELSE
-        v_block_remaining := autobattle_ability_burst(CASE WHEN v_attacker = 'player' THEN v_effective_ability_nom ELSE v_level.opponent_ability_nom END);
+        v_block_remaining := autobattle_ability_burst(CASE WHEN v_attacker = 'player' THEN v_effective_ability_nom ELSE v_effective_opponent_ability_nom END);
         IF v_block_remaining = 0 THEN
           v_turns := v_turns || jsonb_build_array(jsonb_build_object(
             'turn', v_turn_no, 'attacker', v_attacker, 'damage', 0, 'skipped', true,
@@ -3317,11 +3360,11 @@ BEGIN
     END IF;
 
     IF v_attacker = 'player' THEN
-      -- Invulnérabilité de l'adversaire (accordée à son propre tour
-      -- précédent, voir plus bas) : rate automatiquement, consommée une
-      -- fois, ignore précision/statuts entièrement.
-      IF v_opponent_invulnerable THEN
-        v_opponent_invulnerable := false;
+      -- Invulnérabilité de l'adversaire (bouclier déjà retiré au début de
+      -- CE tour ci-dessus, voir v_opponent_invuln_pending_miss) : rate
+      -- automatiquement, ignore précision/statuts entièrement.
+      IF v_opponent_invuln_pending_miss THEN
+        v_opponent_invuln_pending_miss := false;
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
           'turn', v_turn_no, 'attacker', 'player', 'damage', 0, 'missed', true, 'invulnerable_miss', true,
           'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', false
@@ -3438,8 +3481,8 @@ BEGIN
         END IF;
       END IF;
     ELSE
-      IF v_player_invulnerable THEN
-        v_player_invulnerable := false;
+      IF v_player_invuln_pending_miss THEN
+        v_player_invuln_pending_miss := false;
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
           'turn', v_turn_no, 'attacker', 'opponent', 'damage', 0, 'missed', true, 'invulnerable_miss', true,
           'defender_hp_after', GREATEST(0, v_player_hp), 'ko', false
@@ -3614,7 +3657,9 @@ BEGIN
     'opponent_pokemon_nom', v_level.opponent_pokemon_nom,
     'opponent_ability_nom', v_level.opponent_ability_nom,
     'player_image_override', v_player_image_override,
-    'player_ability_nom_override', CASE WHEN v_is_metamorph THEN v_effective_ability_nom ELSE NULL END
+    'player_ability_nom_override', CASE WHEN v_is_metamorph THEN v_effective_ability_nom ELSE NULL END,
+    'opponent_image_override', v_opponent_image_override,
+    'opponent_ability_nom_override', CASE WHEN v_is_opponent_metamorph THEN v_effective_opponent_ability_nom ELSE NULL END
   );
 END;
 $$;

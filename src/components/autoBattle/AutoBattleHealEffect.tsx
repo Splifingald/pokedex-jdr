@@ -16,7 +16,7 @@ export function AutoBattleHealEffect({ amount, animKey }: Props) {
       left: 5 + Math.random() * 90,
       top: 5 + Math.random() * 85,
       drift: (Math.random() - 0.5) * 40,
-      delay: Math.random() * 0.25,
+      delay: Math.random() * 0.325,
       size: 9 + Math.random() * 12,
     })),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- volontairement figé par occurrence (animKey), pas par amount
@@ -33,11 +33,11 @@ export function AutoBattleHealEffect({ amount, animKey }: Props) {
             left: `${b.left}%`, top: `${b.top}%`, width: b.size, height: b.size,
             boxShadow: '0 0 10px 3px rgba(79, 240, 138, 0.9)',
             '--bx': `${b.drift}px`,
-            animation: `heal-bubble-rise 1.4s ease-out ${b.delay}s forwards`,
+            animation: `heal-bubble-rise 1.82s ease-out ${b.delay}s forwards`,
           } as CSSProperties}
         />
       ))}
-      <div className="absolute inset-x-0 top-0 flex items-center justify-center" style={{ opacity: 0, animation: 'damage-number-pop 1.3s ease-out 0.1s forwards' }}>
+      <div className="absolute inset-x-0 top-0 flex items-center justify-center" style={{ opacity: 0, animation: 'damage-number-pop 1.69s ease-out 0.13s forwards' }}>
         <span className="text-2xl font-bold text-[#2f8f4f] [text-shadow:0_2px_0_rgba(255,255,255,0.5)]">+{amount} PV</span>
       </div>
     </div>

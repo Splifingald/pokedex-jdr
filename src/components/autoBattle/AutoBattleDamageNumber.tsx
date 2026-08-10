@@ -18,7 +18,7 @@ export function AutoBattleDamageNumber({ damage, animKey, superEffective = false
     <div
       key={animKey}
       className="absolute inset-x-0 top-0 flex flex-col items-center pointer-events-none"
-      style={{ animation: 'damage-number-pop 1.3s ease-out forwards' }}
+      style={{ animation: 'damage-number-pop 1.69s ease-out forwards' }}
     >
       {superEffective && (
         <span className="text-[#ffd85e] text-xs font-bold whitespace-nowrap [text-shadow:0_1px_2px_rgba(0,0,0,0.7)]">

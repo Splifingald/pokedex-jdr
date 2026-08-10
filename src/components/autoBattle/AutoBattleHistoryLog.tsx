@@ -14,6 +14,7 @@ export interface AutoBattleHistoryEntryData {
   statusText?: { before: string; statusLabel: string; statusColor: string; after: string }
   damage?: number
   heal?: number
+  superEffective?: boolean
 }
 
 function formatElapsed(ms: number): string {
@@ -67,7 +68,9 @@ export function AutoBattleHistoryLog({ entries, onHide, className = '' }: Props)
                       {e.statusText.after}
                     </>
                   ) : e.text}
-                  {e.damage != null && <span className="text-hp-red font-bold"> -{e.damage} PV</span>}
+                  {e.damage != null && (
+                    <span className="text-hp-red font-bold"> -{e.damage} PV{e.superEffective ? ' (Super Efficace)' : ''}</span>
+                  )}
                   {e.heal != null && <span className="text-hp-green font-bold"> +{e.heal} PV</span>}
                 </p>
                 <p className="text-ink-muted-2 text-[10px]">{formatElapsed(e.elapsedMs)}</p>

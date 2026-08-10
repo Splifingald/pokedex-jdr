@@ -34,6 +34,8 @@ interface Props {
   opponentMaxHp: number
   opponentNom: string
   opponentAbilityNom: string
+  /** Cas Métamorph configuré comme adversaire : sprite du joueur copié pour ce combat — remplace opponentSpecies.image_miniature partout où le sprite adverse est affiché. */
+  opponentImageOverride?: string
   turns: AutoBattleTurn[]
   /** Le pokémon du joueur est-il super efficace contre le type de l'adversaire (voir requirement #17) */
   playerTypeBonus: boolean
@@ -43,7 +45,14 @@ interface Props {
 }
 
 const COUNTDOWN_STEPS = ['3', '2', '1', 'GO !']
-const COUNTDOWN_STEP_MS = 600
+
+// Ralentissement global de toutes les animations/affichages de texte de
+// l'écran de combat (1.3× plus lent que la base historique) — appliqué une
+// fois ici à toutes les constantes de durée ci-dessous plutôt que dispersé
+// dans chaque composant, pour garder un seul endroit à ajuster.
+const GLOBAL_SLOWDOWN = 1.3
+
+const COUNTDOWN_STEP_MS = 600 * GLOBAL_SLOWDOWN
 
 // Durées de base des phases d'attaque (voir AttackPhase ci-dessous) — les
 // dégâts sont appliqués au moment de l'impact (atterrissage, fin de
@@ -56,22 +65,26 @@ const COUNTDOWN_STEP_MS = 600
 // raccourcit quand la capacité est utilisée plusieurs fois d'affilée — donc
 // jamais utilisées telles quelles pour programmer les timers, seulement via
 // computeDurations(multiplier).
-const ANTICIPATION_MS = 150
-const LUNGE_MS = 100
-const STRIKE_RISE_MS = 140
-const STRIKE_LAND_MS = 140
-const RETURN_MS = 250
-const GAP_MS = 150
-const HEAL_DELAY_MS = 250 // le soin apparaît après les dégâts, pas en même temps (base, voir computeDurations)
+const ANTICIPATION_MS = 150 * GLOBAL_SLOWDOWN
+const LUNGE_MS = 100 * GLOBAL_SLOWDOWN
+const STRIKE_RISE_MS = 140 * GLOBAL_SLOWDOWN
+const STRIKE_LAND_MS = 140 * GLOBAL_SLOWDOWN
+const RETURN_MS = 250 * GLOBAL_SLOWDOWN
+const GAP_MS = 150 * GLOBAL_SLOWDOWN
+const HEAL_DELAY_MS = 250 * GLOBAL_SLOWDOWN // le soin apparaît après les dégâts, pas en même temps (base, voir computeDurations)
 // Durée d'affichage des textes flottants (MANQUÉ / tour passé) — doit rester
 // synchronisée avec la durée de l'animation 'damage-number-pop' utilisée par
 // AutoBattleFloatingText (voir src/index.css), sans quoi le texte disparaît
 // (démontage du composant) avant la fin de l'animation CSS.
-const FLYING_TEXT_MS = 1300
+const FLYING_TEXT_MS = 1300 * GLOBAL_SLOWDOWN
 // Temps d'affichage du dé avant de révéler le résultat d'un tick de statut
 // (Sommeil/Brûlure, voir turn.status_tick) — 0 si le tick n'a pas de dé
 // (Poison, ou paralysie/gel/peur/confusion qui n'en lancent jamais).
-const STATUS_DICE_MS = 700
+const STATUS_DICE_MS = 700 * GLOBAL_SLOWDOWN
+// Secousse/flash au moment de l'impact — durée alignée avec les animations
+// CSS 'hit-shake'/'hit-flash' déclenchées en même temps (voir plus bas).
+const SHAKE_MS = 300 * GLOBAL_SLOWDOWN
+const FLASH_MS = 220 * GLOBAL_SLOWDOWN
 
 // Vitesse d'enchaînement d'une capacité utilisée plusieurs fois d'affilée
 // par le même camp (play_twice/play_three/play_random/repeat_until_fail,
@@ -167,7 +180,7 @@ function statusOverlayStyle(status: AutoBattleStatusEffect, spriteUrl: string): 
 // fois le combat terminé, reste affiché avec un bouton "Continuer" plutôt
 // que d'enchaîner automatiquement sur les récompenses/l'écran de défaite.
 export function AutoBattleScreen({
-  playerPokemon, playerSpecies, playerMaxHp, playerAbilityNom, playerImageOverride, opponentSpecies, opponentMaxHp, opponentNom, opponentAbilityNom, turns,
+  playerPokemon, playerSpecies, playerMaxHp, playerAbilityNom, playerImageOverride, opponentSpecies, opponentMaxHp, opponentNom, opponentAbilityNom, opponentImageOverride, turns,
   playerTypeBonus, opponentTypeBonus, onContinue,
 }: Props) {
   const [countdownStep, setCountdownStep] = useState(-1)
@@ -224,18 +237,26 @@ export function AutoBattleScreen({
     let streak = 0
     let prevStreakAttacker: Side | null = null
     const battleStart = Date.now()
+    // Suivi local du bouclier d'invulnérabilité — expire au tout début du
+    // tour adverse suivant, que ce tour soit une vraie attaque ou non (voir
+    // autobattle_resolve_battle) : même règle appliquée ici côté client,
+    // sans dépendre d'un champ serveur dédié, pour rester synchronisé même
+    // quand le bouclier expire "silencieusement" (préparation/tour passé/
+    // tick de statut adverse) plutôt que via un raté explicite.
+    let playerShieldActive = false
+    let opponentShieldActive = false
 
     // Nom/icône/capacité affichés dans l'historique pour un côté donné — voir
     // AutoBattleHistoryLog (la bordure colorée de la carte suffit à distinguer
     // les deux camps, pas besoin d'un suffixe sur le nom).
     const sideInfo = (side: Side) => side === 'player'
       ? { name: ownedPokemonName(playerPokemon), iconSrc: playerImageOverride ?? playerSpecies?.image_miniature, ability: playerAbilityNom }
-      : { name: opponentNom, iconSrc: opponentSpecies?.image_miniature, ability: opponentAbilityNom }
+      : { name: opponentNom, iconSrc: opponentImageOverride ?? opponentSpecies?.image_miniature, ability: opponentAbilityNom }
 
     const pushHistory = (
       side: Side,
       content: string | { before: string; status: AutoBattleStatusEffect; after: string },
-      extra?: { damage?: number; heal?: number }
+      extra?: { damage?: number; heal?: number; superEffective?: boolean }
     ) => {
       const info = sideInfo(side)
       historyIdRef.current += 1
@@ -248,6 +269,7 @@ export function AutoBattleScreen({
         })(),
         damage: extra?.damage && extra.damage > 0 ? extra.damage : undefined,
         heal: extra?.heal && extra.heal > 0 ? extra.heal : undefined,
+        superEffective: extra?.superEffective,
       }
       setHistoryEntries((prev) => [entry, ...prev])
     }
@@ -256,6 +278,27 @@ export function AutoBattleScreen({
       const turnStart = cursor
       const attackerSide = turn.attacker
       const hitSide: Side = attackerSide === 'player' ? 'opponent' : 'player'
+
+      // Le bouclier d'invulnérabilité de la CIBLE de ce tour expire dès que
+      // ce tour commence, quel qu'en soit le type (voir la déclaration de
+      // playerShieldActive/opponentShieldActive plus haut).
+      if (attackerSide === 'player' && opponentShieldActive) {
+        opponentShieldActive = false
+        timers.push(window.setTimeout(() => setOpponentInvulnerable(false), turnStart))
+      } else if (attackerSide === 'opponent' && playerShieldActive) {
+        playerShieldActive = false
+        timers.push(window.setTimeout(() => setPlayerInvulnerable(false), turnStart))
+      }
+      // Le suivi local (synchrone, pendant la programmation des timers) doit
+      // être mis à jour ICI plutôt que dans les callbacks différés
+      // (setTimeout) ci-dessous : ce .forEach programme TOUS les tours d'un
+      // coup avant qu'aucune animation ne joue réellement, donc une
+      // affectation faite dans un callback différé ne serait jamais visible
+      // par les itérations suivantes de cette même boucle synchrone.
+      if (turn.invulnerable_granted) {
+        if (attackerSide === 'player') playerShieldActive = true
+        else opponentShieldActive = true
+      }
 
       // Position (1-based) de ce tour dans son bloc d'attaques consécutives
       // du même camp — voir speedMultiplierForRepeat ci-dessus. 'skipped' et
@@ -299,8 +342,8 @@ export function AutoBattleScreen({
             setFlashSide(attackerSide)
             setLastDamage({ side: attackerSide, damage: turn.damage, superEffective: false, color: status ? getStatusEffectDisplay(status).color : undefined })
             setHitKey((k) => k + 1)
-            window.setTimeout(() => setShakeSide(null), 300)
-            window.setTimeout(() => setFlashSide(null), 220)
+            window.setTimeout(() => setShakeSide(null), SHAKE_MS)
+            window.setTimeout(() => setFlashSide(null), FLASH_MS)
           }
           if (turn.status_cured) {
             if (attackerSide === 'player') setPlayerStatus(null)
@@ -383,9 +426,9 @@ export function AutoBattleScreen({
         setFlashSide(hitSide)
         setLastDamage({ side: hitSide, damage: turn.damage, superEffective: isSuperEffective })
         setHitKey((k) => k + 1)
-        window.setTimeout(() => setShakeSide(null), 300)
-        window.setTimeout(() => setFlashSide(null), 220)
-        pushHistory(attackerSide, `a utilisé ${sideInfo(attackerSide).ability}`, { damage: turn.damage, heal: turn.heal })
+        window.setTimeout(() => setShakeSide(null), SHAKE_MS)
+        window.setTimeout(() => setFlashSide(null), FLASH_MS)
+        pushHistory(attackerSide, `a utilisé ${sideInfo(attackerSide).ability}`, { damage: turn.damage, heal: turn.heal, superEffective: isSuperEffective })
 
         if (turn.heal != null && turn.attacker_hp_after != null) {
           const healAmount = turn.heal
@@ -451,6 +494,9 @@ export function AutoBattleScreen({
   // autobattle_resolve_battle) — remplace le sprite réel de Métamorph
   // partout où il est affiché sur cet écran.
   const playerSpriteSrc = playerImageOverride ?? playerSpecies?.image_miniature
+  // Cas Métamorph configuré comme adversaire (voir autobattle_resolve_battle)
+  // — même principe symétrique que playerSpriteSrc.
+  const opponentSpriteSrc = opponentImageOverride ?? opponentSpecies?.image_miniature
 
   const playerAttackStyle = attackState?.side === 'player' ? attackTransform(attackState.phase, 1, attackState.durations) : undefined
   const opponentAttackStyle = attackState?.side === 'opponent' ? attackTransform(attackState.phase, -1, attackState.durations) : undefined
@@ -477,7 +523,7 @@ export function AutoBattleScreen({
           </p>
           <div
             className="relative w-24 h-24 flex items-center justify-center"
-            style={{ ...playerAttackStyle, animation: shakeSide === 'player' ? 'hit-shake 0.3s ease-in-out' : undefined }}
+            style={{ ...playerAttackStyle, animation: shakeSide === 'player' ? `hit-shake ${SHAKE_MS}ms ease-in-out` : undefined }}
           >
             {playerSpriteSrc ? (
               <img
@@ -492,7 +538,7 @@ export function AutoBattleScreen({
               <div className="absolute inset-0 pointer-events-none" style={statusOverlayStyle(playerStatus, playerSpriteSrc)} />
             )}
             {flashSide === 'player' && (
-              <div className="absolute inset-0 bg-hp-red rounded-full pointer-events-none" style={{ animation: 'hit-flash 0.22s ease-out' }} />
+              <div className="absolute inset-0 bg-hp-red rounded-full pointer-events-none" style={{ animation: `hit-flash ${FLASH_MS}ms ease-out` }} />
             )}
             {lastDamage?.side === 'player' && (
               <AutoBattleDamageNumber damage={lastDamage.damage} animKey={hitKey} superEffective={lastDamage.superEffective} color={lastDamage.color} />
@@ -537,22 +583,22 @@ export function AutoBattleScreen({
           </p>
           <div
             className="relative w-24 h-24 flex items-center justify-center"
-            style={{ ...opponentAttackStyle, animation: shakeSide === 'opponent' ? 'hit-shake 0.3s ease-in-out' : undefined }}
+            style={{ ...opponentAttackStyle, animation: shakeSide === 'opponent' ? `hit-shake ${SHAKE_MS}ms ease-in-out` : undefined }}
           >
-            {opponentSpecies?.image_miniature ? (
+            {opponentSpriteSrc ? (
               <img
-                src={opponentSpecies.image_miniature}
+                src={opponentSpriteSrc}
                 alt=""
                 className={`pixelated w-full h-full object-contain transition-opacity duration-500 ${opponentKo ? 'grayscale opacity-40' : opponentInvulnerable ? 'opacity-10' : ''}`}
               />
             ) : (
               <span className="text-4xl">?</span>
             )}
-            {opponentStatus && opponentSpecies?.image_miniature && (
-              <div className="absolute inset-0 pointer-events-none" style={statusOverlayStyle(opponentStatus, opponentSpecies.image_miniature)} />
+            {opponentStatus && opponentSpriteSrc && (
+              <div className="absolute inset-0 pointer-events-none" style={statusOverlayStyle(opponentStatus, opponentSpriteSrc)} />
             )}
             {flashSide === 'opponent' && (
-              <div className="absolute inset-0 bg-hp-red rounded-full pointer-events-none" style={{ animation: 'hit-flash 0.22s ease-out' }} />
+              <div className="absolute inset-0 bg-hp-red rounded-full pointer-events-none" style={{ animation: `hit-flash ${FLASH_MS}ms ease-out` }} />
             )}
             {lastDamage?.side === 'opponent' && (
               <AutoBattleDamageNumber damage={lastDamage.damage} animKey={hitKey} superEffective={lastDamage.superEffective} color={lastDamage.color} />
@@ -580,13 +626,13 @@ export function AutoBattleScreen({
       </div>
 
       {!fighting && countdownStep >= 0 && (
-        <div key={countdownStep} className="text-center text-ink text-4xl font-bold animate-[celebrate-pop_0.4s_ease-out]">
+        <div key={countdownStep} className="text-center text-ink text-4xl font-bold animate-[celebrate-pop_0.52s_ease-out]">
           {COUNTDOWN_STEPS[countdownStep]}
         </div>
       )}
 
       {(playerKo || opponentKo) && (
-        <p className="text-center text-hp-red text-xl font-bold animate-[celebrate-pop_0.4s_ease-out]">K.O. !</p>
+        <p className="text-center text-hp-red text-xl font-bold animate-[celebrate-pop_0.52s_ease-out]">K.O. !</p>
       )}
 
       {battleDone && (

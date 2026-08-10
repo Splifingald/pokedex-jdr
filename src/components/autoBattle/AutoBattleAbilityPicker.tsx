@@ -49,10 +49,10 @@ export function AutoBattleAbilityPicker({ playerPokemon, attacksByName, bannedAt
                   onSelect(a)
                 }
               }}
-              className={`${PANEL} flex items-center gap-3 p-2.5 text-left ${ineligible ? 'opacity-40 grayscale cursor-not-allowed' : BUTTON_STYLE.gray}`}
+              className={`${PANEL} flex flex-wrap items-center gap-x-3 gap-y-1.5 p-2.5 text-left ${ineligible ? 'opacity-40 grayscale cursor-not-allowed' : BUTTON_STYLE.gray}`}
             >
               <TypeBadge type={a.type} small />
-              <span className="flex-1 text-ink text-sm font-bold truncate">{a.nom}</span>
+              <span className="flex-1 min-w-[6rem] text-ink text-sm font-bold truncate">{a.nom}</span>
               {ineligible ? (
                 <span className="flex items-center gap-1 shrink-0">
                   <span className="text-sm">🛑</span>

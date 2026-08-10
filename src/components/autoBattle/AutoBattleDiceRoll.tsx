@@ -16,13 +16,13 @@ export function AutoBattleDiceRoll({ value, animKey }: Props) {
     <div
       key={animKey}
       className="absolute inset-x-0 top-0 flex items-center justify-center pointer-events-none"
-      style={{ animation: 'damage-number-pop 1s ease-out forwards' }}
+      style={{ animation: 'damage-number-pop 1.3s ease-out forwards' }}
     >
       <img
         src={DICE_ICON[value]}
         alt={String(value)}
         className="w-8 h-8 object-contain pixelated"
-        style={{ animation: 'dice-shake 0.3s ease-in-out 1' }}
+        style={{ animation: 'dice-shake 0.39s ease-in-out 1' }}
       />
     </div>
   )

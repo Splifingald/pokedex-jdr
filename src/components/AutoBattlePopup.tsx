@@ -429,7 +429,8 @@ export function AutoBattlePopup({
               opponentSpecies={opponentSpecies}
               opponentMaxHp={battleResult.opponent_hp ?? 1}
               opponentNom={battleResult.opponent_pokemon_nom ?? ''}
-              opponentAbilityNom={battleResult.opponent_ability_nom ?? ''}
+              opponentAbilityNom={battleResult.opponent_ability_nom_override ?? battleResult.opponent_ability_nom ?? ''}
+              opponentImageOverride={battleResult.opponent_image_override ?? undefined}
               turns={battleResult.turns}
               playerTypeBonus={battleResult.player_type_bonus ?? false}
               opponentTypeBonus={battleResult.opponent_type_bonus ?? false}
