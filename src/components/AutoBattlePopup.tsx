@@ -55,11 +55,12 @@ interface Props {
   pokedollarImageUrl?: string | null
   onRequestPokemonDetail: (id: number) => void
   onClose: () => void
+  isAdmin?: boolean
 }
 
 export function AutoBattlePopup({
   player, playerItems, roster, pokemonByName, attacksByName, itemsByName, evolutionsByPokemonNom,
-  pokedollarImageUrl, onRequestPokemonDetail, onClose,
+  pokedollarImageUrl, onRequestPokemonDetail, onClose, isAdmin,
 }: Props) {
   const { config } = useAutoBattleConfig()
   const { state, updateState } = useAutoBattlePlayerState(player.id)
@@ -295,12 +296,14 @@ export function AutoBattlePopup({
         className="relative bg-cream w-full h-full overflow-hidden flex flex-col
           sm:h-auto sm:max-w-md sm:max-h-[85vh] sm:rounded-[var(--radius-pixel)] sm:border-[3px] sm:border-ink sm:shadow-[var(--shadow-pixel-lg)]"
       >
-        <button
-          onClick={onClose}
-          className="absolute right-3 top-3 z-20 w-8 h-8 rounded-full border-2 border-ink bg-cream shadow-[var(--shadow-pixel)] flex items-center justify-center text-ink hover:bg-black/10 active:shadow-none active:translate-x-[1px] active:translate-y-[1px] transition-all"
-        >
-          <CloseIcon className="w-4 h-4" />
-        </button>
+        {view !== 'coin-toss' && view !== 'battle' && (
+          <button
+            onClick={onClose}
+            className="absolute right-3 top-3 z-20 w-8 h-8 rounded-full border-2 border-ink bg-cream shadow-[var(--shadow-pixel)] flex items-center justify-center text-ink hover:bg-black/10 active:shadow-none active:translate-x-[1px] active:translate-y-[1px] transition-all"
+          >
+            <CloseIcon className="w-4 h-4" />
+          </button>
+        )}
 
         {view === 'battle' && activeLevel && battleResult?.turns && selectedPokemon && (
           <GameBanner bannerUrl={activeVariant?.banner_url ?? ''} fallbackEmoji="⚔️" className="aspect-[10/3] shrink-0" />
@@ -435,6 +438,10 @@ export function AutoBattlePopup({
               playerTypeBonus={battleResult.player_type_bonus ?? false}
               opponentTypeBonus={battleResult.opponent_type_bonus ?? false}
               onContinue={handleBattleFinished}
+              isAdmin={isAdmin}
+              attacksByName={attacksByName}
+              playerDamagePerHit={battleResult.player_damage_per_hit}
+              opponentDamagePerHit={battleResult.opponent_damage_per_hit}
             />
           )}
 

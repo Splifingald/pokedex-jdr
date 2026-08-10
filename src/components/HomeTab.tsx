@@ -493,6 +493,7 @@ export function HomeTab({ player, players, isAdmin, pokemonByName, discoveredPok
           pokedollarImageUrl={itemsByName.get(POKEDOLLAR_ITEM_NAME)?.image_url}
           onRequestPokemonDetail={(id) => { setShowAutoBattle(false); setSelectedElevated(false); setSelectedId(id) }}
           onClose={() => setShowAutoBattle(false)}
+          isAdmin={isAdmin}
         />
       )}
 

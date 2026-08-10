@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { Pokemon, PlayerPokemon, AutoBattleStatusEffect } from '../../types'
+import type { Pokemon, PlayerPokemon, AutoBattleStatusEffect, Attack } from '../../types'
 import { ownedPokemonName } from '../../types'
 import { HpGauge } from '../HpGauge'
 import { AutoBattleDamageNumber } from './AutoBattleDamageNumber'
@@ -8,7 +8,7 @@ import { AutoBattleFloatingText } from './AutoBattleFloatingText'
 import { AutoBattleHealEffect } from './AutoBattleHealEffect'
 import { AutoBattleDiceRoll } from './AutoBattleDiceRoll'
 import { AutoBattleHistoryLog, type AutoBattleHistoryEntryData } from './AutoBattleHistoryLog'
-import { getStatusEffectDisplay } from '../../lib/autoBattle'
+import { getStatusEffectDisplay, STATUS_EFFECT_LABEL } from '../../lib/autoBattle'
 import { PixelIcon } from '../icons/PixelIcon'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 import type { AutoBattleTurn } from '../../types'
@@ -21,6 +21,17 @@ const STATUS_SKIP_LABEL: Partial<Record<AutoBattleStatusEffect, string>> = {
   paralysis: 'Paralysé !',
   frozen: 'Gelé !',
   sleep: 'Endormi...',
+}
+
+// Pénalité de précision appliquée par confusion/peur — doit rester
+// synchronisée avec v_status_precision_penalty côté serveur (voir
+// autobattle_resolve_battle : CASE WHEN status='fear' THEN 3 ELSE 5 END),
+// jamais redéfinie arbitrairement ici : ces valeurs sont un pur affichage de
+// debug admin, le résultat réel (touché/raté) est toujours décidé par le
+// serveur.
+const PRECISION_MODIFIER_BY_STATUS: Partial<Record<AutoBattleStatusEffect, number>> = {
+  confusion: -5,
+  fear: -3,
 }
 
 interface Props {
@@ -42,6 +53,12 @@ interface Props {
   /** Idem pour l'adversaire contre le type du joueur */
   opponentTypeBonus: boolean
   onContinue: () => void
+  isAdmin?: boolean
+  attacksByName?: Map<string, Attack>
+  /** Dégâts par coup AVANT dé (espèce + bonus XP + multiplicateur type + dégâts de base de la capacité), voir autobattle_resolve_battle v_player_damage — sert à isoler la valeur du dé en debug admin (turn.damage - ce total). */
+  playerDamagePerHit?: number
+  /** Idem côté adversaire (v_opponent_damage). */
+  opponentDamagePerHit?: number
 }
 
 const COUNTDOWN_STEPS = ['3', '2', '1', 'GO !']
@@ -181,7 +198,7 @@ function statusOverlayStyle(status: AutoBattleStatusEffect, spriteUrl: string): 
 // que d'enchaîner automatiquement sur les récompenses/l'écran de défaite.
 export function AutoBattleScreen({
   playerPokemon, playerSpecies, playerMaxHp, playerAbilityNom, playerImageOverride, opponentSpecies, opponentMaxHp, opponentNom, opponentAbilityNom, opponentImageOverride, turns,
-  playerTypeBonus, opponentTypeBonus, onContinue,
+  playerTypeBonus, opponentTypeBonus, onContinue, isAdmin = false, attacksByName, playerDamagePerHit, opponentDamagePerHit,
 }: Props) {
   const [countdownStep, setCountdownStep] = useState(-1)
   const [fighting, setFighting] = useState(false)
@@ -220,6 +237,17 @@ export function AutoBattleScreen({
   const [historyOpen, setHistoryOpen] = useState(true)
   const historyIdRef = useRef(0)
 
+  // Précision effective affichée en debug admin — reproduit EXACTEMENT
+  // GREATEST(0, ability.precision - v_status_precision_penalty) côté
+  // serveur (voir autobattle_resolve_battle), donc clampée à 0 seulement
+  // (jamais un plancher artificiel à 1 : le serveur peut légitimement
+  // amener la précision à 0, auquel cas l'attaque rate toujours).
+  const getEffectivePrecision = (basePrecision: number, status: AutoBattleStatusEffect | null): { effective: number; modifier: number; statusLabel?: string } => {
+    const modifier = status ? (PRECISION_MODIFIER_BY_STATUS[status] ?? 0) : 0
+    const effective = Math.max(0, basePrecision + modifier)
+    return { effective, modifier, statusLabel: status && modifier !== 0 ? STATUS_EFFECT_LABEL[status] : undefined }
+  }
+
   // Compte à rebours 3…2…1…GO ! avant le premier coup, même idiome que
   // MagikarpGame — les deux pokémon sont déjà affichés pendant ce temps.
   useEffect(() => {
@@ -256,7 +284,7 @@ export function AutoBattleScreen({
     const pushHistory = (
       side: Side,
       content: string | { before: string; status: AutoBattleStatusEffect; after: string },
-      extra?: { damage?: number; heal?: number; superEffective?: boolean }
+      extra?: { damage?: number; heal?: number; superEffective?: boolean; basePrecision?: number; effectivePrecision?: number; diceRoll?: number; precisionStatus?: string }
     ) => {
       const info = sideInfo(side)
       historyIdRef.current += 1
@@ -270,6 +298,10 @@ export function AutoBattleScreen({
         damage: extra?.damage && extra.damage > 0 ? extra.damage : undefined,
         heal: extra?.heal && extra.heal > 0 ? extra.heal : undefined,
         superEffective: extra?.superEffective,
+        debugBasePrecision: extra?.basePrecision,
+        debugEffectivePrecision: extra?.effectivePrecision,
+        debugDiceRoll: extra?.diceRoll,
+        debugPrecisionStatus: extra?.precisionStatus,
       }
       setHistoryEntries((prev) => [entry, ...prev])
     }
@@ -278,6 +310,23 @@ export function AutoBattleScreen({
       const turnStart = cursor
       const attackerSide = turn.attacker
       const hitSide: Side = attackerSide === 'player' ? 'opponent' : 'player'
+
+      // Confusion/peur (voir autobattle_resolve_battle) : le serveur émet
+      // TOUJOURS, pour le tour qui les subit, un tour 'status_tick' (status
+      // déjà marqué status_cured=true à ce moment précis — c'est ainsi que le
+      // serveur modélise "la pénalité s'applique à CE tour puis disparaît")
+      // IMMÉDIATEMENT SUIVI, sans jamais aucun tour d'un autre camp entre les
+      // deux, du vrai tour d'attaque du même attaquant (voir v_status_
+      // precision_penalty : posé au tick, consommé dans le v_missed du tour
+      // suivant, jamais persisté au-delà). Donc turns[i-1] suffit à détecter
+      // "cette attaque a été jouée sous confusion/peur" — jamais besoin de
+      // suivre un état à travers plusieurs tours comme pour le bouclier.
+      const precedingTick = i > 0 ? turns[i - 1] : undefined
+      const attackerPrecisionStatus: AutoBattleStatusEffect | null =
+        precedingTick?.status_tick && precedingTick.attacker === attackerSide
+        && (precedingTick.status === 'confusion' || precedingTick.status === 'fear')
+          ? precedingTick.status
+          : null
 
       // Le bouclier d'invulnérabilité expire EXACTEMENT 1 tour après avoir
       // été accordé, point — quel que soit le type de ce tour suivant et quel
@@ -350,13 +399,23 @@ export function AutoBattleScreen({
             window.setTimeout(() => setShakeSide(null), SHAKE_MS)
             window.setTimeout(() => setFlashSide(null), FLASH_MS)
           }
-          if (turn.status_cured) {
+          // Confusion/peur : le serveur marque TOUJOURS ce tick
+          // status_cured=true (voir autobattle_resolve_battle), mais la
+          // pénalité de précision qu'il vient de révéler s'applique encore à
+          // l'attaque de ce même camp qui suit IMMÉDIATEMENT (jamais de tour
+          // adverse entre les deux) — le badge visuel doit donc rester
+          // affiché jusqu'à la résolution de cette attaque (voir
+          // attackerPrecisionStatus, qui la détecte via turns[i-1] et efface
+          // le badge une fois cette attaque résolue), pas ici.
+          if (turn.status_cured && status !== 'confusion' && status !== 'fear') {
             if (attackerSide === 'player') setPlayerStatus(null)
             else setOpponentStatus(null)
           }
           if (status) {
             if (turn.skipped) {
               pushHistory(attackerSide, { before: 'ne peut pas agir (', status, after: ')' }, { damage: turn.damage })
+            } else if (status === 'confusion' || status === 'fear') {
+              pushHistory(attackerSide, { before: "agit sous l'effet de ", status, after: '' }, { damage: turn.damage })
             } else if (turn.status_cured) {
               if (status === 'sleep') pushHistory(attackerSide, 'se réveille !', { damage: turn.damage })
               else pushHistory(attackerSide, { before: "n'est plus affecté par ", status, after: '' }, { damage: turn.damage })
@@ -420,7 +479,27 @@ export function AutoBattleScreen({
             if (hitSide === 'player') setPlayerInvulnerable(false)
             else setOpponentInvulnerable(false)
           }
-          pushHistory(attackerSide, `a manqué son attaque ${sideInfo(attackerSide).ability}`)
+
+          const abilityNom = attackerSide === 'player' ? playerAbilityNom : opponentAbilityNom
+          const ability = attacksByName?.get(abilityNom)
+          const basePrecision = ability?.precision ?? 10
+          const precisionInfo = isAdmin ? getEffectivePrecision(basePrecision, attackerPrecisionStatus) : null
+
+          pushHistory(attackerSide, `a manqué son attaque ${sideInfo(attackerSide).ability}`, {
+            basePrecision: isAdmin ? basePrecision : undefined,
+            effectivePrecision: isAdmin ? precisionInfo?.effective : undefined,
+            diceRoll: undefined,
+            precisionStatus: isAdmin ? precisionInfo?.statusLabel : undefined,
+          })
+          // Confusion/peur : cette attaque ratée (ou non) est précisément
+          // celle sous l'effet révélé par le tick précédent (turns[i-1]) —
+          // le badge a été délibérément laissé affiché jusqu'ici (voir le
+          // bloc status_tick plus haut), il disparaît maintenant que cette
+          // attaque est résolue.
+          if (attackerPrecisionStatus) {
+            if (attackerSide === 'player') setPlayerStatus(null)
+            else setOpponentStatus(null)
+          }
           window.setTimeout(() => setMissSide(null), FLYING_TEXT_MS)
           return
         }
@@ -433,7 +512,39 @@ export function AutoBattleScreen({
         setHitKey((k) => k + 1)
         window.setTimeout(() => setShakeSide(null), SHAKE_MS)
         window.setTimeout(() => setFlashSide(null), FLASH_MS)
-        pushHistory(attackerSide, `a utilisé ${sideInfo(attackerSide).ability}`, { damage: turn.damage, heal: turn.heal, superEffective: isSuperEffective })
+
+        const abilityNom = attackerSide === 'player' ? playerAbilityNom : opponentAbilityNom
+        const ability = attacksByName?.get(abilityNom)
+        const basePrecision = ability?.precision ?? 10
+        const precisionInfo = isAdmin ? getEffectivePrecision(basePrecision, attackerPrecisionStatus) : null
+        // damagePerHit = tout ce qui compose turn.damage AVANT le dé (espèce +
+        // XP + multiplicateur type + degats_base de la capacité, voir
+        // autobattle_resolve_battle v_player_damage/v_opponent_damage) —
+        // fourni tel quel par le serveur, jamais recalculé côté client
+        // (contrairement à ability.degats_base seul, qui omettait la
+        // composante espèce/XP/type et donnait une valeur de dé fausse).
+        const damagePerHit = attackerSide === 'player' ? playerDamagePerHit : opponentDamagePerHit
+        const diceValue = isAdmin && damagePerHit != null ? turn.damage - damagePerHit : undefined
+
+        pushHistory(attackerSide, `a utilisé ${sideInfo(attackerSide).ability}`, {
+          damage: turn.damage,
+          heal: turn.heal,
+          superEffective: isSuperEffective,
+          basePrecision: isAdmin ? basePrecision : undefined,
+          effectivePrecision: isAdmin ? precisionInfo?.effective : undefined,
+          diceRoll: diceValue,
+          precisionStatus: isAdmin ? precisionInfo?.statusLabel : undefined,
+        })
+
+        // Confusion/peur : même principe que côté raté ci-dessus — cette
+        // attaque réussie était celle sous l'effet révélé par le tick
+        // précédent (turns[i-1]), le badge disparaît maintenant qu'elle est
+        // résolue (avant un éventuel NOUVEAU statut appliqué par ce même
+        // coup plus bas, qui écrasera cet effacement le cas échéant).
+        if (attackerPrecisionStatus) {
+          if (attackerSide === 'player') setPlayerStatus(null)
+          else setOpponentStatus(null)
+        }
 
         if (turn.heal != null && turn.attacker_hp_after != null) {
           const healAmount = turn.heal
@@ -663,6 +774,7 @@ export function AutoBattleScreen({
         <AutoBattleHistoryLog
           entries={historyEntries}
           onHide={() => setHistoryOpen(false)}
+          isAdmin={isAdmin}
         />
       )}
     </div>

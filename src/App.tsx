@@ -196,8 +196,11 @@ export default function App() {
         <button
           onClick={() => setShowProfile(true)}
           title="Profil"
-          className="absolute top-16 right-3 z-20 w-10 h-10 rounded-full overflow-hidden border-[3px] border-ink shadow-[var(--shadow-pixel)]"
-          style={{ backgroundColor: player.color }}
+          className="absolute right-3 z-20 w-10 h-10 rounded-full overflow-hidden border-[3px] border-ink shadow-[var(--shadow-pixel)]"
+          style={{
+            backgroundColor: player.color,
+            top: 'calc(0.625rem + env(safe-area-inset-top) + 2.5rem + 0.625rem + 0.5rem)',
+          }}
         >
           {player.image_url && (
             <img src={player.image_url} alt={player.name} className="w-full h-full object-cover" />
