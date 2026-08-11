@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import type { Pokemon, PlayerPokemon, Attack } from '../../types'
 import { ownedPokemonName } from '../../types'
 import { getEligiblePlayerPokemon } from '../../lib/autoBattle'
+import { getSuperEfficace } from '../../lib/pokemonFacts'
 import { PANEL } from '../../lib/panelStyles'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 
@@ -10,15 +11,18 @@ interface Props {
   pokemonByName: Map<string, Pokemon>
   attacksByName: Map<string, Attack>
   bannedAttacks: Set<string>
+  /** Espèce adverse du niveau en cours — undefined si pas encore résolue (ne devrait pas arriver en pratique, voir AutoBattlePopup). */
+  opponentSpecies?: Pokemon
+  /** Ce niveau a-t-il déjà été joué au moins une fois (autobattle_player_level_state.discovered) — le badge "Super Efficace" ne doit apparaître qu'une fois l'adversaire réellement découvert, jamais en avant-première sur un niveau jamais tenté. */
+  opponentDiscovered: boolean
   onSelect: (pp: PlayerPokemon) => void
   onBack: () => void
 }
 
 // Sélection du pokémon combattant — même structure de grille de cartes que
 // PensionPlacementList (Équipe + PC, pension exclue), filtrée aux pokémon
-// ayant au moins une capacité offensive apprise (voir requirement #6/#9),
-// bannies exclues.
-export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, bannedAttacks, onSelect, onBack }: Props) {
+// ayant au moins une capacité apprise non-bannie (voir requirement #6/#9).
+export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, bannedAttacks, opponentSpecies, opponentDiscovered, onSelect, onBack }: Props) {
   const eligible = useMemo(
     () => getEligiblePlayerPokemon(roster, attacksByName, bannedAttacks),
     [roster, attacksByName, bannedAttacks]
@@ -28,7 +32,7 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
     return (
       <div className="flex flex-col items-center gap-3 py-6">
         <p className="text-ink-muted-2 text-sm text-center">
-          Aucun pokémon avec une capacité offensive apprise (et hors pension) n'est disponible pour combattre.
+          Aucun pokémon avec une capacité apprise (et hors pension) n'est disponible pour combattre.
         </p>
         <button onClick={onBack} className={`text-xs px-3 py-1.5 rounded font-bold ${BUTTON_STYLE.gray}`}>← Retour</button>
       </div>
@@ -44,6 +48,8 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
       <div className="grid grid-cols-2 gap-2">
         {eligible.map((pp) => {
           const species = pokemonByName.get(pp.pokemon_nom)
+          const superEffective = opponentDiscovered && opponentSpecies != null
+            && getSuperEfficace(species).includes(opponentSpecies.type)
           return (
             <button
               key={pp.id}
@@ -59,6 +65,11 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
               </div>
               <span className="text-ink text-sm font-bold truncate w-full text-center">{ownedPokemonName(pp)}</span>
               {pp.in_team && <span className="text-ink-muted-2 text-xs">Équipe</span>}
+              {superEffective && (
+                <span className="text-xs font-bold px-2.5 py-1 rounded-full text-white bg-[#d9761e] whitespace-nowrap">
+                  Super Efficace
+                </span>
+              )}
             </button>
           )
         })}

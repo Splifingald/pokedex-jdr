@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Player } from '../types'
-import { useFullscreen } from '../hooks/useFullscreen'
+import { useFullscreen, isFullscreenSupported } from '../hooks/useFullscreen'
 import { usePushNotifications } from '../hooks/usePushNotifications'
 import { ConfirmPopup } from './ConfirmPopup'
 import { AddToHomeScreenModal } from './AddToHomeScreenModal'
@@ -91,15 +91,17 @@ export function SettingsPopup({ player, isAdmin, notificationsAvailable, onReque
         </div>
 
         {/* Plein écran */}
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-sm">⛶ Plein écran</span>
-          <button
-            onClick={toggle}
-            className={`text-xs px-2.5 py-1.5 rounded-md font-bold ${isFullscreen ? BUTTON_STYLE.green : BUTTON_STYLE.gray}`}
-          >
-            {isFullscreen ? 'Activé' : 'Désactivé'}
-          </button>
-        </div>
+        {isFullscreenSupported && (
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm">⛶ Plein écran</span>
+            <button
+              onClick={toggle}
+              className={`text-xs px-2.5 py-1.5 rounded-md font-bold ${isFullscreen ? BUTTON_STYLE.green : BUTTON_STYLE.gray}`}
+            >
+              {isFullscreen ? 'Activé' : 'Désactivé'}
+            </button>
+          </div>
+        )}
 
         {/* Rafraîchissement complet */}
         <div className="flex items-center justify-between mb-3">

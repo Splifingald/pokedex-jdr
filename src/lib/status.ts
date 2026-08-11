@@ -24,8 +24,8 @@ export interface StatusInfo {
 export const STATUS_LIST: StatusInfo[] = [
   { id: 'aucun', label: 'Aucun Statut', color: '#9CA3AF', description: '', icon: '' },
   { id: 'paralysie', label: 'Paralysé', color: '#EAB308', description: "Empêche les mouvements et empêche de lancer des attaques pendant 1 tour.", icon: '⚡', iconSrc: STATUS_ICON.paralysie },
-  { id: 'apeure', label: 'Appeuré', color: '#6B7280', description: "Empêche les mouvements et réduit la précision de 3 pendant 1 tour.", icon: '😱', iconSrc: STATUS_ICON.apeure },
-  { id: 'confusion', label: 'Confus', color: '#EC4899', description: "Réduit la précision de 5 pendant 1 tour.", icon: '😵‍💫', iconSrc: STATUS_ICON.confusion },
+  { id: 'apeure', label: 'Appeuré', color: '#6B7280', description: "Empêche les mouvements et réduit la précision de 5 pendant 1 tour.", icon: '😱', iconSrc: STATUS_ICON.apeure },
+  { id: 'confusion', label: 'Confus', color: '#EC4899', description: "Au début de son tour, la cible lance un D6 pour sortir de sa confusion (4, 5, 6 = réussite). En cas d'échec, sa précision est réduite de 5 pour ce tour.", icon: '😵‍💫', iconSrc: STATUS_ICON.confusion },
   { id: 'endormi', label: 'Endormi', color: '#3B82F6', description: "Empêche les mouvements et les attaques : Au début de son tour, la cible lance un D6 pour se réveiller (4, 5, 6 = réveil).", icon: '💤', iconSrc: STATUS_ICON.endormi },
   { id: 'brule', label: 'Brûlé', color: '#EF4444', description: "Inflige 5 de dégâts par tour à la cible, au début de son tour la cible lance un D6 pour ne plus être brûlée (4, 5, 6 = soin).", icon: '🔥', iconSrc: STATUS_ICON.brule },
   { id: 'empoisonne', label: 'Empoisonné', color: '#A855F7', description: "Inflige 3 de dégâts par tour à la cible (s'arrête si la cible soigne ses PV ou son statut).", icon: '☢️', iconSrc: STATUS_ICON.empoisonne },

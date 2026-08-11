@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
-import type { Player, PlayerPokemon, Pokemon, Attack, PokemonEvolution, Item, AutoBattleVariant, AutoBattleLevel, AutoBattleResolveResult } from '../types'
+import { useState, useEffect, useRef, useMemo } from 'react'
+import type { Player, PlayerPokemon, Pokemon, Attack, PokemonEvolution, Item, AutoBattleVariant, AutoBattleLevel, AutoBattleResolveResult, AutoBattleManualRoundResult, AutoBattleAbilityRule } from '../types'
 import { TICKET_AUTOBATTLE_ITEM_NAME, POKEDOLLAR_ITEM_NAME, ownedPokemonName } from '../types'
 import { supabase } from '../lib/supabase'
 import { usePlayerItems } from '../hooks/usePlayerItems'
@@ -8,8 +8,10 @@ import { useAutoBattlePlayerState } from '../hooks/useAutoBattlePlayerState'
 import { useAutoBattleVariants } from '../hooks/useAutoBattleVariants'
 import { useAutoBattleProgress } from '../hooks/useAutoBattleProgress'
 import { useAutoBattleBannedAttacks } from '../hooks/useAutoBattleBannedAttacks'
+import { useAutoBattleAbilityRules } from '../hooks/useAutoBattleAbilityRules'
 import { isPurchaseCapReached, localDateString, formatCountdown } from '../lib/casino'
 import { generateIdempotencyKey } from '../lib/autoBattle'
+import { getHpBreakdown } from '../lib/xpBonuses'
 import { getEvolutionOptions } from '../lib/evolution'
 import { useToast } from '../context/ToastContext'
 import { GameBanner } from './CasinoGameCard'
@@ -18,6 +20,7 @@ import { AutoBattlePokemonPicker } from './autoBattle/AutoBattlePokemonPicker'
 import { AutoBattleAbilityPicker } from './autoBattle/AutoBattleAbilityPicker'
 import { AutoBattleCoinToss } from './autoBattle/AutoBattleCoinToss'
 import { AutoBattleScreen } from './autoBattle/AutoBattleScreen'
+import { ManualBattleScreen } from './autoBattle/ManualBattleScreen'
 import { AutoBattleRewardPopup } from './autoBattle/AutoBattleRewardPopup'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
@@ -27,7 +30,7 @@ import { CloseIcon } from './icons/CloseIcon'
 import { PokedollarIcon } from './PokedollarIcon'
 import { logHistoryEvent } from '../lib/historyLog'
 
-type View = 'list' | 'pick-pokemon' | 'pick-ability' | 'coin-toss' | 'battle' | 'reward' | 'lose'
+type View = 'list' | 'pick-pokemon' | 'pick-ability' | 'coin-toss' | 'battle' | 'manual-battle' | 'reward' | 'lose'
 
 // Messages affichés au joueur pour chaque statut non-'ok' renvoyé par le RPC
 // autobattle_resolve_battle (voir supabase/schema.sql) — évite qu'un rejet
@@ -42,6 +45,7 @@ const STATUS_MESSAGE: Record<string, string> = {
   invalid_level: 'Niveau mal configuré, contactez un admin.',
   duplicate_request: 'Combat déjà résolu.',
   not_found: 'Niveau introuvable.',
+  wrong_mode: 'Ce parcours a changé de mode de jeu, réessayez.',
 }
 
 interface Props {
@@ -67,7 +71,14 @@ export function AutoBattlePopup({
   const { variants, levelsByVariant, rewardsByLevel, loading: variantsLoading } = useAutoBattleVariants()
   const { progressByVariant, stateByLevel } = useAutoBattleProgress(player.id)
   const { bannedNames } = useAutoBattleBannedAttacks()
+  const { rules: abilityRules } = useAutoBattleAbilityRules()
   const { showToast } = useToast()
+
+  const abilityRulesByName = useMemo(() => {
+    const map = new Map<string, AutoBattleAbilityRule>()
+    for (const r of abilityRules) map.set(r.attack_nom, r)
+    return map
+  }, [abilityRules])
 
   const [view, setView] = useState<View>('list')
   const [now, setNow] = useState(() => Date.now())
@@ -85,6 +96,12 @@ export function AutoBattlePopup({
   // RPC exécutées) alors qu'un seul restait visible à l'écran (le second
   // résultat écrasant le premier), rendant le bug quasi invisible.
   const submittingRef = useRef(false)
+  // Combat Manuel : le ticket n'est débité (optimiste, comme le mode Auto)
+  // qu'au 1er tour du combat, pas à chaque appel RPC (voir autobattle_
+  // resolve_manual_round, qui ne débite lui aussi qu'à la création de la
+  // ligne autobattle_manual_battles) — ce ref suit si c'est déjà fait pour
+  // le combat en cours.
+  const manualTicketSpentRef = useRef(false)
 
   const ticketRow = playerItems.inventory.find((r) => r.item_nom === TICKET_AUTOBATTLE_ITEM_NAME)
   const ticketCount = ticketRow?.quantity ?? 0
@@ -134,7 +151,83 @@ export function AutoBattlePopup({
     setBattleResult(null)
     setEvolutionEligible(false)
     setShowEvolvePrompt(false)
+    manualTicketSpentRef.current = false
     setView('pick-pokemon')
+  }
+
+  // Combat Manuel : appelée par ManualBattleScreen à chaque capacité choisie
+  // par le joueur (un tour = un appel RPC, voir autobattle_resolve_manual_
+  // round). Retourne null en cas d'erreur réseau/RPC — ManualBattleScreen
+  // se contente alors de redonner la main sans planter, le toast suffit.
+  const handleSubmitManualRound = async (pp: PlayerPokemon, ability: Attack): Promise<AutoBattleManualRoundResult | null> => {
+    if (!activeLevel) return null
+    const isFirstRound = !manualTicketSpentRef.current
+    if (isFirstRound) {
+      if (ticketCount < 1 || !ticketRow) {
+        showToast('Aucun ticket disponible.')
+        return null
+      }
+      manualTicketSpentRef.current = true
+      const spentTotal = ticketRow.quantity - 1
+      // Pas d'await ici : setQuantity applique déjà la mise à jour optimiste
+      // du compteur de tickets de façon SYNCHRONE avant son propre appel
+      // réseau (voir usePlayerItems.setQuantity) — le faire attendre avant
+      // de lancer le RPC du 1er tour ne ferait qu'ajouter un aller-retour
+      // réseau complet au temps mort perçu avant que l'animation démarre,
+      // pour rien (l'UI est déjà à jour, et le débit serveur du ticket est
+      // de toute façon fait indépendamment par le RPC lui-même).
+      void playerItems.setQuantity(ticketRow, spentTotal)
+      void logHistoryEvent('inventory', 'item_autobattle_spend', player.id, {
+        item_nom: TICKET_AUTOBATTLE_ITEM_NAME,
+        delta: 1,
+        total: spentTotal,
+        source: activeVariant?.nom ?? config.nom,
+      })
+    }
+
+    let result: AutoBattleManualRoundResult | null = null
+    let rpcError: unknown
+    try {
+      const idempotencyKey = generateIdempotencyKey()
+      const { data, error } = await supabase.rpc('autobattle_resolve_manual_round', {
+        p_player_id: player.id,
+        p_level_id: activeLevel.id,
+        p_player_pokemon_id: pp.id,
+        p_ability_nom: ability.nom,
+        p_idempotency_key: idempotencyKey,
+        p_is_new_battle: isFirstRound,
+      })
+      result = (data ?? null) as AutoBattleManualRoundResult | null
+      rpcError = error
+    } catch (err) {
+      rpcError = err
+    }
+
+    if (rpcError || !result || result.status !== 'ok') {
+      if (rpcError) console.error('Erreur lors de la résolution du tour Combat Manuel :', rpcError)
+      if (isFirstRound) {
+        manualTicketSpentRef.current = false
+        await playerItems.addItems(TICKET_AUTOBATTLE_ITEM_NAME, 1)
+        void logHistoryEvent('inventory', 'item_add', player.id, {
+          item_nom: TICKET_AUTOBATTLE_ITEM_NAME,
+          delta: 1,
+          total: ticketCount,
+          source: 'combat refusé',
+        })
+      }
+      showToast(STATUS_MESSAGE[result?.status ?? ''] ?? 'Combat impossible pour le moment.')
+      return null
+    }
+
+    if (result.outcome === 'win') {
+      void playerItems.refetch()
+    }
+    return result
+  }
+
+  const handleManualBattleFinished = (result: AutoBattleManualRoundResult) => {
+    setBattleResult(result as AutoBattleResolveResult)
+    handleBattleFinished(result)
   }
 
   const handleSelectAbility = async (pp: PlayerPokemon, ability: Attack) => {
@@ -202,32 +295,38 @@ export function AutoBattlePopup({
     submittingRef.current = false
   }
 
-  const handleBattleFinished = () => {
-    if (!battleResult || !activeVariant || !activeLevel || !selectedPokemon) return
-    const opponentSpecies = pokemonByName.get(battleResult.opponent_pokemon_nom ?? '')
+  // Accepte un résultat explicite (mode Manuel : ManualBattleScreen appelle
+  // ceci dès la fin d'animation du tour final, avant même que setBattleResult
+  // n'ait eu le temps de re-rendre — lire l'état battleResult ici serait donc
+  // stale) ; par défaut lit l'état (mode Auto : le bouton "Continuer" de
+  // AutoBattleScreen n'a pas de résultat à passer, battleResult est déjà à
+  // jour depuis handleSelectAbility).
+  const handleBattleFinished = (result: AutoBattleResolveResult | AutoBattleManualRoundResult | null = battleResult) => {
+    if (!result || !activeVariant || !activeLevel || !selectedPokemon) return
+    const opponentSpecies = pokemonByName.get(result.opponent_pokemon_nom ?? '')
 
-    if (battleResult.outcome === 'win') {
+    if (result.outcome === 'win') {
       void logHistoryEvent('autobattle', 'autobattle_win', player.id, {
         variant_nom: activeVariant.nom,
         pokemon_nom: selectedPokemon.pokemon_nom,
         player_pokemon_id: selectedPokemon.id,
         nickname: selectedPokemon.nickname,
         level_index: activeLevel.level_index,
-        opponent_pokemon_nom: battleResult.opponent_pokemon_nom ?? '',
+        opponent_pokemon_nom: result.opponent_pokemon_nom ?? '',
       })
-      if (battleResult.variant_completed) {
+      if (result.variant_completed) {
         void logHistoryEvent('autobattle', 'autobattle_variant_completed', player.id, {
           variant_nom: activeVariant.nom,
           pokemon_nom: selectedPokemon.pokemon_nom,
           player_pokemon_id: selectedPokemon.id,
           nickname: selectedPokemon.nickname,
           level_index: activeLevel.level_index,
-          opponent_pokemon_nom: battleResult.opponent_pokemon_nom ?? '',
+          opponent_pokemon_nom: result.opponent_pokemon_nom ?? '',
           variant_completed: true,
         })
       }
 
-      const xpReward = (battleResult.rewards ?? []).find((r) => r.reward_type === 'xp')
+      const xpReward = (result.rewards ?? []).find((r) => r.reward_type === 'xp')
       const finalXp = xpReward?.xp_after ?? selectedPokemon.xp
       const options = getEvolutionOptions(
         { ...selectedPokemon, xp: finalXp },
@@ -246,7 +345,7 @@ export function AutoBattlePopup({
         player_pokemon_id: selectedPokemon.id,
         nickname: selectedPokemon.nickname,
         level_index: activeLevel.level_index,
-        opponent_pokemon_nom: opponentSpecies?.nom ?? battleResult.opponent_pokemon_nom ?? '',
+        opponent_pokemon_nom: opponentSpecies?.nom ?? result.opponent_pokemon_nom ?? '',
       })
       setView('lose')
     }
@@ -296,7 +395,7 @@ export function AutoBattlePopup({
         className="relative bg-cream w-full h-full overflow-hidden flex flex-col
           sm:h-auto sm:max-w-md sm:max-h-[85vh] sm:rounded-[var(--radius-pixel)] sm:border-[3px] sm:border-ink sm:shadow-[var(--shadow-pixel-lg)]"
       >
-        {view !== 'coin-toss' && view !== 'battle' && (
+        {view !== 'coin-toss' && view !== 'battle' && view !== 'manual-battle' && (
           <button
             onClick={onClose}
             className="absolute right-3 top-3 z-20 w-8 h-8 rounded-full border-2 border-ink bg-cream shadow-[var(--shadow-pixel)] flex items-center justify-center text-ink hover:bg-black/10 active:shadow-none active:translate-x-[1px] active:translate-y-[1px] transition-all"
@@ -305,7 +404,7 @@ export function AutoBattlePopup({
           </button>
         )}
 
-        {view === 'battle' && activeLevel && battleResult?.turns && selectedPokemon && (
+        {(view === 'battle' || view === 'manual-battle') && activeLevel && (
           <GameBanner bannerUrl={activeVariant?.banner_url ?? ''} fallbackEmoji="⚔️" className="aspect-[10/3] shrink-0" />
         )}
 
@@ -398,8 +497,30 @@ export function AutoBattlePopup({
               pokemonByName={pokemonByName}
               attacksByName={attacksByName}
               bannedAttacks={bannedNames}
-              onSelect={(pp) => { setSelectedPokemon(pp); setView('pick-ability') }}
+              opponentSpecies={activeLevel ? pokemonByName.get(activeLevel.opponent_pokemon_nom) : undefined}
+              opponentDiscovered={activeLevel ? (stateByLevel.get(activeLevel.id)?.discovered ?? false) : false}
+              onSelect={(pp) => {
+                setSelectedPokemon(pp)
+                setView(activeVariant?.game_mode === 'manual' ? 'manual-battle' : 'pick-ability')
+              }}
               onBack={resetToList}
+            />
+          )}
+
+          {view === 'manual-battle' && activeLevel && selectedPokemon && (
+            <ManualBattleScreen
+              playerPokemon={selectedPokemon}
+              playerSpecies={activeSpecies}
+              playerMaxHp={Math.max(1, getHpBreakdown(activeSpecies, selectedPokemon.xp).total)}
+              opponentSpecies={pokemonByName.get(activeLevel.opponent_pokemon_nom)}
+              opponentNom={activeLevel.opponent_pokemon_nom}
+              opponentMaxHp={activeLevel.opponent_hp}
+              attacksByName={attacksByName}
+              abilityRulesByName={abilityRulesByName}
+              bannedAttacks={bannedNames}
+              precisionEnabled={config.precision_enabled}
+              onSubmitRound={(ability) => handleSubmitManualRound(selectedPokemon, ability)}
+              onFinished={handleManualBattleFinished}
             />
           )}
 
@@ -407,6 +528,7 @@ export function AutoBattlePopup({
             <AutoBattleAbilityPicker
               playerPokemon={selectedPokemon}
               attacksByName={attacksByName}
+              abilityRulesByName={abilityRulesByName}
               bannedAttacks={bannedNames}
               precisionEnabled={config.precision_enabled}
               onSelect={(ability) => void handleSelectAbility(selectedPokemon, ability)}
@@ -437,9 +559,10 @@ export function AutoBattlePopup({
               turns={battleResult.turns}
               playerTypeBonus={battleResult.player_type_bonus ?? false}
               opponentTypeBonus={battleResult.opponent_type_bonus ?? false}
-              onContinue={handleBattleFinished}
+              onContinue={() => handleBattleFinished()}
               isAdmin={isAdmin}
               attacksByName={attacksByName}
+              abilityRulesByName={abilityRulesByName}
               playerDamagePerHit={battleResult.player_damage_per_hit}
               opponentDamagePerHit={battleResult.opponent_damage_per_hit}
             />

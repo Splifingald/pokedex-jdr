@@ -841,6 +841,11 @@ export interface AutoBattlePlayerState {
   created_at: string
 }
 
+// 'auto' = le joueur choisit UNE capacité avant le combat, tout se résout
+// d'un coup (voir autobattle_resolve_battle). 'manual' = le joueur choisit
+// une capacité à chaque tour (voir autobattle_resolve_manual_round).
+export type AutoBattleGameMode = 'auto' | 'manual'
+
 export interface AutoBattleVariant {
   id: number
   nom: string
@@ -848,6 +853,7 @@ export interface AutoBattleVariant {
   icon_url: string
   banner_url: string
   sort_order: number
+  game_mode: AutoBattleGameMode
   created_at: string
 }
 
@@ -859,6 +865,18 @@ export interface AutoBattleLevel {
   opponent_hp: number
   opponent_base_damage: number
   opponent_ability_nom: string
+  // Positions 2 à 10 de la séquence adverse (mode Manuel uniquement, voir
+  // autobattle_resolve_manual_round) — l'adversaire les joue dans cet ordre,
+  // en boucle. Ignorées en mode Auto (toujours opponent_ability_nom seule).
+  opponent_ability_nom_2: string | null
+  opponent_ability_nom_3: string | null
+  opponent_ability_nom_4: string | null
+  opponent_ability_nom_5: string | null
+  opponent_ability_nom_6: string | null
+  opponent_ability_nom_7: string | null
+  opponent_ability_nom_8: string | null
+  opponent_ability_nom_9: string | null
+  opponent_ability_nom_10: string | null
   created_at: string
 }
 
@@ -934,6 +952,30 @@ export type AutoBattleBonusDamageType = 'multiply' | 'flat' | 'range'
 // bonus_damage_condition_dice_value. has_status : ce camp est actuellement
 // affecté par un statut (quel qu'il soit).
 export type AutoBattleBonusDamageCondition = 'took_damage_last_turn' | 'first_use' | 'dice_equals' | 'has_status'
+// Modificateur de stat (dégâts de base ou précision) — 'opponent' = débuff
+// (appliqué à l'adversaire du lanceur), 'self' = buff (appliqué au lanceur
+// lui-même) : le sens (hausse/baisse) découle directement de la cible, pas
+// un champ séparé. 'percent' n'est valable que pour stat = 'damage' (la
+// précision n'a pas d'équivalent "stat de base" en %, voir requirement).
+// Un seul modificateur actif à la fois par (camp, stat) — une réapplication
+// écrase la précédente (même montant rejoué au lieu d'empiler), au même
+// titre que le statut. Dure soit stat_mod_duration_turns tours de COMBAT
+// (compteur global, pas propre à un camp), soit jusqu'à la fin du combat.
+// stat_mod_max_uses plafonne le nombre d'applications RÉUSSIES (un raté ne
+// compte pas) sur tout le combat — au-delà, la capacité continue de
+// s'utiliser normalement mais n'applique plus le modificateur (voir
+// AutoBattleTurn.stat_mod_limit_reached).
+export type AutoBattleStatModTarget = 'self' | 'opponent'
+export type AutoBattleStatModStat = 'damage' | 'precision'
+export type AutoBattleStatModValueType = 'flat' | 'range' | 'percent'
+export type AutoBattleStatModDurationType = 'turns' | 'battle_end'
+// Style d'animation de l'attaque côté client (AutoBattleScreen) — purement
+// visuel, aucun effet sur la résolution du combat. 'normal' = bond habituel
+// vers l'adversaire. 'soft' = le pokémon reste sur place (léger
+// grossissement/rétrécissement) — pensé pour les capacités auto-ciblées
+// (soin, buff sur soi…) où un bond vers l'adversaire n'a pas de sens, mais
+// réglable pour n'importe quelle capacité.
+export type AutoBattleAnimationStyle = 'normal' | 'soft'
 
 export interface AutoBattleAbilityRule {
   attack_nom: string
@@ -957,6 +999,39 @@ export interface AutoBattleAbilityRule {
   bonus_damage_max: number | null
   bonus_damage_condition: AutoBattleBonusDamageCondition | null
   bonus_damage_condition_dice_value: number | null
+  // Ne s'applique qu'à bonus_damage_condition = 'has_status' : NULL =
+  // "n'importe quel statut" (comportement historique), sinon la condition
+  // n'est vérifiée que pour ce statut précis.
+  bonus_damage_status_filter: AutoBattleStatusEffect | null
+  stat_mod_target: AutoBattleStatModTarget | null
+  stat_mod_stat: AutoBattleStatModStat | null
+  stat_mod_value_type: AutoBattleStatModValueType | null
+  stat_mod_flat: number | null
+  stat_mod_min: number | null
+  stat_mod_max: number | null
+  stat_mod_percent: number | null
+  stat_mod_duration_type: AutoBattleStatModDurationType | null
+  stat_mod_duration_turns: number | null
+  stat_mod_max_uses: number | null
+  // Soin passif ("heal over time") : accordé à son utilisateur sur un coup
+  // réussi, tick de heal_dot_amount PV à chaque début de son propre tour
+  // pendant heal_dot_duration_turns tours de combat (compteur global, comme
+  // stat_mod_duration_turns) — indépendant du soin instantané (heal_type
+  // ci-dessus), les deux peuvent coexister sur la même capacité. Bloqué par
+  // un Anti-Soin adverse actif (cancel_heal_duration_turns), voir plus bas.
+  heal_dot_amount: number | null
+  heal_dot_duration_turns: number | null
+  // Anti-Soin : sur un coup réussi, annule TOUS les effets de soin de
+  // l'adversaire (heal_type instantané, heal_dot, guérison du poison par un
+  // soin) pendant cancel_heal_duration_turns tours de combat.
+  cancel_heal_duration_turns: number | null
+  // Dégâts en % des PV restants (comme Super Fang) : remplace ENTIÈREMENT le
+  // calcul de dégâts habituel par floor(PV actuels de la cible AVANT ce coup
+  // × percent_hp_damage_percent / 100) — les dégâts additionnels
+  // conditionnels/contre-coup/soin s'appliquent ensuite normalement sur ce
+  // total. NULL = désactivé.
+  percent_hp_damage_percent: number | null
+  animation_style: AutoBattleAnimationStyle
   created_at: string
 }
 
@@ -1001,6 +1076,36 @@ export interface AutoBattleTurn {
   status?: AutoBattleStatusEffect
   status_roll?: number | null
   status_cured?: boolean
+  // stat_mod_applied = un coup réussi a (ré)appliqué le modificateur de stat
+  // de cette capacité — sur turn.attacker (target='self') ou sur l'autre
+  // camp (target='opponent'), voir amount (déjà signé : négatif = baisse,
+  // positif = hausse). stat_mod_limit_reached = ce coup aurait dû appliquer
+  // le modificateur mais stat_mod_max_uses est déjà épuisé (aucun effet ce
+  // tour-là). heal_dot_tick = ce tour est un tick de soin passif (comme
+  // status_tick, mais soigne au lieu de blesser — montant dans `heal`,
+  // toujours sur turn.attacker). heal_dot_granted = ce coup réussi a
+  // (ré)accordé le soin passif de cette capacité à son utilisateur.
+  // cancel_heal_applied = ce coup réussi a activé l'Anti-Soin sur
+  // l'adversaire. heal_blocked = un soin (instantané ou passif) aurait dû
+  // s'appliquer ce tour-là mais a été annulé par l'Anti-Soin adverse actif.
+  stat_mod_applied?: { target: AutoBattleStatModTarget; stat: AutoBattleStatModStat; amount: number; duration_type: AutoBattleStatModDurationType }
+  stat_mod_limit_reached?: boolean
+  heal_dot_tick?: boolean
+  heal_dot_granted?: boolean
+  cancel_heal_applied?: boolean
+  heal_blocked?: boolean
+  // percent_hp_damage = les dégâts de ce coup viennent du calcul "% des PV
+  // restants" (voir AutoBattleAbilityRule.percent_hp_damage_percent) plutôt
+  // que du calcul habituel dégâts de base + dé.
+  percent_hp_damage?: boolean
+  // Décoration CLIENT UNIQUEMENT (jamais renvoyée par le serveur) — voir
+  // ManualBattleScreen : en Combat Manuel la capacité change à chaque tour,
+  // contrairement au Combat Auto où elle est fixe (playerAbilityNom/
+  // opponentAbilityNom, props de AutoBattleScreen) ; ManualBattleScreen tague
+  // chaque tour avec la capacité effectivement jouée ce tour-là avant de
+  // l'ajouter au tableau `turns` cumulatif passé à AutoBattleScreen, qui la
+  // préfère à ses props fixes quand présente (voir sideInfo).
+  ability_nom?: string
 }
 
 export interface AutoBattleReward {
@@ -1051,6 +1156,41 @@ export interface AutoBattleResolveResult {
   opponent_image_override?: string | null
   /** Cas Métamorph adversaire : capacité réellement jouée (celle du joueur, copiée), différente de celle configurée sur le niveau. */
   opponent_ability_nom_override?: string | null
+}
+
+export type AutoBattleManualRoundStatus = AutoBattleResolveStatus | 'wrong_mode'
+
+// Réponse du RPC autobattle_resolve_manual_round (voir supabase/schema.sql) —
+// résout UN SEUL tour (voir AutoBattleTurn) — mais un "tour" y couvre un
+// tour complet des DEUX camps, rafales/passes/préparations comprises (voir
+// autobattle_ability_rules.turn_effect, pleinement actif en mode Manuel) —
+// pas le combat entier. turns ne contient que les entrées NOUVELLES de ce
+// tour, à concaténer côté client à la suite du journal déjà affiché plutôt
+// qu'à le remplacer. Pas de Métamorph JOUEUR en mode Manuel (limitation
+// volontaire) ; Métamorph ADVERSAIRE copie tout le movepool du joueur et
+// pioche au hasard dedans à chaque nouveau tour (voir requirement dédié).
+export interface AutoBattleManualRoundResult {
+  status: AutoBattleManualRoundStatus
+  turn_no?: number
+  first_attacker?: 'player' | 'opponent'
+  player_hp?: number
+  player_max_hp?: number
+  opponent_hp?: number
+  opponent_max_hp?: number
+  player_damage_per_hit?: number
+  opponent_damage_per_hit?: number
+  player_type_bonus?: boolean
+  opponent_type_bonus?: boolean
+  turns?: AutoBattleTurn[]
+  outcome?: 'win' | 'lose'
+  rewards?: AutoBattleReward[]
+  variant_completed?: boolean
+  next_level_index?: number
+  opponent_pokemon_nom?: string
+  /** Capacité effectivement jouée par l'adversaire CE tour (séquence à jusqu'à 10 positions, voir autobattle_levels.opponent_ability_nom_2..10) — pas forcément la même d'un tour à l'autre. */
+  opponent_ability_nom?: string
+  /** Capacité jouée par le joueur ce tour (= p_ability_nom envoyé) — renvoyée pour simplifier l'affichage/historique côté client. */
+  player_ability_nom?: string
 }
 
 // ── Notifications Push ───────────────────────────────────────

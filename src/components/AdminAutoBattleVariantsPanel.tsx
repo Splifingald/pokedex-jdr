@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import type { AutoBattleLevel, AutoBattleLevelReward, AutoBattleRewardType, Pokemon, Attack, Item } from '../types'
+import type { AutoBattleLevel, AutoBattleLevelReward, AutoBattleRewardType, AutoBattleGameMode, Pokemon, Attack, Item } from '../types'
 import { useAutoBattleVariants } from '../hooks/useAutoBattleVariants'
 import { useAutoBattleBannedAttacks } from '../hooks/useAutoBattleBannedAttacks'
 import { usePokemon } from '../hooks/usePokemon'
 import { useAttacks } from '../hooks/useAttacks'
 import { useItems } from '../hooks/useItems'
-import { isDamagingAbility, getStatusEffectDisplay } from '../lib/autoBattle'
+import { getStatusEffectDisplay } from '../lib/autoBattle'
 import { NumberInput } from './NumberInput'
 import { PokemonSearchInput } from './PokemonSearchInput'
 import { MoveSearchInput } from './MoveSearchInput'
@@ -23,6 +23,15 @@ import { CloseIcon } from './icons/CloseIcon'
 // base (compat. lignes existantes) mais n'est plus proposé comme choix
 // distinct en admin, pour ne pas laisser croire à un système séparé.
 const REWARD_TYPE_LABEL: Record<'xp' | 'item', string> = { xp: 'XP', item: 'Objet' }
+
+// Positions 2 à 10 de la séquence de capacités adverses (mode Manuel) —
+// chaque slot ne s'affiche que si le précédent est rempli, jusqu'à 10 au
+// total (voir autobattle_levels.opponent_ability_nom_2..10 dans schema.sql).
+const OPPONENT_ABILITY_EXTRA_KEYS = [
+  'opponent_ability_nom_2', 'opponent_ability_nom_3', 'opponent_ability_nom_4',
+  'opponent_ability_nom_5', 'opponent_ability_nom_6', 'opponent_ability_nom_7',
+  'opponent_ability_nom_8', 'opponent_ability_nom_9', 'opponent_ability_nom_10',
+] as const satisfies readonly (keyof AutoBattleLevel)[]
 const isItemReward = (t: AutoBattleRewardType) => t === 'item' || t === 'badge'
 
 // "Objet" cliqué mais pas encore d'objet choisi : seul cas où l'affichage
@@ -147,8 +156,68 @@ function RewardEditor({
   )
 }
 
+// Une position de la séquence de capacités adverses. La 1ʳᵉ (opponent_ability_
+// nom) est toujours requise (attacks.opponent_ability_nom NOT NULL) — les 3
+// suivantes (mode Manuel uniquement, voir types.ts) sont optionnelles et
+// peuvent être retirées via "Changer" → laisser vide n'est pas possible ici,
+// on utilise onClear pour repasser le champ à null.
+function OpponentAbilitySlot({
+  label, value, attacks, onSelect, onClear, clearable,
+}: {
+  label: string
+  value: string | null
+  attacks: Attack[]
+  onSelect: (nom: string) => void
+  onClear?: () => void
+  clearable?: boolean
+}) {
+  const ability = attacks.find((a) => a.nom === value)
+  return (
+    <div>
+      <p className="text-ink-muted-2 text-xs mb-1">{label}</p>
+      {value ? (
+        <div className="flex items-center gap-2 flex-wrap">
+          <TypeBadge type={ability?.type ?? '?'} small />
+          <span className="text-ink text-sm flex-1 truncate">{value}</span>
+          <span className="flex items-center gap-1 shrink-0">
+            <PixelIcon src={STAT_ICON.damage} size={14} colored className="text-ink" />
+            <span className="text-ink text-sm font-bold">{ability?.degats_base ?? '—'}</span>
+          </span>
+          {ability?.degats_de != null && (
+            <span className="flex items-center gap-1 shrink-0">
+              <PixelIcon src={DICE_GENERIC_ICON} size={14} colored className="text-ink" />
+              <span className="text-ink text-sm font-bold">{ability.degats_de}</span>
+            </span>
+          )}
+          <span className="flex items-center gap-1 shrink-0">
+            <span className="text-sm">🎯</span>
+            <span className="text-sm font-bold" style={{ color: getPrecisionColor(ability?.precision ?? 10) }}>{ability?.precision ?? 10}</span>
+          </span>
+          {ability?.status_effect && (() => {
+            const statusDisplay = getStatusEffectDisplay(ability.status_effect)
+            return (
+              <span
+                className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full text-white shrink-0 whitespace-nowrap"
+                style={{ backgroundColor: statusDisplay.color }}
+              >
+                <PixelIcon src={statusDisplay.iconSrc} size={14} colored />
+                {statusDisplay.label} {ability.status_chance ?? 0}%
+              </span>
+            )
+          })()}
+          <button onClick={onClear ?? (() => onSelect(''))} className={`text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>
+            {clearable ? <CloseIcon className="w-3 h-3" /> : 'Changer'}
+          </button>
+        </div>
+      ) : (
+        <MoveSearchInput options={attacks} disabled={false} showDamage onSelect={(a) => onSelect(a.nom)} />
+      )}
+    </div>
+  )
+}
+
 function LevelEditor({
-  level, index, total, rewards, pokemon, attacks, items, bannedAttacks,
+  level, index, total, rewards, pokemon, attacks, items, bannedAttacks, manual,
   onUpdate, onMoveUp, onMoveDown, onDelete, onAddReward, onUpdateReward, onRemoveReward,
 }: {
   level: AutoBattleLevel
@@ -159,6 +228,7 @@ function LevelEditor({
   attacks: Attack[]
   items: Item[]
   bannedAttacks: Set<string>
+  manual: boolean
   onUpdate: (id: number, patch: Partial<Omit<AutoBattleLevel, 'id' | 'variant_id' | 'created_at'>>) => void
   onMoveUp: () => void
   onMoveDown: () => void
@@ -169,8 +239,7 @@ function LevelEditor({
 }) {
   const [expanded, setExpanded] = useState(false)
   const opponentSpecies = pokemon.find((p) => p.nom === level.opponent_pokemon_nom)
-  const opponentAbility = attacks.find((a) => a.nom === level.opponent_ability_nom)
-  const damagingAttacks = attacks.filter((a) => isDamagingAbility(a) && !bannedAttacks.has(a.nom))
+  const damagingAttacks = attacks.filter((a) => !bannedAttacks.has(a.nom))
   const invalid = !level.opponent_pokemon_nom || !level.opponent_ability_nom || rewards.length === 0
 
   return (
@@ -252,44 +321,41 @@ function LevelEditor({
             </div>
           </div>
 
-          <div>
-            <p className="text-ink-muted-2 text-xs mb-1">Capacité offensive de l'opposant</p>
-            {level.opponent_ability_nom ? (
-              <div className="flex items-center gap-2">
-                <TypeBadge type={opponentAbility?.type ?? '?'} small />
-                <span className="text-ink text-sm flex-1 truncate">{level.opponent_ability_nom}</span>
-                <span className="flex items-center gap-1 shrink-0">
-                  <PixelIcon src={STAT_ICON.damage} size={14} colored className="text-ink" />
-                  <span className="text-ink text-sm font-bold">{opponentAbility?.degats_base ?? '—'}</span>
-                </span>
-                {opponentAbility?.degats_de != null && (
-                  <span className="flex items-center gap-1 shrink-0">
-                    <PixelIcon src={DICE_GENERIC_ICON} size={14} colored className="text-ink" />
-                    <span className="text-ink text-sm font-bold">{opponentAbility.degats_de}</span>
-                  </span>
-                )}
-                <span className="flex items-center gap-1 shrink-0">
-                  <span className="text-sm">🎯</span>
-                  <span className="text-sm font-bold" style={{ color: getPrecisionColor(opponentAbility?.precision ?? 10) }}>{opponentAbility?.precision ?? 10}</span>
-                </span>
-                {opponentAbility?.status_effect && (() => {
-                  const statusDisplay = getStatusEffectDisplay(opponentAbility.status_effect)
-                  return (
-                    <span
-                      className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full text-white shrink-0 whitespace-nowrap"
-                      style={{ backgroundColor: statusDisplay.color }}
-                    >
-                      <PixelIcon src={statusDisplay.iconSrc} size={14} colored />
-                      {statusDisplay.label} {opponentAbility.status_chance ?? 0}%
-                    </span>
-                  )
-                })()}
-                <button onClick={() => onUpdate(level.id, { opponent_ability_nom: '' })} className={`text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>Changer</button>
-              </div>
-            ) : (
-              <MoveSearchInput options={damagingAttacks} disabled={false} showDamage onSelect={(a) => onUpdate(level.id, { opponent_ability_nom: a.nom })} />
-            )}
-          </div>
+          {manual ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-ink-muted-2 text-xs -mb-1">
+                Séquence de capacités de l'opposant (mode Manuel) — jouées dans cet ordre, en boucle.
+              </p>
+              <OpponentAbilitySlot
+                label="Capacité 1"
+                value={level.opponent_ability_nom || null}
+                attacks={damagingAttacks}
+                onSelect={(nom) => onUpdate(level.id, { opponent_ability_nom: nom })}
+              />
+              {OPPONENT_ABILITY_EXTRA_KEYS.map((key, i) => {
+                const prevKey = i === 0 ? null : OPPONENT_ABILITY_EXTRA_KEYS[i - 1]
+                if (prevKey && !level[prevKey]) return null
+                return (
+                  <OpponentAbilitySlot
+                    key={key}
+                    label={`Capacité ${i + 2} (optionnelle)`}
+                    value={level[key]}
+                    attacks={damagingAttacks}
+                    onSelect={(nom) => onUpdate(level.id, { [key]: nom })}
+                    onClear={() => onUpdate(level.id, { [key]: null })}
+                    clearable
+                  />
+                )
+              })}
+            </div>
+          ) : (
+            <OpponentAbilitySlot
+              label="Capacité offensive de l'opposant"
+              value={level.opponent_ability_nom || null}
+              attacks={damagingAttacks}
+              onSelect={(nom) => onUpdate(level.id, { opponent_ability_nom: nom })}
+            />
+          )}
 
           <div className="border-t-2 border-[#cfc7a8] pt-2">
             <p className="text-ink-muted-2 text-xs mb-2">Récompenses</p>
@@ -435,6 +501,17 @@ export function AdminAutoBattleVariantsPanel() {
               />
               <span>Activée {!canEnable && '(nom, bannière, icône et au moins un niveau requis)'}</span>
             </label>
+            <div>
+              <label className="text-ink-muted-2 text-sm block mb-1">Mode de jeu</label>
+              <select
+                value={selectedVariant.game_mode}
+                onChange={(e) => updateVariant(selectedVariant.id, { game_mode: e.target.value as AutoBattleGameMode })}
+                className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+              >
+                <option value="auto">Auto (une capacité choisie avant le combat)</option>
+                <option value="manual">Manuel (une capacité choisie à chaque tour)</option>
+              </select>
+            </div>
           </div>
 
           <div className="border-t-2 border-[#cfc7a8] pt-3">
@@ -454,6 +531,7 @@ export function AdminAutoBattleVariantsPanel() {
                   attacks={attacks}
                   items={items}
                   bannedAttacks={bannedNames}
+                  manual={selectedVariant.game_mode === 'manual'}
                   onUpdate={updateLevel}
                   onMoveUp={() => i > 0 && swapLevelOrder(level, selectedLevels[i - 1])}
                   onMoveDown={() => i < selectedLevels.length - 1 && swapLevelOrder(level, selectedLevels[i + 1])}

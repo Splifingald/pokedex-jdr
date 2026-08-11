@@ -1,4 +1,4 @@
-import type { Attack, Item, PlayerPokemon, AutoBattleLevelReward, AutoBattleStatusEffect } from '../types'
+import type { Attack, Item, PlayerPokemon, AutoBattleLevelReward, AutoBattleStatusEffect, AutoBattleAbilityRule } from '../types'
 import { getStatusInfo, type StatusId } from './status'
 
 // Libellés propres à Combat Auto (alignés sur les libellés du CSV des
@@ -64,14 +64,16 @@ export function isDamagingAbility(attack: Attack): boolean {
   return hasBase || hasDice
 }
 
-// Capacités offensives effectivement apprises par cette instance
-// (playerPokemon.moves), hors capacités bannies (trop puissantes pour ce
-// mode, voir autobattle_banned_attacks / AdminAutoBattleBannedAttacksPanel)
-// — seules celles-ci sont sélectionnables en Combat Auto (voir
-// AutoBattleAbilityPicker). Note : moves n'est PAS restreint au pool
-// attaque_1..10 de l'espèce (voir PokemonDetailSheet.tsx où addableMoves
-// propose tout le catalogue d'attaques, pas seulement celles de l'espèce) —
-// il ne faut donc jamais recroiser avec ce pool ici.
+// Capacités effectivement apprises par cette instance (playerPokemon.moves),
+// hors capacités bannies (trop puissantes pour ce mode, voir
+// autobattle_banned_attacks / AdminAutoBattleBannedAttacksPanel) — seules
+// celles-ci sont sélectionnables en Combat Auto (voir
+// AutoBattleAbilityPicker). Plus de restriction aux capacités offensives : le
+// système de ban gère désormais toutes les limitations manuellement. Note :
+// moves n'est PAS restreint au pool attaque_1..10 de l'espèce (voir
+// PokemonDetailSheet.tsx où addableMoves propose tout le catalogue
+// d'attaques, pas seulement celles de l'espèce) — il ne faut donc jamais
+// recroiser avec ce pool ici.
 export function getEligibleAbilities(
   playerMoves: string[],
   attacksByName: Map<string, Attack>,
@@ -79,11 +81,11 @@ export function getEligibleAbilities(
 ): Attack[] {
   return playerMoves
     .map((nom) => attacksByName.get(nom))
-    .filter((a): a is Attack => a != null && isDamagingAbility(a) && !bannedAttacks.has(a.nom))
+    .filter((a): a is Attack => a != null && !bannedAttacks.has(a.nom))
 }
 
 // Pokémon du joueur pouvant participer à un combat : ni en pension, ni sans
-// capacité offensive apprise (voir requirement #6/#9 du cahier des charges).
+// capacité apprise non-bannie (voir requirement #6/#9 du cahier des charges).
 export function getEligiblePlayerPokemon(
   roster: PlayerPokemon[],
   attacksByName: Map<string, Attack>,
@@ -131,4 +133,81 @@ export function generateIdempotencyKey(): string {
   bytes[8] = (bytes[8] & 0x3f) | 0x80
   const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+// Résumé textuel court des effets spéciaux d'une capacité (voir
+// autobattle_ability_rules) — une ligne par effet configuré, utilisé par les
+// écrans de sélection de capacité en Combat Auto (AutoBattleAbilityPicker,
+// avant le combat) ET Combat Manuel (ManualBattleAbilityGrid, pendant le
+// combat) pour afficher "ce que fait" une capacité au-delà de dégâts/dé/
+// précision/statut déjà montrés séparément ailleurs. turn_effect (rythme des
+// tours) pleinement actif dans les deux modes (voir autobattle_resolve_battle
+// et autobattle_resolve_manual_round) — inclus ci-dessous.
+export function describeAbilityRule(rule: AutoBattleAbilityRule | undefined, ability: Attack): string[] {
+  if (!rule) return []
+  const lines: string[] = []
+  if (rule.turn_effect === 'skip') {
+    lines.push('Passe son tour un coup sur deux')
+  } else if (rule.turn_effect === 'play_twice') {
+    lines.push('Attaque deux fois de suite')
+  } else if (rule.turn_effect === 'play_three') {
+    lines.push('Attaque trois fois de suite')
+  } else if (rule.turn_effect === 'play_random') {
+    lines.push(`Attaque entre ${rule.turn_random_min} et ${rule.turn_random_max} fois de suite`)
+  } else if (rule.turn_effect === 'repeat_until_fail') {
+    lines.push(`Attaque en rafale jusqu'au premier échec (max ${rule.repeat_max_iterations} fois)`)
+  } else if (rule.turn_effect === 'prepare_release') {
+    lines.push('Nécessite un tour de préparation avant de frapper')
+  }
+  if (rule.heal_type === 'static' && rule.heal_amount) {
+    lines.push(`Soigne ${rule.heal_amount} PV`)
+  } else if (rule.heal_type === 'percent_damage' && rule.heal_percent) {
+    lines.push(`Soigne ${rule.heal_percent}% des dégâts infligés`)
+  } else if (rule.heal_type === 'use_stats') {
+    lines.push('Soigne selon ses propres dégâts')
+  }
+  if (rule.heal_dot_amount && rule.heal_dot_duration_turns) {
+    lines.push(`Soigne ${rule.heal_dot_amount} PV/tour pendant ${rule.heal_dot_duration_turns} tours`)
+  }
+  if (rule.cancel_heal_duration_turns) {
+    lines.push(`Annule les soins adverses pendant ${rule.cancel_heal_duration_turns} tours`)
+  }
+  if (rule.stat_mod_target && rule.stat_mod_stat) {
+    const statLabel = rule.stat_mod_stat === 'damage' ? 'dégâts' : 'précision'
+    const targetLabel = rule.stat_mod_target === 'opponent' ? "de l'adversaire" : 'de son utilisateur'
+    const verb = rule.stat_mod_target === 'opponent' ? 'Réduit' : 'Augmente'
+    const amount = rule.stat_mod_value_type === 'flat' ? `${rule.stat_mod_flat}`
+      : rule.stat_mod_value_type === 'range' ? `${rule.stat_mod_min}-${rule.stat_mod_max}`
+      : `${rule.stat_mod_percent}%`
+    const duration = rule.stat_mod_duration_type === 'battle_end' ? "jusqu'à la fin du combat" : `pendant ${rule.stat_mod_duration_turns} tours`
+    const usesSuffix = rule.stat_mod_max_uses ? ` (max ${rule.stat_mod_max_uses}×)` : ''
+    lines.push(`${verb} les ${statLabel} ${targetLabel} de ${amount} ${duration}${usesSuffix}`)
+  }
+  if (rule.percent_hp_damage_percent) {
+    lines.push(`Inflige ${rule.percent_hp_damage_percent}% des PV restants de la cible (remplace les dégâts habituels)`)
+  }
+  if (rule.recoil_type === 'range' && rule.recoil_min != null && rule.recoil_max != null) {
+    lines.push(rule.recoil_min === rule.recoil_max ? `Contre-coup de ${rule.recoil_min} PV` : `Contre-coup de ${rule.recoil_min}-${rule.recoil_max} PV`)
+  } else if (rule.recoil_type === 'percent_damage' && rule.recoil_percent) {
+    lines.push(`Contre-coup de ${rule.recoil_percent}% des dégâts infligés`)
+  }
+  if (rule.bonus_damage_type) {
+    const conditionLabel = rule.bonus_damage_condition === 'took_damage_last_turn' ? "s'il a subi des dégâts au tour adverse précédent"
+      : rule.bonus_damage_condition === 'first_use' ? "à la 1ère utilisation"
+      : rule.bonus_damage_condition === 'dice_equals' ? `si le dé tombe sur ${rule.bonus_damage_condition_dice_value}`
+      : rule.bonus_damage_condition === 'has_status'
+        ? (rule.bonus_damage_status_filter ? `s'il est ${STATUS_EFFECT_LABEL[rule.bonus_damage_status_filter].toLowerCase()}` : "s'il est affecté par un statut (n'importe lequel)")
+      : ''
+    const bonusLabel = rule.bonus_damage_type === 'multiply' ? `dégâts ×${rule.bonus_damage_multiplier}`
+      : rule.bonus_damage_type === 'flat' ? `+${rule.bonus_damage_flat} dégâts`
+      : `+${rule.bonus_damage_min}-${rule.bonus_damage_max} dégâts`
+    lines.push(`Bonus : ${bonusLabel} ${conditionLabel}`)
+  }
+  if (rule.invulnerable_next_turn) {
+    lines.push('Rend invulnérable au prochain tour adverse')
+  }
+  if (ability.status_effect && rule.status_reversed) {
+    lines.push('Le statut affecte son utilisateur, pas l\'adversaire')
+  }
+  return lines
 }

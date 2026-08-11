@@ -69,55 +69,63 @@ export function PensionDaycareCard({
   ))
 
   return (
-    <div className="relative aspect-[2/3] min-w-0">
-      {/* Fond/bordure sur une couche dédiée (plutôt que sur ce conteneur) :
-          le sprite agrandi (scale-[1.6] ci-dessous) doit pouvoir déborder de
-          sa case sans être rogné par un overflow-hidden porté par ce même
-          conteneur. */}
-      <div className="absolute inset-0 border-2 border-ink rounded-lg bg-cream-secondary overflow-hidden" />
+    <div className="flex flex-col min-w-0">
+      {/* Zone sprite : hauteur fixée par aspect-square plutôt que par toute la
+          case (voir ci-dessous), le bandeau nom/jauge vit désormais en flux
+          normal en dessous au lieu de se superposer au sprite. */}
+      <div className="relative aspect-square min-w-0">
+        {/* Fond/bordure sur une couche dédiée (plutôt que sur ce conteneur) :
+            le sprite agrandi (scale-[1.6] ci-dessous) doit pouvoir déborder de
+            sa case sans être rogné par un overflow-hidden porté par ce même
+            conteneur. */}
+        <div className="absolute inset-0 border-2 border-b-0 border-ink rounded-t-lg bg-cream-secondary overflow-hidden" />
 
-      {owner && (
-        <span
-          className="absolute top-1 left-1 z-10 w-6 h-6 rounded-full border-2 shrink-0 overflow-hidden bg-cream"
-          style={{ borderColor: owner.color }}
-          title={owner.name}
-        >
-          {owner.image_url ? (
-            <img src={owner.image_url} alt={owner.name} className="w-full h-full object-cover" />
-          ) : (
-            <span className="w-full h-full block" style={{ backgroundColor: owner.color }} />
-          )}
-        </span>
-      )}
-
-      {hasPair && (
-        <span className="absolute top-1 right-1 z-10 text-lg [filter:drop-shadow(1px_1px_0_rgba(0,0,0,0.4))]" title="Appariement en cours pour un œuf">
-          ❤️
-        </span>
-      )}
-
-      {/* z-[1] (plutôt que l'empilement par défaut) : sans valeur explicite, le
-          débordement du sprite serait comparé à l'échelle de toute la grille
-          par ordre du DOM plutôt que par carte — le fond (non positionné) de
-          la case suivante repasserait alors par-dessus le débordement de
-          celle-ci dès que deux cases voisines sont occupées. */}
-      <button onClick={onSelect} className="absolute inset-0 z-[1] flex items-center justify-center p-1" title={ownedPokemonName(playerPokemon)}>
-        <div className="w-full h-full flex items-center justify-center" style={jumping ? { animation: 'jump-pop 0.6s ease-out 1' } : undefined}>
-          <div className="w-full h-full flex items-center justify-center" style={{ animation: `idle-bob ${bobDuration}s ease-in-out ${bobDelay}s infinite` }}>
-            {pokemon?.image_miniature ? (
-              <img
-                src={pokemon.image_miniature}
-                alt=""
-                className="pixelated max-w-full max-h-full object-contain scale-[1.6] [filter:drop-shadow(1px_2px_1px_rgba(0,0,0,0.3))]"
-              />
+        {owner && (
+          <span
+            className="absolute top-1 left-1 z-10 w-6 h-6 rounded-full border-2 shrink-0 overflow-hidden bg-cream"
+            style={{ borderColor: owner.color }}
+            title={owner.name}
+          >
+            {owner.image_url ? (
+              <img src={owner.image_url} alt={owner.name} className="w-full h-full object-cover" />
             ) : (
-              <span className="text-ink-muted-2 text-6xl">?</span>
+              <span className="w-full h-full block" style={{ backgroundColor: owner.color }} />
             )}
-          </div>
-        </div>
-      </button>
+          </span>
+        )}
 
-      <div className="absolute bottom-0 inset-x-0 z-10 flex flex-col gap-0.5 px-1.5 pt-1 pb-1.5 bg-cream/90 border-t-2 border-ink/20">
+        {hasPair && (
+          <span className="absolute top-1 right-1 z-10 text-lg [filter:drop-shadow(1px_1px_0_rgba(0,0,0,0.4))]" title="Appariement en cours pour un œuf">
+            ❤️
+          </span>
+        )}
+
+        {/* z-[1] (plutôt que l'empilement par défaut) : sans valeur explicite, le
+            débordement du sprite serait comparé à l'échelle de toute la grille
+            par ordre du DOM plutôt que par carte — le fond (non positionné) de
+            la case suivante repasserait alors par-dessus le débordement de
+            celle-ci dès que deux cases voisines sont occupées. */}
+        <button onClick={onSelect} className="absolute inset-0 z-[1] flex items-center justify-center p-1" title={ownedPokemonName(playerPokemon)}>
+          <div className="w-full h-full flex items-center justify-center" style={jumping ? { animation: 'jump-pop 0.6s ease-out 1' } : undefined}>
+            <div className="w-full h-full flex items-center justify-center" style={{ animation: `idle-bob ${bobDuration}s ease-in-out ${bobDelay}s infinite` }}>
+              {pokemon?.image_miniature ? (
+                <img
+                  src={pokemon.image_miniature}
+                  alt=""
+                  className="pixelated max-w-full max-h-full object-contain scale-[1.6] [filter:drop-shadow(1px_2px_1px_rgba(0,0,0,0.3))]"
+                />
+              ) : (
+                <span className="text-ink-muted-2 text-6xl">?</span>
+              )}
+            </div>
+          </div>
+        </button>
+      </div>
+
+      {/* Bandeau nom/jauge en flux normal, sous le sprite plutôt que superposé
+          à lui — la case s'agrandit en hauteur si besoin plutôt que de
+          rogner ou cacher le sprite. */}
+      <div className="flex flex-col gap-0.5 px-1.5 pt-1 pb-1.5 bg-cream/90 border-2 border-t-0 border-ink rounded-b-lg">
         <span className="text-ink text-xs font-bold truncate w-full text-center">{ownedPokemonName(playerPokemon)}</span>
 
         {isMaxed ? (

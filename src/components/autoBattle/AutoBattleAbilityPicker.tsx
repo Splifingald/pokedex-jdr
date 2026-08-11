@@ -1,5 +1,5 @@
-import type { PlayerPokemon, Attack } from '../../types'
-import { isDamagingAbility, getStatusEffectDisplay } from '../../lib/autoBattle'
+import type { PlayerPokemon, Attack, AutoBattleAbilityRule } from '../../types'
+import { getStatusEffectDisplay, describeAbilityRule } from '../../lib/autoBattle'
 import { TypeBadge } from '../TypeBadge'
 import { PixelIcon } from '../icons/PixelIcon'
 import { STAT_ICON, DICE_GENERIC_ICON } from '../../lib/icons'
@@ -11,20 +11,24 @@ import { useToast } from '../../context/ToastContext'
 interface Props {
   playerPokemon: PlayerPokemon
   attacksByName: Map<string, Attack>
+  abilityRulesByName: Map<string, AutoBattleAbilityRule>
   bannedAttacks: Set<string>
   precisionEnabled: boolean
   onSelect: (ability: Attack) => void
   onBack: () => void
 }
 
-// Sélection de la capacité offensive — affiche TOUTES les capacités apprises
-// par ce Pokémon (pas seulement les éligibles) : nom/type/dégâts de base + dé
-// + précision (si le système est activé), jamais l'effet, contrairement à
-// AttackDetailCard utilisé partout ailleurs dans l'app. Les capacités
-// bannies (trop puissantes) ou non-offensives restent visibles mais grisées
-// avec un badge 🛑 BAN — non sélectionnables, un tap affiche un toast
-// d'indisponibilité au lieu d'appeler onSelect.
-export function AutoBattleAbilityPicker({ playerPokemon, attacksByName, bannedAttacks, precisionEnabled, onSelect, onBack }: Props) {
+// Sélection de la capacité — affiche TOUTES les capacités apprises par ce
+// Pokémon (pas seulement les éligibles) : nom/type/dégâts de base + dé +
+// précision (si le système est activé), jamais l'effet, contrairement à
+// AttackDetailCard utilisé partout ailleurs dans l'app. Seules les capacités
+// bannies (trop puissantes, voir autobattle_banned_attacks /
+// AdminAutoBattleBannedAttacksPanel) restent visibles mais grisées avec un
+// badge 🛑 BAN — non sélectionnables, un tap affiche un toast
+// d'indisponibilité au lieu d'appeler onSelect. Plus de restriction aux
+// capacités offensives : le système de ban gère désormais toutes les
+// limitations manuellement.
+export function AutoBattleAbilityPicker({ playerPokemon, attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, onSelect, onBack }: Props) {
   const { showToast } = useToast()
   const abilities = playerPokemon.moves
     .map((nom) => attacksByName.get(nom))
@@ -34,11 +38,12 @@ export function AutoBattleAbilityPicker({ playerPokemon, attacksByName, bannedAt
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
         <button onClick={onBack} className={`text-xs px-2 py-1 rounded font-bold ${BUTTON_STYLE.gray}`}>← Retour</button>
-        <h4 className="text-ink text-base font-bold">Choisissez une capacité offensive</h4>
+        <h4 className="text-ink text-base font-bold">Choisissez une capacité</h4>
       </div>
       <div className="flex flex-col gap-2">
         {abilities.map((a) => {
-          const ineligible = bannedAttacks.has(a.nom) || !isDamagingAbility(a)
+          const ineligible = bannedAttacks.has(a.nom)
+          const effectLines = describeAbilityRule(abilityRulesByName.get(a.nom), a)
           return (
             <button
               key={a.nom}
@@ -60,10 +65,12 @@ export function AutoBattleAbilityPicker({ playerPokemon, attacksByName, bannedAt
                 </span>
               ) : (
                 <>
-                  <span className="flex items-center gap-1 shrink-0">
-                    <PixelIcon src={STAT_ICON.damage} size={16} colored className="text-ink" />
-                    <span className="text-ink text-sm font-bold">{a.degats_base}</span>
-                  </span>
+                  {a.degats_base != null && a.degats_base > 0 && (
+                    <span className="flex items-center gap-1 shrink-0">
+                      <PixelIcon src={STAT_ICON.damage} size={16} colored className="text-ink" />
+                      <span className="text-ink text-sm font-bold">{a.degats_base}</span>
+                    </span>
+                  )}
                   {a.degats_de != null && (
                     <span className="flex items-center gap-1 shrink-0">
                       <PixelIcon src={DICE_GENERIC_ICON} size={16} colored className="text-ink" />
@@ -88,6 +95,13 @@ export function AutoBattleAbilityPicker({ playerPokemon, attacksByName, bannedAt
                       </span>
                     )
                   })()}
+                  {effectLines.length > 0 && (
+                    <div className="w-full flex flex-col gap-0.5 mt-0.5">
+                      {effectLines.map((line, i) => (
+                        <span key={i} className="text-ink-muted-2 text-sm leading-tight">{line}</span>
+                      ))}
+                    </div>
+                  )}
                 </>
               )}
             </button>

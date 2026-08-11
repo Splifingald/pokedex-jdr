@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import type { CSSProperties } from 'react'
-import type { Pokemon, PlayerPokemon, AutoBattleStatusEffect, Attack } from '../../types'
+import type { CSSProperties, ReactNode } from 'react'
+import type { Pokemon, PlayerPokemon, AutoBattleStatusEffect, Attack, AutoBattleAbilityRule } from '../../types'
 import { ownedPokemonName } from '../../types'
 import { HpGauge } from '../HpGauge'
 import { AutoBattleDamageNumber } from './AutoBattleDamageNumber'
@@ -14,9 +14,12 @@ import { BUTTON_STYLE } from '../../lib/buttonStyles'
 import type { AutoBattleTurn } from '../../types'
 
 // Libellé du texte flottant affiché quand un statut fait passer le tour
-// (paralysie/gel = une fois ; sommeil = tant que le dé ne tombe pas sur
-// 4/5/6) — 'fear'/'confusion'/'burn'/'poison' ne passent jamais le tour donc
+// (paralysie/gel = une fois ; sommeil/confusion = tant que le dé ne tombe
+// pas sur 4/5/6) — 'fear'/'burn'/'poison' ne passent jamais le tour donc
 // n'ont pas d'entrée ici (voir AutoBattleTurn.status_tick côté serveur).
+// Confusion ne SAUTE PAS le tour (contrairement à sommeil) : elle réduit
+// juste la précision de l'attaque qui suit immédiatement, d'où son absence
+// ici malgré le tirage de dé — voir status_tick plus bas.
 const STATUS_SKIP_LABEL: Partial<Record<AutoBattleStatusEffect, string>> = {
   paralysis: 'Paralysé !',
   frozen: 'Gelé !',
@@ -25,13 +28,12 @@ const STATUS_SKIP_LABEL: Partial<Record<AutoBattleStatusEffect, string>> = {
 
 // Pénalité de précision appliquée par confusion/peur — doit rester
 // synchronisée avec v_status_precision_penalty côté serveur (voir
-// autobattle_resolve_battle : CASE WHEN status='fear' THEN 3 ELSE 5 END),
-// jamais redéfinie arbitrairement ici : ces valeurs sont un pur affichage de
-// debug admin, le résultat réel (touché/raté) est toujours décidé par le
-// serveur.
+// autobattle_resolve_battle : les deux valent désormais 5), jamais redéfinie
+// arbitrairement ici : ces valeurs sont un pur affichage de debug admin, le
+// résultat réel (touché/raté) est toujours décidé par le serveur.
 const PRECISION_MODIFIER_BY_STATUS: Partial<Record<AutoBattleStatusEffect, number>> = {
   confusion: -5,
-  fear: -3,
+  fear: -5,
 }
 
 interface Props {
@@ -55,10 +57,19 @@ interface Props {
   onContinue: () => void
   isAdmin?: boolean
   attacksByName?: Map<string, Attack>
+  /** Style d'animation par capacité (voir autobattle_ability_rules.animation_style, réglable en admin) — 'soft' fait rester le pokémon sur place au lieu de bondir sur l'adversaire, voir attackTransform. */
+  abilityRulesByName?: Map<string, AutoBattleAbilityRule>
   /** Dégâts par coup AVANT dé (espèce + bonus XP + multiplicateur type + dégâts de base de la capacité), voir autobattle_resolve_battle v_player_damage — sert à isoler la valeur du dé en debug admin (turn.damage - ce total). */
   playerDamagePerHit?: number
   /** Idem côté adversaire (v_opponent_damage). */
   opponentDamagePerHit?: number
+  /** Combat Manuel (ManualBattleScreen) : `turns` grandit au fil des tours (un seul appel RPC par tour, voir autobattle_resolve_manual_round) plutôt que d'arriver résolu d'un bloc — l'effet de programmation des animations devient alors incrémental (ne rejoue jamais les tours déjà animés), voir le useEffect principal ci-dessous. Sans effet en Combat Auto (turns fixe pour tout le combat, comme avant). */
+  /** Masque le bouton "Continuer" et appelle onContinue automatiquement dès que l'animation des tours actuellement disponibles est terminée (Combat Manuel : signale à ManualBattleScreen qu'il peut redonner la main au joueur, ou transitionner vers récompense/défaite si l'issue est connue). */
+  hideContinueButton?: boolean
+  /** Contenu injecté entre le visuel de combat et l'historique (Combat Manuel : la grille de sélection de capacité, voir requirement). */
+  midSlot?: ReactNode
+  /** Combat Manuel : pas de compte à rebours 3-2-1-GO, le combat "commence" dès le montage (voir useEffect du countdown). */
+  skipCountdown?: boolean
 }
 
 const COUNTDOWN_STEPS = ['3', '2', '1', 'GO !']
@@ -131,7 +142,7 @@ function computeDurations(multiplier: number): PhaseDurations {
 }
 
 type AttackPhase = 'anticipation' | 'lunge' | 'strike-rise' | 'strike-land' | 'return'
-interface AttackState { side: 'player' | 'opponent'; phase: AttackPhase; durations: PhaseDurations }
+interface AttackState { side: 'player' | 'opponent'; phase: AttackPhase; durations: PhaseDurations; soft: boolean }
 type Side = 'player' | 'opponent'
 
 // Style de transform du pokémon attaquant selon la phase en cours, combinant
@@ -145,8 +156,26 @@ type Side = 'player' | 'opponent'
 // `sign` vaut +1 pour le joueur (avance vers la droite, l'adversaire) et -1
 // pour l'adversaire (avance vers la gauche). `durations` vient du tour en
 // cours (voir speedMultiplierForRepeat) : accéléré si ce tour fait partie
-// d'un bloc multi-attaques.
-function attackTransform(phase: AttackPhase, sign: 1 | -1, durations: PhaseDurations): React.CSSProperties {
+// d'un bloc multi-attaques. `soft` (voir autobattle_ability_rules.
+// animation_style) : le pokémon reste sur place — juste un léger
+// grossissement/rétrécissement sur place (aucun `translate`) — au lieu du
+// bond vers l'adversaire, pour les capacités où ça a plus de sens
+// visuellement (soin/buff sur soi…).
+function attackTransform(phase: AttackPhase, sign: 1 | -1, durations: PhaseDurations, soft: boolean): React.CSSProperties {
+  if (soft) {
+    switch (phase) {
+      case 'anticipation':
+        return { transform: 'scale(0.97)', transition: `transform ${durations.anticipation}ms ease-out` }
+      case 'lunge':
+        return { transform: 'scale(1.05)', transition: `transform ${durations.lunge}ms ease-in` }
+      case 'strike-rise':
+        return { transform: 'scale(1.12)', transition: `transform ${durations.strikeRise}ms ease-out` }
+      case 'strike-land':
+        return { transform: 'scale(1.16)', transition: `transform ${durations.strikeLand}ms ease-in` }
+      case 'return':
+        return { transform: 'scale(1)', transition: `transform ${durations.return}ms ease-out` }
+    }
+  }
   switch (phase) {
     case 'anticipation':
       return { transform: `translate(${sign * -8}px, 4px) scale(0.95)`, transition: `transform ${durations.anticipation}ms ease-out` }
@@ -198,10 +227,11 @@ function statusOverlayStyle(status: AutoBattleStatusEffect, spriteUrl: string): 
 // que d'enchaîner automatiquement sur les récompenses/l'écran de défaite.
 export function AutoBattleScreen({
   playerPokemon, playerSpecies, playerMaxHp, playerAbilityNom, playerImageOverride, opponentSpecies, opponentMaxHp, opponentNom, opponentAbilityNom, opponentImageOverride, turns,
-  playerTypeBonus, opponentTypeBonus, onContinue, isAdmin = false, attacksByName, playerDamagePerHit, opponentDamagePerHit,
+  playerTypeBonus, opponentTypeBonus, onContinue, isAdmin = false, attacksByName, abilityRulesByName, playerDamagePerHit, opponentDamagePerHit,
+  hideContinueButton = false, midSlot, skipCountdown = false,
 }: Props) {
   const [countdownStep, setCountdownStep] = useState(-1)
-  const [fighting, setFighting] = useState(false)
+  const [fighting, setFighting] = useState(skipCountdown)
   const [playerHp, setPlayerHp] = useState(playerMaxHp)
   const [opponentHp, setOpponentHp] = useState(opponentMaxHp)
   const [shownTurnIndex, setShownTurnIndex] = useState(-1)
@@ -236,6 +266,20 @@ export function AutoBattleScreen({
   const [historyEntries, setHistoryEntries] = useState<AutoBattleHistoryEntryData[]>([])
   const [historyOpen, setHistoryOpen] = useState(true)
   const historyIdRef = useRef(0)
+  // Suivi persistant entre deux exécutions de l'effet de programmation
+  // ci-dessous — nécessaire uniquement pour le Combat Manuel (`turns`
+  // grandit au fil des tours, voir ManualBattleScreen) : sans ces refs,
+  // chaque nouvelle exécution repartirait de zéro et rejouerait tout le
+  // combat depuis le début à chaque tour. En Combat Auto, `turns` ne change
+  // jamais après le montage donc l'effet ne s'exécute qu'une fois et ces
+  // refs restent à leur valeur initiale — comportement strictement
+  // identique à avant.
+  const scheduledCountRef = useRef(0)
+  const streakRef = useRef(0)
+  const prevStreakAttackerRef = useRef<Side | null>(null)
+  const battleStartRef = useRef<number | null>(null)
+  const playerShieldActiveRef = useRef(false)
+  const opponentShieldActiveRef = useRef(false)
 
   // Précision effective affichée en debug admin — reproduit EXACTEMENT
   // GREATEST(0, ability.precision - v_status_precision_penalty) côté
@@ -250,36 +294,60 @@ export function AutoBattleScreen({
 
   // Compte à rebours 3…2…1…GO ! avant le premier coup, même idiome que
   // MagikarpGame — les deux pokémon sont déjà affichés pendant ce temps.
+  // Combat Manuel (skipCountdown) : pas de compte à rebours, le joueur choisit
+  // sa capacité à son rythme (voir midSlot) donc le combat "commence" dès que
+  // possible sans mise en scène.
   useEffect(() => {
+    if (skipCountdown) return
     const timers = COUNTDOWN_STEPS.map((_, i) =>
       window.setTimeout(() => setCountdownStep(i), i * COUNTDOWN_STEP_MS)
     )
     timers.push(window.setTimeout(() => setFighting(true), COUNTDOWN_STEPS.length * COUNTDOWN_STEP_MS))
     return () => timers.forEach(clearTimeout)
-  }, [])
+  }, [skipCountdown])
 
   useEffect(() => {
     if (!fighting) return
+    // Rien de nouveau à programmer (Combat Manuel : l'effet se redéclenche à
+    // chaque tour car `turns` grandit, voir dépendances plus bas, mais rien
+    // à faire tant qu'aucun nouveau tour n'est arrivé depuis la dernière
+    // exécution).
+    if (scheduledCountRef.current >= turns.length) return
     const timers: number[] = []
+    // TOUJOURS à 0 en début d'exécution, contrairement à streak/prevStreak-
+    // Attacker/shields ci-dessous : window.setTimeout(fn, délai) est relatif
+    // au moment où il est programmé ("maintenant"), pas à un instant fixe
+    // depuis le début du combat — cursor n'a donc de sens QUE dans le
+    // référentiel de CETTE exécution de l'effet. Le report d'une exécution à
+    // l'autre (comme pour les autres refs) décalerait chaque nouveau lot de
+    // tours (Combat Manuel) d'un délai supplémentaire égal à la durée totale
+    // déjà écoulée des tours précédents, cumulatif à chaque tour — c'est
+    // très exactement le bug corrigé ici (le combat semblait mettre de plus
+    // en plus de temps à démarrer après chaque sélection de capacité).
     let cursor = 0
-    let streak = 0
-    let prevStreakAttacker: Side | null = null
-    const battleStart = Date.now()
+    let streak = streakRef.current
+    let prevStreakAttacker: Side | null = prevStreakAttackerRef.current
+    if (battleStartRef.current == null) battleStartRef.current = Date.now()
+    const battleStart = battleStartRef.current
     // Suivi local du bouclier d'invulnérabilité — expire au tout début du
     // tour adverse suivant, que ce tour soit une vraie attaque ou non (voir
     // autobattle_resolve_battle) : même règle appliquée ici côté client,
     // sans dépendre d'un champ serveur dédié, pour rester synchronisé même
     // quand le bouclier expire "silencieusement" (préparation/tour passé/
     // tick de statut adverse) plutôt que via un raté explicite.
-    let playerShieldActive = false
-    let opponentShieldActive = false
+    let playerShieldActive = playerShieldActiveRef.current
+    let opponentShieldActive = opponentShieldActiveRef.current
+    setBattleDone(false)
 
     // Nom/icône/capacité affichés dans l'historique pour un côté donné — voir
     // AutoBattleHistoryLog (la bordure colorée de la carte suffit à distinguer
-    // les deux camps, pas besoin d'un suffixe sur le nom).
-    const sideInfo = (side: Side) => side === 'player'
-      ? { name: ownedPokemonName(playerPokemon), iconSrc: playerImageOverride ?? playerSpecies?.image_miniature, ability: playerAbilityNom }
-      : { name: opponentNom, iconSrc: opponentImageOverride ?? opponentSpecies?.image_miniature, ability: opponentAbilityNom }
+    // les deux camps, pas besoin d'un suffixe sur le nom). Combat Manuel :
+    // préfère turn.ability_nom (la capacité effectivement jouée CE tour-là,
+    // voir ManualBattleScreen) aux props fixes playerAbilityNom/
+    // opponentAbilityNom (qui ne valent que pour tout le combat en Auto).
+    const sideInfo = (side: Side, turn?: AutoBattleTurn) => side === 'player'
+      ? { name: ownedPokemonName(playerPokemon), iconSrc: playerImageOverride ?? playerSpecies?.image_miniature, ability: turn?.ability_nom ?? playerAbilityNom }
+      : { name: opponentNom, iconSrc: opponentImageOverride ?? opponentSpecies?.image_miniature, ability: turn?.ability_nom ?? opponentAbilityNom }
 
     const pushHistory = (
       side: Side,
@@ -306,21 +374,27 @@ export function AutoBattleScreen({
       setHistoryEntries((prev) => [entry, ...prev])
     }
 
-    turns.forEach((turn, i) => {
+    for (let i = scheduledCountRef.current; i < turns.length; i++) {
+      const turn = turns[i]
       const turnStart = cursor
       const attackerSide = turn.attacker
       const hitSide: Side = attackerSide === 'player' ? 'opponent' : 'player'
 
       // Confusion/peur (voir autobattle_resolve_battle) : le serveur émet
-      // TOUJOURS, pour le tour qui les subit, un tour 'status_tick' (status
-      // déjà marqué status_cured=true à ce moment précis — c'est ainsi que le
-      // serveur modélise "la pénalité s'applique à CE tour puis disparaît")
+      // TOUJOURS, pour le tour qui les subit, un tour 'status_tick'
       // IMMÉDIATEMENT SUIVI, sans jamais aucun tour d'un autre camp entre les
       // deux, du vrai tour d'attaque du même attaquant (voir v_status_
       // precision_penalty : posé au tick, consommé dans le v_missed du tour
       // suivant, jamais persisté au-delà). Donc turns[i-1] suffit à détecter
       // "cette attaque a été jouée sous confusion/peur" — jamais besoin de
       // suivre un état à travers plusieurs tours comme pour le bouclier.
+      // Peur : status_cured TOUJOURS true sur ce tick (un seul coup, puis
+      // guérie). Confusion : comme le sommeil, un dé décide si elle guérit
+      // CETTE fois (status_roll/status_cured) — si elle ne guérit pas,
+      // v_player_status/v_opponent_status reste 'confusion' pour les tours
+      // suivants, mais l'attaque de CE tour-ci est de toute façon jouée sous
+      // la pénalité de précision (elle n'est jamais sautée, contrairement au
+      // sommeil).
       const precedingTick = i > 0 ? turns[i - 1] : undefined
       const attackerPrecisionStatus: AutoBattleStatusEffect | null =
         precedingTick?.status_tick && precedingTick.attacker === attackerSide
@@ -334,14 +408,26 @@ export function AutoBattleScreen({
       // plus conditionné à "l'adversaire attaque", une rafale du même camp
       // qui l'a accordé le retire tout aussi bien). granted ci-dessous est
       // affecté à la fin de CETTE itération : ce test porte donc toujours sur
-      // un bouclier accordé lors d'une itération précédente.
+      // un bouclier accordé lors d'une itération précédente. SAUF si ce tour
+      // est justement l'attaque adverse bloquée par ce bouclier
+      // (turn.invulnerable_miss) : dans ce cas, effacer l'effet visuel
+      // "estompé" dès maintenant (avant même que l'animation de cette
+      // attaque ne commence à jouer) donnerait l'impression que le bouclier
+      // a disparu AVANT d'avoir bloqué quoi que ce soit — on laisse alors le
+      // gestionnaire de raté plus bas (au moment de l'impact, quand
+      // "Invulnérable !" s'affiche) s'en charger, pour que le pokémon reste
+      // visuellement estompé jusqu'à cet instant précis.
       if (playerShieldActive) {
         playerShieldActive = false
-        timers.push(window.setTimeout(() => setPlayerInvulnerable(false), turnStart))
+        if (!(turn.attacker === 'opponent' && turn.invulnerable_miss)) {
+          timers.push(window.setTimeout(() => setPlayerInvulnerable(false), turnStart))
+        }
       }
       if (opponentShieldActive) {
         opponentShieldActive = false
-        timers.push(window.setTimeout(() => setOpponentInvulnerable(false), turnStart))
+        if (!(turn.attacker === 'player' && turn.invulnerable_miss)) {
+          timers.push(window.setTimeout(() => setOpponentInvulnerable(false), turnStart))
+        }
       }
       // Le suivi local (synchrone, pendant la programmation des timers) doit
       // être mis à jour ICI plutôt que dans les callbacks différés
@@ -399,31 +485,39 @@ export function AutoBattleScreen({
             window.setTimeout(() => setShakeSide(null), SHAKE_MS)
             window.setTimeout(() => setFlashSide(null), FLASH_MS)
           }
-          // Confusion/peur : le serveur marque TOUJOURS ce tick
-          // status_cured=true (voir autobattle_resolve_battle), mais la
-          // pénalité de précision qu'il vient de révéler s'applique encore à
-          // l'attaque de ce même camp qui suit IMMÉDIATEMENT (jamais de tour
-          // adverse entre les deux) — le badge visuel doit donc rester
+          // Peur/confusion : la pénalité de précision qu'il vient de révéler
+          // s'applique encore à l'attaque de ce même camp qui suit
+          // IMMÉDIATEMENT (jamais de tour adverse entre les deux), qu'elle
+          // soit guérie ce tick-ci ou non — le badge visuel doit donc rester
           // affiché jusqu'à la résolution de cette attaque (voir
           // attackerPrecisionStatus, qui la détecte via turns[i-1] et efface
-          // le badge une fois cette attaque résolue), pas ici.
+          // le badge une fois cette attaque résolue si status_cured), pas ici.
           if (turn.status_cured && status !== 'confusion' && status !== 'fear') {
             if (attackerSide === 'player') setPlayerStatus(null)
             else setOpponentStatus(null)
           }
+          // Sommeil : le tick est TOUJOURS 'skipped' désormais, guéri ou non
+          // (voir autobattle_resolve_battle — l'effet s'applique au moins une
+          // fois, comme la brûlure) — donc vérifié EN PREMIER, avant le
+          // branchement générique sur turn.skipped, pour que "se réveille !"
+          // prenne le pas sur "ne peut pas agir".
           if (status) {
-            if (turn.skipped) {
+            if (status === 'sleep' && turn.status_cured) {
+              pushHistory(attackerSide, 'se réveille !', { damage: turn.damage })
+            } else if (turn.skipped) {
               pushHistory(attackerSide, { before: 'ne peut pas agir (', status, after: ')' }, { damage: turn.damage })
-            } else if (status === 'confusion' || status === 'fear') {
+            } else if (status === 'fear') {
               pushHistory(attackerSide, { before: "agit sous l'effet de ", status, after: '' }, { damage: turn.damage })
             } else if (turn.status_cured) {
-              if (status === 'sleep') pushHistory(attackerSide, 'se réveille !', { damage: turn.damage })
-              else pushHistory(attackerSide, { before: "n'est plus affecté par ", status, after: '' }, { damage: turn.damage })
+              pushHistory(attackerSide, { before: "n'est plus affecté par ", status, after: '' }, { damage: turn.damage })
             } else {
               pushHistory(attackerSide, { before: 'souffre de ', status, after: '' }, { damage: turn.damage })
             }
           }
-          if (turn.skipped && status) {
+          // Idem pour le texte flottant "Endormi..." : pas de sens de
+          // l'afficher sur le tick où le pokémon se réveille (déjà annoncé
+          // par l'historique ci-dessus).
+          if (turn.skipped && status && !(status === 'sleep' && turn.status_cured)) {
             setSkipSide(attackerSide)
             setSkipLabel(STATUS_SKIP_LABEL[status] ?? 'Tour passé !')
             setSkipKey((k) => k + 1)
@@ -433,7 +527,7 @@ export function AutoBattleScreen({
           timers.push(window.setTimeout(() => setSkipSide(null), revealAt + FLYING_TEXT_MS))
         }
         cursor += turnDuration
-        return
+        continue
       }
 
       if (turn.skipped) {
@@ -442,7 +536,7 @@ export function AutoBattleScreen({
           setSkipSide(attackerSide)
           setSkipLabel(turn.preparing ? 'Préparation' : 'Tour passé !')
           setSkipKey((k) => k + 1)
-          pushHistory(attackerSide, turn.preparing ? `se prépare à attaquer avec ${sideInfo(attackerSide).ability}` : 'passe son tour')
+          pushHistory(attackerSide, turn.preparing ? `se prépare à attaquer avec ${sideInfo(attackerSide, turn).ability}` : 'passe son tour')
           // Invulnérabilité accordée dès la préparation (prepare_release +
           // invulnerable_next_turn combinés, voir autobattle_resolve_battle) —
           // protège le tour adverse qui suit immédiatement, pas celui après
@@ -454,23 +548,33 @@ export function AutoBattleScreen({
         }, turnStart + durations.anticipation))
         timers.push(window.setTimeout(() => setSkipSide(null), turnStart + durations.anticipation + FLYING_TEXT_MS))
         cursor += turnDuration
-        return
+        continue
       }
 
-      timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'anticipation', durations }), turnStart))
+      // Animation "douce" (voir autobattle_ability_rules.animation_style,
+      // réglable en admin) : le pokémon reste sur place au lieu de bondir sur
+      // l'adversaire — pensé pour les capacités auto-ciblées (soin, buff sur
+      // soi…) où un lunge vers l'adversaire n'a pas de sens, mais applicable
+      // à n'importe quelle capacité. N'affecte que le déplacement de
+      // l'ATTAQUANT (voir attackTransform) — dégâts/tremblement/flash sur la
+      // cible inchangés.
+      const attackAbilityNom = turn.ability_nom ?? (attackerSide === 'player' ? playerAbilityNom : opponentAbilityNom)
+      const isSoftAttack = abilityRulesByName?.get(attackAbilityNom)?.animation_style === 'soft'
+
+      timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'anticipation', durations, soft: isSoftAttack }), turnStart))
       if (!turn.missed) {
-        timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'lunge', durations }), turnStart + durations.anticipation))
-        timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'strike-rise', durations }), turnStart + durations.anticipation + durations.lunge))
-        timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'strike-land', durations }), turnStart + durations.anticipation + durations.lunge + durations.strikeRise))
+        timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'lunge', durations, soft: isSoftAttack }), turnStart + durations.anticipation))
+        timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'strike-rise', durations, soft: isSoftAttack }), turnStart + durations.anticipation + durations.lunge))
+        timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'strike-land', durations, soft: isSoftAttack }), turnStart + durations.anticipation + durations.lunge + durations.strikeRise))
       }
 
       const isSuperEffective = attackerSide === 'player' ? playerTypeBonus : opponentTypeBonus
       timers.push(window.setTimeout(() => {
         setShownTurnIndex(i)
-        setAttackState({ side: attackerSide, phase: 'return', durations })
+        setAttackState({ side: attackerSide, phase: 'return', durations, soft: isSoftAttack })
 
         if (turn.missed) {
-          setMissSide(attackerSide)
+          setMissSide(turn.invulnerable_miss ? hitSide : attackerSide)
           setMissLabel(turn.invulnerable_miss ? 'Invulnérable !' : 'MANQUÉ')
           setMissKey((k) => k + 1)
           if (turn.invulnerable_miss) {
@@ -480,23 +584,26 @@ export function AutoBattleScreen({
             else setOpponentInvulnerable(false)
           }
 
-          const abilityNom = attackerSide === 'player' ? playerAbilityNom : opponentAbilityNom
+          const abilityNom = turn.ability_nom ?? (attackerSide === 'player' ? playerAbilityNom : opponentAbilityNom)
           const ability = attacksByName?.get(abilityNom)
           const basePrecision = ability?.precision ?? 10
           const precisionInfo = isAdmin ? getEffectivePrecision(basePrecision, attackerPrecisionStatus) : null
 
-          pushHistory(attackerSide, `a manqué son attaque ${sideInfo(attackerSide).ability}`, {
+          pushHistory(attackerSide, `a manqué son attaque ${sideInfo(attackerSide, turn).ability}`, {
             basePrecision: isAdmin ? basePrecision : undefined,
             effectivePrecision: isAdmin ? precisionInfo?.effective : undefined,
             diceRoll: undefined,
             precisionStatus: isAdmin ? precisionInfo?.statusLabel : undefined,
           })
-          // Confusion/peur : cette attaque ratée (ou non) est précisément
+          // Peur/confusion : cette attaque ratée (ou non) est précisément
           // celle sous l'effet révélé par le tick précédent (turns[i-1]) —
           // le badge a été délibérément laissé affiché jusqu'ici (voir le
-          // bloc status_tick plus haut), il disparaît maintenant que cette
-          // attaque est résolue.
-          if (attackerPrecisionStatus) {
+          // bloc status_tick plus haut). Il ne disparaît que si CE tick a
+          // effectivement guéri le statut (precedingTick.status_cured) : la
+          // peur guérit toujours en un coup, mais la confusion peut persister
+          // (comme le sommeil) et le badge doit alors rester affiché pour les
+          // tours suivants.
+          if (attackerPrecisionStatus && precedingTick?.status_cured) {
             if (attackerSide === 'player') setPlayerStatus(null)
             else setOpponentStatus(null)
           }
@@ -513,7 +620,7 @@ export function AutoBattleScreen({
         window.setTimeout(() => setShakeSide(null), SHAKE_MS)
         window.setTimeout(() => setFlashSide(null), FLASH_MS)
 
-        const abilityNom = attackerSide === 'player' ? playerAbilityNom : opponentAbilityNom
+        const abilityNom = turn.ability_nom ?? (attackerSide === 'player' ? playerAbilityNom : opponentAbilityNom)
         const ability = attacksByName?.get(abilityNom)
         const basePrecision = ability?.precision ?? 10
         const precisionInfo = isAdmin ? getEffectivePrecision(basePrecision, attackerPrecisionStatus) : null
@@ -522,11 +629,14 @@ export function AutoBattleScreen({
         // autobattle_resolve_battle v_player_damage/v_opponent_damage) —
         // fourni tel quel par le serveur, jamais recalculé côté client
         // (contrairement à ability.degats_base seul, qui omettait la
-        // composante espèce/XP/type et donnait une valeur de dé fausse).
-        const damagePerHit = attackerSide === 'player' ? playerDamagePerHit : opponentDamagePerHit
+        // composante espèce/XP/type et donnait une valeur de dé fausse). Non
+        // fiable en Combat Manuel (la capacité change à chaque tour, ce total
+        // ne correspond qu'à celle du tour où le combat a commencé) — le dé
+        // debug admin y est donc simplement masqué (voir diceValue ci-dessous).
+        const damagePerHit = turn.ability_nom ? undefined : (attackerSide === 'player' ? playerDamagePerHit : opponentDamagePerHit)
         const diceValue = isAdmin && damagePerHit != null ? turn.damage - damagePerHit : undefined
 
-        pushHistory(attackerSide, `a utilisé ${sideInfo(attackerSide).ability}`, {
+        pushHistory(attackerSide, `a utilisé ${sideInfo(attackerSide, turn).ability}`, {
           damage: turn.damage,
           heal: turn.heal,
           superEffective: isSuperEffective,
@@ -536,12 +646,13 @@ export function AutoBattleScreen({
           precisionStatus: isAdmin ? precisionInfo?.statusLabel : undefined,
         })
 
-        // Confusion/peur : même principe que côté raté ci-dessus — cette
+        // Peur/confusion : même principe que côté raté ci-dessus — cette
         // attaque réussie était celle sous l'effet révélé par le tick
-        // précédent (turns[i-1]), le badge disparaît maintenant qu'elle est
-        // résolue (avant un éventuel NOUVEAU statut appliqué par ce même
-        // coup plus bas, qui écrasera cet effacement le cas échéant).
-        if (attackerPrecisionStatus) {
+        // précédent (turns[i-1]), le badge ne disparaît que si ce tick a
+        // effectivement guéri le statut (avant un éventuel NOUVEAU statut
+        // appliqué par ce même coup plus bas, qui écrasera cet effacement le
+        // cas échéant).
+        if (attackerPrecisionStatus && precedingTick?.status_cured) {
           if (attackerSide === 'player') setPlayerStatus(null)
           else setOpponentStatus(null)
         }
@@ -598,11 +709,26 @@ export function AutoBattleScreen({
       }, turnStart + impactOffset))
       timers.push(window.setTimeout(() => setAttackState(null), turnStart + impactOffset + durations.return))
       cursor += turnDuration
-    })
-    timers.push(window.setTimeout(() => setBattleDone(true), cursor + 200))
+    }
+
+    scheduledCountRef.current = turns.length
+    streakRef.current = streak
+    prevStreakAttackerRef.current = prevStreakAttacker
+    playerShieldActiveRef.current = playerShieldActive
+    opponentShieldActiveRef.current = opponentShieldActive
+
+    timers.push(window.setTimeout(() => {
+      setBattleDone(true)
+      // Combat Manuel (hideContinueButton) : pas de bouton "Continuer" à
+      // cliquer, on signale nous-mêmes la fin d'animation de ce tour dès
+      // qu'elle arrive, pour que ManualBattleScreen redonne la main au
+      // joueur (ou transitionne vers récompense/défaite si l'issue est
+      // connue) — voir onContinue.
+      if (hideContinueButton) onContinue()
+    }, cursor + 200))
     return () => timers.forEach(clearTimeout)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- ne doit démarrer qu'une fois fighting passe à true (turns figé pour ce combat)
-  }, [fighting])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ne doit redémarrer que quand fighting passe à true ou que de nouveaux tours arrivent (Combat Manuel) ; les autres props (playerAbilityNom, isAdmin, etc.) sont volontairement lues via closure, jamais suivies en dépendance
+  }, [fighting, turns])
 
   const playerKo = shownTurnIndex >= 0 && playerHp <= 0
   const opponentKo = shownTurnIndex >= 0 && opponentHp <= 0
@@ -614,8 +740,8 @@ export function AutoBattleScreen({
   // — même principe symétrique que playerSpriteSrc.
   const opponentSpriteSrc = opponentImageOverride ?? opponentSpecies?.image_miniature
 
-  const playerAttackStyle = attackState?.side === 'player' ? attackTransform(attackState.phase, 1, attackState.durations) : undefined
-  const opponentAttackStyle = attackState?.side === 'opponent' ? attackTransform(attackState.phase, -1, attackState.durations) : undefined
+  const playerAttackStyle = attackState?.side === 'player' ? attackTransform(attackState.phase, 1, attackState.durations, attackState.soft) : undefined
+  const opponentAttackStyle = attackState?.side === 'opponent' ? attackTransform(attackState.phase, -1, attackState.durations, attackState.soft) : undefined
 
   return (
     <div className="flex flex-col gap-4">
@@ -751,7 +877,7 @@ export function AutoBattleScreen({
         <p className="text-center text-hp-red text-xl font-bold animate-[celebrate-pop_0.52s_ease-out]">K.O. !</p>
       )}
 
-      {battleDone && (
+      {battleDone && !hideContinueButton && (
         <div className="flex items-center justify-center gap-2 mt-1">
           <button
             onClick={onContinue}
@@ -769,6 +895,8 @@ export function AutoBattleScreen({
           )}
         </div>
       )}
+
+      {midSlot}
 
       {fighting && historyOpen && (
         <AutoBattleHistoryLog

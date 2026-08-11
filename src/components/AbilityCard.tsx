@@ -24,6 +24,7 @@ export function AbilityCard({ attack, onRemove, onClick }: Props) {
         </div>
         {onRemove && (
           <button
+            type="button"
             onClick={(e) => { e.stopPropagation(); onRemove() }}
             className="text-ink-muted-2 hover:text-hp-red text-sm leading-none shrink-0"
             title="Retirer la capacité"

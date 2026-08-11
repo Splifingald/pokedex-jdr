@@ -108,7 +108,7 @@ export function PensionPlacementList({
           const disabled = daycareFull || remaining <= 0
           return (
             <div key={pp.id} className={`${PANEL} flex flex-col gap-1.5 p-2.5`}>
-              <div className="flex items-center gap-2.5">
+              <div className="flex flex-col items-center gap-1.5 text-center sm:flex-row sm:items-center sm:gap-2.5 sm:text-left">
                 <div className="w-14 h-14 shrink-0 rounded-md border-2 border-ink bg-cream-secondary flex items-center justify-center overflow-hidden">
                   {species?.image_miniature ? (
                     <img src={species.image_miniature} alt="" className="pixelated w-full h-full object-contain" />
@@ -116,7 +116,7 @@ export function PensionPlacementList({
                     <span className="text-ink-muted-2 text-2xl">?</span>
                   )}
                 </div>
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0 w-full">
                   <span className="text-ink text-sm font-bold truncate block mb-1">{ownedPokemonName(pp)}</span>
                   <PensionXpBar xp={pp.xp} remainingCap={remaining} maxXp={maxXp} compact />
                 </div>

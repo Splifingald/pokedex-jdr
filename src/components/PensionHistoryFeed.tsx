@@ -57,9 +57,9 @@ export function PensionHistoryFeed({ pokemonByName, itemsByName }: Props) {
         const player = playersById.get(entry.player_id)
         const parts = buildSentenceParts(entry, sentenceCtx)
         return (
-          <div key={entry.key} className="flex items-center gap-2 text-sm">
+          <div key={entry.key} className="flex items-start gap-2 text-sm">
             <FeedAvatar player={player} />
-            <span className="text-ink flex-1 min-w-0 truncate">{sentenceToPlainText(parts)}</span>
+            <span className="text-ink flex-1 min-w-0">{sentenceToPlainText(parts)}</span>
             <span className="text-ink-muted-2 text-xs shrink-0">{formatMoveTimestamp(entry.created_at, new Date(now))}</span>
           </div>
         )

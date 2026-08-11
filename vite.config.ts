@@ -14,8 +14,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'pwa-icons/*.png'],
       manifest: {
-        name: 'Pokédex',
-        short_name: 'Pokédex',
+        name: 'JDR Pokémon',
+        short_name: 'JDR Pokémon',
         description: 'Pokédex pour jeu de rôle Pokémon',
         theme_color: '#DC0A2D',
         background_color: '#DC0A2D',

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   Attack, AutoBattleAbilityRule, AutoBattleTurnEffect, AutoBattleHealType,
   AutoBattleRecoilType, AutoBattleBonusDamageType, AutoBattleBonusDamageCondition,
+  AutoBattleStatModTarget, AutoBattleStatModStat, AutoBattleStatModValueType, AutoBattleStatModDurationType,
+  AutoBattleAnimationStyle, AutoBattleStatusEffect,
 } from '../types'
 import { useAutoBattleAbilityRules } from '../hooks/useAutoBattleAbilityRules'
 import { useAttacks } from '../hooks/useAttacks'
@@ -11,6 +13,7 @@ import { TypeBadge } from './TypeBadge'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { CloseIcon } from './icons/CloseIcon'
+import { STATUS_EFFECT_LABEL } from '../lib/autoBattle'
 
 const TURN_EFFECT_LABEL: Record<AutoBattleTurnEffect, string> = {
   skip: 'Passe son tour',
@@ -43,6 +46,32 @@ const BONUS_DAMAGE_CONDITION_LABEL: Record<AutoBattleBonusDamageCondition, strin
   first_use: "C'est la toute première capacité utilisée par ce camp",
   dice_equals: 'Le dé de dégâts de cette capacité tombe sur une valeur précise',
   has_status: 'Le pokémon est actuellement affecté par un statut',
+}
+
+const ANIMATION_STYLE_LABEL: Record<AutoBattleAnimationStyle, string> = {
+  normal: 'Normale (bond vers l\'adversaire)',
+  soft: 'Douce (reste sur place)',
+}
+
+const STAT_MOD_TARGET_LABEL: Record<AutoBattleStatModTarget, string> = {
+  opponent: "Baisse une stat de l'adversaire",
+  self: 'Augmente une stat de son utilisateur',
+}
+
+const STAT_MOD_STAT_LABEL: Record<AutoBattleStatModStat, string> = {
+  damage: 'Dégâts de base',
+  precision: 'Précision',
+}
+
+const STAT_MOD_VALUE_TYPE_LABEL: Record<AutoBattleStatModValueType, string> = {
+  flat: 'Montant fixe',
+  range: 'Fourchette',
+  percent: 'Pourcentage des dégâts de base',
+}
+
+const STAT_MOD_DURATION_TYPE_LABEL: Record<AutoBattleStatModDurationType, string> = {
+  turns: 'Un nombre de tours',
+  battle_end: "Jusqu'à la fin du combat",
 }
 
 function AbilityRuleRow({
@@ -104,6 +133,7 @@ function AbilityRuleRow({
       onUpdate(rule.attack_nom, {
         bonus_damage_type: null, bonus_damage_multiplier: null, bonus_damage_flat: null,
         bonus_damage_min: null, bonus_damage_max: null, bonus_damage_condition: null, bonus_damage_condition_dice_value: null,
+        bonus_damage_status_filter: null,
       })
       return
     }
@@ -120,10 +150,81 @@ function AbilityRuleRow({
 
   const handleBonusConditionChange = (value: string) => {
     if (value === 'dice_equals') {
-      onUpdate(rule.attack_nom, { bonus_damage_condition: 'dice_equals', bonus_damage_condition_dice_value: rule.bonus_damage_condition_dice_value ?? 6 })
+      onUpdate(rule.attack_nom, { bonus_damage_condition: 'dice_equals', bonus_damage_condition_dice_value: rule.bonus_damage_condition_dice_value ?? 6, bonus_damage_status_filter: null })
+    } else if (value === 'has_status') {
+      onUpdate(rule.attack_nom, { bonus_damage_condition: 'has_status', bonus_damage_condition_dice_value: null })
     } else {
-      onUpdate(rule.attack_nom, { bonus_damage_condition: value as AutoBattleBonusDamageCondition, bonus_damage_condition_dice_value: null })
+      onUpdate(rule.attack_nom, { bonus_damage_condition: value as AutoBattleBonusDamageCondition, bonus_damage_condition_dice_value: null, bonus_damage_status_filter: null })
     }
+  }
+
+  const handleBonusStatusFilterChange = (value: string) => {
+    onUpdate(rule.attack_nom, { bonus_damage_status_filter: value === '' ? null : (value as AutoBattleStatusEffect) })
+  }
+
+  const handleStatModTargetChange = (value: string) => {
+    if (value === '') {
+      onUpdate(rule.attack_nom, {
+        stat_mod_target: null, stat_mod_stat: null, stat_mod_value_type: null,
+        stat_mod_flat: null, stat_mod_min: null, stat_mod_max: null, stat_mod_percent: null,
+        stat_mod_duration_type: null, stat_mod_duration_turns: null, stat_mod_max_uses: null,
+      })
+      return
+    }
+    onUpdate(rule.attack_nom, {
+      stat_mod_target: value as AutoBattleStatModTarget,
+      stat_mod_stat: rule.stat_mod_stat ?? 'damage',
+      stat_mod_value_type: rule.stat_mod_value_type ?? 'flat',
+      stat_mod_flat: rule.stat_mod_flat ?? 3,
+      stat_mod_duration_type: rule.stat_mod_duration_type ?? 'turns',
+      stat_mod_duration_turns: rule.stat_mod_duration_turns ?? 3,
+    })
+  }
+
+  const handleStatModStatChange = (value: string) => {
+    // La précision n'a pas de "pourcentage de dégâts de base" — repasse sur
+    // montant fixe si on quitte 'damage' alors qu'un % était sélectionné.
+    const nextValueType = value === 'precision' && rule.stat_mod_value_type === 'percent' ? 'flat' : rule.stat_mod_value_type
+    onUpdate(rule.attack_nom, {
+      stat_mod_stat: value as AutoBattleStatModStat,
+      stat_mod_value_type: nextValueType,
+      stat_mod_flat: nextValueType === 'flat' ? (rule.stat_mod_flat ?? 3) : null,
+      stat_mod_percent: nextValueType === 'percent' ? rule.stat_mod_percent : null,
+    })
+  }
+
+  const handleStatModValueTypeChange = (value: string) => {
+    if (value === 'flat') {
+      onUpdate(rule.attack_nom, { stat_mod_value_type: 'flat', stat_mod_flat: rule.stat_mod_flat ?? 3, stat_mod_min: null, stat_mod_max: null, stat_mod_percent: null })
+    } else if (value === 'range') {
+      onUpdate(rule.attack_nom, { stat_mod_value_type: 'range', stat_mod_min: rule.stat_mod_min ?? 1, stat_mod_max: rule.stat_mod_max ?? 5, stat_mod_flat: null, stat_mod_percent: null })
+    } else {
+      onUpdate(rule.attack_nom, { stat_mod_value_type: 'percent', stat_mod_percent: rule.stat_mod_percent ?? 20, stat_mod_flat: null, stat_mod_min: null, stat_mod_max: null })
+    }
+  }
+
+  const handleStatModDurationTypeChange = (value: string) => {
+    if (value === 'battle_end') {
+      onUpdate(rule.attack_nom, { stat_mod_duration_type: 'battle_end', stat_mod_duration_turns: null })
+    } else {
+      onUpdate(rule.attack_nom, { stat_mod_duration_type: 'turns', stat_mod_duration_turns: rule.stat_mod_duration_turns ?? 3 })
+    }
+  }
+
+  const handleHealDotToggle = (enabled: boolean) => {
+    if (enabled) {
+      onUpdate(rule.attack_nom, { heal_dot_amount: rule.heal_dot_amount ?? 5, heal_dot_duration_turns: rule.heal_dot_duration_turns ?? 3 })
+    } else {
+      onUpdate(rule.attack_nom, { heal_dot_amount: null, heal_dot_duration_turns: null })
+    }
+  }
+
+  const handleCancelHealToggle = (enabled: boolean) => {
+    onUpdate(rule.attack_nom, { cancel_heal_duration_turns: enabled ? (rule.cancel_heal_duration_turns ?? 3) : null })
+  }
+
+  const handlePercentHpDamageToggle = (enabled: boolean) => {
+    onUpdate(rule.attack_nom, { percent_hp_damage_percent: enabled ? (rule.percent_hp_damage_percent ?? 50) : null })
   }
 
   return (
@@ -138,6 +239,19 @@ function AbilityRuleRow({
         <button onClick={() => onRemove(rule.attack_nom)} className={`text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>
           <CloseIcon className="w-3 h-3" />
         </button>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className="text-ink-muted-2 text-xs">Animation (purement visuel, sans effet sur le combat)</label>
+        <select
+          value={rule.animation_style}
+          onChange={(e) => onUpdate(rule.attack_nom, { animation_style: e.target.value as AutoBattleAnimationStyle })}
+          className="bg-white border-2 border-ink rounded px-2 py-1.5 text-ink text-sm outline-none"
+        >
+          {(Object.keys(ANIMATION_STYLE_LABEL) as AutoBattleAnimationStyle[]).map((s) => (
+            <option key={s} value={s}>{ANIMATION_STYLE_LABEL[s]}</option>
+          ))}
+        </select>
       </div>
 
       <div className="flex flex-col gap-1">
@@ -377,6 +491,226 @@ function AbilityRuleRow({
                 />
               </div>
             )}
+            {rule.bonus_damage_condition === 'has_status' && (
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-ink-muted-2 text-xs">Statut</span>
+                <select
+                  value={rule.bonus_damage_status_filter ?? ''}
+                  onChange={(e) => handleBonusStatusFilterChange(e.target.value)}
+                  className="bg-white border-2 border-ink rounded px-2 py-1.5 text-ink text-sm outline-none"
+                >
+                  <option value="">N'importe quel statut</option>
+                  {(Object.keys(STATUS_EFFECT_LABEL) as AutoBattleStatusEffect[]).map((s) => (
+                    <option key={s} value={s}>{STATUS_EFFECT_LABEL[s]}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className="text-ink-muted-2 text-xs">Modificateur de stat (baisse adverse ou hausse sur soi, sur un coup réussi)</label>
+        <select
+          value={rule.stat_mod_target ?? ''}
+          onChange={(e) => handleStatModTargetChange(e.target.value)}
+          className="bg-white border-2 border-ink rounded px-2 py-1.5 text-ink text-sm outline-none"
+        >
+          <option value="">Aucun</option>
+          {(Object.keys(STAT_MOD_TARGET_LABEL) as AutoBattleStatModTarget[]).map((t) => (
+            <option key={t} value={t}>{STAT_MOD_TARGET_LABEL[t]}</option>
+          ))}
+        </select>
+        {rule.stat_mod_target && (
+          <>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-ink-muted-2 text-xs">Stat visée</span>
+              <select
+                value={rule.stat_mod_stat ?? 'damage'}
+                onChange={(e) => handleStatModStatChange(e.target.value)}
+                className="bg-white border-2 border-ink rounded px-2 py-1.5 text-ink text-sm outline-none"
+              >
+                {(Object.keys(STAT_MOD_STAT_LABEL) as AutoBattleStatModStat[]).map((s) => (
+                  <option key={s} value={s}>{STAT_MOD_STAT_LABEL[s]}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-ink-muted-2 text-xs">Montant</span>
+              <select
+                value={rule.stat_mod_value_type ?? 'flat'}
+                onChange={(e) => handleStatModValueTypeChange(e.target.value)}
+                className="bg-white border-2 border-ink rounded px-2 py-1.5 text-ink text-sm outline-none"
+              >
+                {(Object.keys(STAT_MOD_VALUE_TYPE_LABEL) as AutoBattleStatModValueType[])
+                  .filter((v) => v !== 'percent' || rule.stat_mod_stat === 'damage')
+                  .map((v) => (
+                    <option key={v} value={v}>{STAT_MOD_VALUE_TYPE_LABEL[v]}</option>
+                  ))}
+              </select>
+            </div>
+            {rule.stat_mod_value_type === 'flat' && (
+              <div className="flex items-center gap-2 mt-1">
+                <NumberInput
+                  min={1}
+                  fallback={rule.stat_mod_flat ?? 3}
+                  value={rule.stat_mod_flat ?? 3}
+                  onCommit={(v) => onUpdate(rule.attack_nom, { stat_mod_flat: Math.max(1, v) })}
+                  className="w-16 bg-white border-2 border-ink rounded px-1 py-1 text-ink text-sm text-center outline-none"
+                />
+              </div>
+            )}
+            {rule.stat_mod_value_type === 'range' && (
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-ink-muted-2 text-xs">Entre</span>
+                <NumberInput
+                  min={1}
+                  fallback={rule.stat_mod_min ?? 1}
+                  value={rule.stat_mod_min ?? 1}
+                  onCommit={(v) => onUpdate(rule.attack_nom, { stat_mod_min: Math.max(1, Math.min(v, rule.stat_mod_max ?? 5)) })}
+                  className="w-14 bg-white border-2 border-ink rounded px-1 py-1 text-ink text-sm text-center outline-none"
+                />
+                <span className="text-ink-muted-2 text-xs">et</span>
+                <NumberInput
+                  min={1}
+                  fallback={rule.stat_mod_max ?? 5}
+                  value={rule.stat_mod_max ?? 5}
+                  onCommit={(v) => onUpdate(rule.attack_nom, { stat_mod_max: Math.max(v, rule.stat_mod_min ?? 1) })}
+                  className="w-14 bg-white border-2 border-ink rounded px-1 py-1 text-ink text-sm text-center outline-none"
+                />
+              </div>
+            )}
+            {rule.stat_mod_value_type === 'percent' && (
+              <div className="flex items-center gap-2 mt-1">
+                <NumberInput
+                  min={1}
+                  fallback={rule.stat_mod_percent ?? 20}
+                  value={rule.stat_mod_percent ?? 20}
+                  onCommit={(v) => onUpdate(rule.attack_nom, { stat_mod_percent: Math.max(1, Math.min(100, v)) })}
+                  className="w-16 bg-white border-2 border-ink rounded px-1 py-1 text-ink text-sm text-center outline-none"
+                />
+                <span className="text-ink-muted-2 text-xs">% des dégâts de base (calculés en tout début de combat)</span>
+              </div>
+            )}
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-ink-muted-2 text-xs">Durée</span>
+              <select
+                value={rule.stat_mod_duration_type ?? 'turns'}
+                onChange={(e) => handleStatModDurationTypeChange(e.target.value)}
+                className="bg-white border-2 border-ink rounded px-2 py-1.5 text-ink text-sm outline-none"
+              >
+                {(Object.keys(STAT_MOD_DURATION_TYPE_LABEL) as AutoBattleStatModDurationType[]).map((d) => (
+                  <option key={d} value={d}>{STAT_MOD_DURATION_TYPE_LABEL[d]}</option>
+                ))}
+              </select>
+              {rule.stat_mod_duration_type === 'turns' && (
+                <>
+                  <NumberInput
+                    min={1}
+                    fallback={rule.stat_mod_duration_turns ?? 3}
+                    value={rule.stat_mod_duration_turns ?? 3}
+                    onCommit={(v) => onUpdate(rule.attack_nom, { stat_mod_duration_turns: Math.max(1, v) })}
+                    className="w-14 bg-white border-2 border-ink rounded px-1 py-1 text-ink text-sm text-center outline-none"
+                  />
+                  <span className="text-ink-muted-2 text-xs">tours de combat</span>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-ink-muted-2 text-xs">Limite d'usages réussis</span>
+              <NumberInput
+                min={1}
+                fallback={rule.stat_mod_max_uses ?? 1}
+                value={rule.stat_mod_max_uses ?? 0}
+                onCommit={(v) => onUpdate(rule.attack_nom, { stat_mod_max_uses: v <= 0 ? null : v })}
+                className="w-14 bg-white border-2 border-ink rounded px-1 py-1 text-ink text-sm text-center outline-none"
+              />
+              <span className="text-ink-muted-2 text-xs">(0 = illimité)</span>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={rule.heal_dot_amount != null}
+            onChange={(e) => handleHealDotToggle(e.target.checked)}
+            className="w-4 h-4"
+          />
+          <span className="text-ink-muted-2 text-xs">Soin passif (soigne son utilisateur à chaque début de son tour)</span>
+        </label>
+        {rule.heal_dot_amount != null && (
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-ink-muted-2 text-xs">Soigne</span>
+            <NumberInput
+              min={1}
+              fallback={rule.heal_dot_amount ?? 5}
+              value={rule.heal_dot_amount ?? 5}
+              onCommit={(v) => onUpdate(rule.attack_nom, { heal_dot_amount: Math.max(1, v) })}
+              className="w-14 bg-white border-2 border-ink rounded px-1 py-1 text-ink text-sm text-center outline-none"
+            />
+            <span className="text-ink-muted-2 text-xs">PV par tour, pendant</span>
+            <NumberInput
+              min={1}
+              fallback={rule.heal_dot_duration_turns ?? 3}
+              value={rule.heal_dot_duration_turns ?? 3}
+              onCommit={(v) => onUpdate(rule.attack_nom, { heal_dot_duration_turns: Math.max(1, v) })}
+              className="w-14 bg-white border-2 border-ink rounded px-1 py-1 text-ink text-sm text-center outline-none"
+            />
+            <span className="text-ink-muted-2 text-xs">tours de combat</span>
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={rule.cancel_heal_duration_turns != null}
+            onChange={(e) => handleCancelHealToggle(e.target.checked)}
+            className="w-4 h-4"
+          />
+          <span className="text-ink-muted-2 text-xs">Anti-Soin (annule tous les soins adverses, sur un coup réussi)</span>
+        </label>
+        {rule.cancel_heal_duration_turns != null && (
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-ink-muted-2 text-xs">Pendant</span>
+            <NumberInput
+              min={1}
+              fallback={rule.cancel_heal_duration_turns ?? 3}
+              value={rule.cancel_heal_duration_turns ?? 3}
+              onCommit={(v) => onUpdate(rule.attack_nom, { cancel_heal_duration_turns: Math.max(1, v) })}
+              className="w-14 bg-white border-2 border-ink rounded px-1 py-1 text-ink text-sm text-center outline-none"
+            />
+            <span className="text-ink-muted-2 text-xs">tours de combat</span>
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={rule.percent_hp_damage_percent != null}
+            onChange={(e) => handlePercentHpDamageToggle(e.target.checked)}
+            className="w-4 h-4"
+          />
+          <span className="text-ink-muted-2 text-xs">Dégâts en % des PV restants (remplace les dégâts habituels)</span>
+        </label>
+        {rule.percent_hp_damage_percent != null && (
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-ink-muted-2 text-xs">Inflige</span>
+            <NumberInput
+              min={1}
+              fallback={rule.percent_hp_damage_percent ?? 50}
+              value={rule.percent_hp_damage_percent ?? 50}
+              onCommit={(v) => onUpdate(rule.attack_nom, { percent_hp_damage_percent: Math.max(1, Math.min(100, v)) })}
+              className="w-14 bg-white border-2 border-ink rounded px-1 py-1 text-ink text-sm text-center outline-none"
+            />
+            <span className="text-ink-muted-2 text-xs">% des PV restants de la cible</span>
           </div>
         )}
       </div>

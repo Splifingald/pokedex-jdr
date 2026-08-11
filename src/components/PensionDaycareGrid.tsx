@@ -24,7 +24,7 @@ interface Props {
 // la place est réservée à un autre dresseur.
 function PensionEmptySlot({ canAdd, onAdd }: { canAdd: boolean; onAdd: () => void }) {
   return (
-    <div className="aspect-[2/3] min-w-0 rounded-lg border-2 border-dashed border-ink/25 bg-cream-secondary/30 flex flex-col items-center justify-center gap-2 p-2">
+    <div className="aspect-square min-w-0 rounded-lg border-2 border-dashed border-ink/25 bg-cream-secondary/30 flex flex-col items-center justify-center gap-2 p-2">
       <svg viewBox="0 0 48 16" className="w-2/5 text-ink" aria-hidden="true">
         <ellipse cx="24" cy="8" rx="22" ry="7" fill="currentColor" opacity="0.15" />
       </svg>

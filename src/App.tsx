@@ -32,7 +32,7 @@ import { SettingsPopup } from './components/SettingsPopup'
 import { PlayerProfilePopup } from './components/PlayerProfilePopup'
 import { FullscreenPromptModal } from './components/FullscreenPromptModal'
 import { PixelIcon } from './components/icons/PixelIcon'
-import { useFullscreen } from './hooks/useFullscreen'
+import { useFullscreen, isFullscreenSupported } from './hooks/useFullscreen'
 import { useUnsavedChangesGuard } from './context/UnsavedChangesContext'
 import { PANEL_LG, PIXEL_BORDER_SM } from './lib/panelStyles'
 import { SETTINGS_ICON } from './lib/icons'
@@ -69,7 +69,7 @@ export default function App() {
   const { enter: enterFullscreen } = useFullscreen()
   const { guardedNavigate } = useUnsavedChangesGuard()
 
-  const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(true)
+  const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(isFullscreenSupported)
   const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem('adminMode') === 'true')
   const [showSettings, setShowSettings] = useState(false)
   const [showProfile, setShowProfile] = useState(false)

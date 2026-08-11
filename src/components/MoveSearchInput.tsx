@@ -55,6 +55,7 @@ export function MoveSearchInput({ options, disabled, onSelect, showDamage = fals
             matches.map((a) => (
               <button
                 key={a.nom}
+                type="button"
                 onClick={() => handleSelect(a)}
                 className="w-full flex items-center gap-2 px-3 py-2 border-b border-[#cfc7a8] last:border-b-0 hover:bg-cream-secondary transition-colors text-left"
               >
