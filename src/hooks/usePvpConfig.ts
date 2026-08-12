@@ -11,6 +11,8 @@ const DEFAULTS: PvpConfig = {
   trial_pokemon_nom: '',
   trial_hp: 80,
   trial_ability_nom: '',
+  champion_banner_url: '',
+  challengers_banner_url: '',
 }
 
 export function usePvpConfig() {

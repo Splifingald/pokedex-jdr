@@ -3,7 +3,7 @@ import type { Player, ChatMessage, Item, Pokemon, Trade } from '../../types'
 import type { ReferenceEntry, ReferenceIndex } from '../../hooks/useReferenceIndex'
 import { findTradeForMessage } from '../../lib/trade'
 import { formatChatMessageTime } from '../../lib/chatMessageTime'
-import { buildMentionMatcher, type MentionMatcher } from '../../lib/chatMentions'
+import { buildMentionMatcher, scanMentions, type MentionMatcher } from '../../lib/chatMentions'
 import { TradeCard } from './TradeCard'
 import { TradeCompletedCard } from './TradeCompletedCard'
 
@@ -58,33 +58,28 @@ function renderReferences(content: string, index: ReferenceIndex, onReferenceCli
   return parts
 }
 
-// Passe préalable : isole les mentions "@Joueur" (PNJ exclus, cf. buildMentionMatcher)
-// et applique le surlignage de référence sur le texte restant entre les mentions.
+// Passe préalable : isole les mentions "@Joueur" (PNJ exclus, casse/accents ignorés,
+// cf. buildMentionMatcher) et applique le surlignage de référence sur le texte
+// restant entre les mentions.
 function renderContent(content: string, index: ReferenceIndex, onReferenceClick: (entry: ReferenceEntry) => void, mentions: MentionMatcher) {
-  if (!mentions.regex) return renderReferences(content, index, onReferenceClick)
+  if (!mentions.lookup) return renderReferences(content, index, onReferenceClick)
 
-  const { regex, lookup } = mentions
-  regex.lastIndex = 0
   const parts: React.ReactNode[] = []
   let lastIndex = 0
-  let m: RegExpExecArray | null
   let key = 0
 
-  while ((m = regex.exec(content))) {
-    const player = lookup.get(m[1].toLowerCase())
-    if (player) {
-      if (m.index > lastIndex) {
-        parts.push(<Fragment key={key++}>{renderReferences(content.slice(lastIndex, m.index), index, onReferenceClick)}</Fragment>)
-      }
-      parts.push(
-        <span key={key++} className="font-bold" style={{ color: 'var(--color-xp-blue)' }}>
-          {m[0]}
-        </span>
-      )
-      lastIndex = m.index + m[0].length
+  scanMentions(content, mentions, (_player, matchedText, matchIndex) => {
+    if (matchIndex > lastIndex) {
+      parts.push(<Fragment key={key++}>{renderReferences(content.slice(lastIndex, matchIndex), index, onReferenceClick)}</Fragment>)
     }
-    if (m.index === regex.lastIndex) regex.lastIndex++
-  }
+    parts.push(
+      <span key={key++} className="font-bold" style={{ color: 'var(--color-xp-blue)' }}>
+        {matchedText}
+      </span>
+    )
+    lastIndex = matchIndex + matchedText.length
+  })
+
   if (lastIndex < content.length) {
     parts.push(<Fragment key={key}>{renderReferences(content.slice(lastIndex), index, onReferenceClick)}</Fragment>)
   }

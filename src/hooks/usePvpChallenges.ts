@@ -90,5 +90,30 @@ export function usePvpChallenges() {
     return true
   }, [])
 
-  return { challenges, loading, postChallenge, withdrawChallenge, deleteChallenge, refetch: fetchAll }
+  // Nomme directement un défi régulier déjà posté Champion (admin, voir
+  // AdminPvpPanel) — dépossède l'ancien Champion s'il y en a un, et sert
+  // aussi bien à désigner le tout premier Champion qu'à en changer à la
+  // volée. Même RPC que celui appelé automatiquement par pvp_resolve_round
+  // à la victoire d'un challenger contre le Champion (voir schema.sql).
+  const promoteToChampion = useCallback(async (challengeId: number) => {
+    const { data, error } = await supabase.rpc('pvp_promote_to_champion', { p_source_challenge_id: challengeId })
+    if (error) {
+      console.error('Erreur lors de la nomination du Champion PvP :', error)
+      return false
+    }
+    return (data as { status: string }).status === 'ok'
+  }, [])
+
+  // Dépossède le Champion actuel sans successeur (admin) — laisse la section
+  // "Champion Actuel" vide côté client.
+  const clearChampion = useCallback(async () => {
+    const { error } = await supabase.rpc('pvp_admin_clear_champion')
+    if (error) {
+      console.error('Erreur lors de la dépossession du Champion PvP :', error)
+      return false
+    }
+    return true
+  }, [])
+
+  return { challenges, loading, postChallenge, withdrawChallenge, deleteChallenge, promoteToChampion, clearChampion, refetch: fetchAll }
 }

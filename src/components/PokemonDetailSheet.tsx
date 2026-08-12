@@ -33,7 +33,7 @@ import { usePensionXpGroups } from '../hooks/usePensionXpGroups'
 import { computeProjectedDaycareXp, resolveApplicableXpGroup } from '../lib/pension'
 import { getStatusInfo } from '../lib/status'
 import { StatusSelect } from './StatusSelect'
-import { getSuperEfficace, getLocalisations, getAttaques } from '../lib/pokemonFacts'
+import { getSuperEfficace, getLocalisations, getAttaquesWithPreEvolutions } from '../lib/pokemonFacts'
 import { toDatetimeLocalInput, fromDatetimeLocalInput } from '../lib/gifting'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
@@ -43,6 +43,12 @@ import { useToast } from '../context/ToastContext'
 import type { StatusId } from '../lib/status'
 
 export type DetailContext = 'home' | 'pokemon' | 'pokedex'
+
+// Références stables pour les appelants qui ne fournissent pas pokemonByName /
+// evolutionsByPokemonNom (fiche ouverte hors contexte équipe/pension) — évite de
+// recréer une Map à chaque rendu, ce qui casserait la mémoïsation.
+const EMPTY_POKEMON_MAP = new Map<string, Pokemon>()
+const EMPTY_EVOLUTIONS_MAP = new Map<string, PokemonEvolution[]>()
 
 interface Props {
   context: DetailContext
@@ -469,7 +475,10 @@ export function PokemonDetailSheet({
 
   const superEfficace = getSuperEfficace(pokemon)
   const localisations = getLocalisations(pokemon)
-  const learnableAttaques = getAttaques(pokemon)
+  const learnableAttaques = useMemo(
+    () => getAttaquesWithPreEvolutions(pokemon, pokemonByName ?? EMPTY_POKEMON_MAP, evolutionsByPokemonNom ?? EMPTY_EVOLUTIONS_MAP),
+    [pokemon, pokemonByName, evolutionsByPokemonNom]
+  )
   const canShowAttaques = isAdmin || isDiscovered
 
   // Stats : bonus d'XP inclus pour une instance possédée, valeurs brutes sinon
@@ -482,12 +491,16 @@ export function PokemonDetailSheet({
     ? dmgBreakdown.bonus > 0 ? `${dmgBreakdown.total} (${dmgBreakdown.base} + ${dmgBreakdown.bonus})` : dmgBreakdown.total
     : pokemon?.degats_base ?? '—'
 
-  const knownMoves = playerPokemon?.moves ?? []
+  const knownMoves = useMemo(() => playerPokemon?.moves ?? [], [playerPokemon?.moves])
   const addableMoves = useMemo(
-    () => [...attacksByName.values()].filter((a) => !(playerPokemon?.moves ?? []).includes(a.nom)),
-    [attacksByName, playerPokemon?.moves]
+    () => [...attacksByName.values()].filter((a) => !knownMoves.includes(a.nom)),
+    [attacksByName, knownMoves]
   )
   const atMoveCap = maxMoves != null && knownMoves.length >= maxMoves
+  const notYetKnownLearnableAttaques = useMemo(
+    () => learnableAttaques.filter((m) => !knownMoves.includes(m)),
+    [learnableAttaques, knownMoves]
+  )
 
   return (
     <SheetShell onClose={onClose} elevated={elevated}>
@@ -667,6 +680,26 @@ export function PokemonDetailSheet({
                     onSelect={(a) => onAddMove(playerPokemon.id, a.nom)}
                   />
                 )}
+
+                {canShowAttaques && notYetKnownLearnableAttaques.length > 0 && (
+                  <div className="mt-3">
+                    <span className="text-xs text-ink-muted-2 font-bold mb-1.5 block">Capacités apprenables</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {notYetKnownLearnableAttaques.map((moveName) => {
+                        const atk = attacksByName.get(moveName)
+                        return atk ? (
+                          <button key={moveName} type="button" onClick={() => setViewingAbility(atk)} className="cursor-pointer">
+                            <TypeBadge type={atk.type} label={atk.nom} small />
+                          </button>
+                        ) : (
+                          <span key={moveName} className="text-xs text-ink-muted-2 border border-ink/30 rounded px-1.5 py-0.5">
+                            {moveName}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -811,7 +844,24 @@ export function PokemonDetailSheet({
       </div>
 
       {viewingAbility && (
-        <AbilityReferencePopup attack={viewingAbility} elevated={elevated} onClose={() => setViewingAbility(null)} />
+        <AbilityReferencePopup
+          attack={viewingAbility}
+          elevated={elevated}
+          onClose={() => setViewingAbility(null)}
+          addToPokemon={
+            isOwnedContext && playerPokemon && onAddMove && !knownMoves.includes(viewingAbility.nom)
+              ? {
+                  pokemonName: nom,
+                  atCap: atMoveCap,
+                  atCapMessage: `${nom} a déjà ${maxMoves ?? knownMoves.length} capacités`,
+                  onAdd: () => {
+                    onAddMove(playerPokemon.id, viewingAbility.nom)
+                    setViewingAbility(null)
+                  },
+                }
+              : undefined
+          }
+        />
       )}
 
       {lightboxOpen && pokemon?.image_miniature && (

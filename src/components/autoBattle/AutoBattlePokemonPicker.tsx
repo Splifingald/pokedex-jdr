@@ -136,7 +136,7 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
                 onClick={() => onSelect(pp)}
                 className={`${PANEL} flex items-stretch gap-2.5 p-2 text-left ${BUTTON_STYLE.gray}`}
               >
-                <div className="aspect-square self-stretch shrink-0 rounded-md border-2 border-ink bg-cream-secondary flex items-center justify-center overflow-hidden">
+                <div className="w-16 h-16 shrink-0 rounded-md border-2 border-ink bg-cream-secondary flex items-center justify-center overflow-hidden">
                   {species?.image_miniature ? (
                     <img src={species.image_miniature} alt="" className="pixelated w-full h-full object-contain" />
                   ) : (

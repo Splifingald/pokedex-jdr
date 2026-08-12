@@ -10,7 +10,7 @@ import { useTrades } from '../../hooks/useTrades'
 import { useReferenceIndex, type ReferenceEntry } from '../../hooks/useReferenceIndex'
 import { ReferenceHighlight, forceReferenceRecompute } from '../../lib/referenceExtension'
 import { chatCooldownSeconds } from '../../lib/chatSpam'
-import { findMentionedPlayers } from '../../lib/chatMentions'
+import { findMentionedPlayers, computeMentionSuggestion } from '../../lib/chatMentions'
 import { ChatMessageBubble } from './ChatMessageBubble'
 import { ChatReferenceDispatcher } from './ChatReferenceDispatcher'
 import { TradePopup } from './TradePopup'
@@ -46,6 +46,23 @@ const SubmitOnEnter = Extension.create<{ getOnSubmit: () => () => void }>({
     return {
       Enter: () => { this.options.getOnSubmit()(); return true },
       'Shift-Enter': () => true,
+    }
+  },
+})
+
+// Tab valide la suggestion de mention en cours (le texte auto-complété par
+// computeMentionSuggestion est sélectionné juste après insertion) en repliant
+// le curseur à la fin, sans l'écraser ni sortir du champ.
+const AcceptMentionOnTab = Extension.create({
+  name: 'acceptMentionOnTab',
+  addKeyboardShortcuts() {
+    return {
+      Tab: () => {
+        const { selection } = this.editor.state
+        if (selection.empty) return false
+        this.editor.commands.setTextSelection(selection.to)
+        return true
+      },
     }
   },
 })
@@ -92,6 +109,15 @@ export function ChatPopup({ player, players, chat, inventory, roster, pokemonByN
   // "Envoyer" désactivé un instant après le début de la frappe.
   const [text, setText] = useState('')
 
+  const playersRef = useRef(players)
+  useEffect(() => { playersRef.current = players }, [players])
+  // Auto-complétion "@Nom" : true pendant la (re)transaction déclenchée par notre
+  // propre insertion de suggestion, pour ne pas la ré-analyser comme une frappe.
+  const mentionSuggestingRef = useRef(false)
+  // Dernière position du curseur observée, pour ne suggérer qu'en frappe vers l'avant
+  // (un retour arrière/flèche ne doit jamais faire réapparaître la suggestion effacée).
+  const mentionLastCursorRef = useRef(0)
+
   const editor = useEditor({
     content: '',
     extensions: [
@@ -107,8 +133,35 @@ export function ChatPopup({ player, players, chat, inventory, roster, pokemonByN
       }),
       // eslint-disable-next-line react-hooks/refs
       SubmitOnEnter.configure({ getOnSubmit: () => handleSendRef.current }),
+      AcceptMentionOnTab,
     ],
-    onUpdate: ({ editor }) => setText(editor.getText()),
+    onUpdate: ({ editor }) => {
+      setText(editor.getText())
+
+      if (mentionSuggestingRef.current) {
+        mentionSuggestingRef.current = false
+        return
+      }
+
+      const { from, empty } = editor.state.selection
+      if (!empty) {
+        mentionLastCursorRef.current = from
+        return
+      }
+      const prevCursor = mentionLastCursorRef.current
+      mentionLastCursorRef.current = from
+      if (from <= prevCursor) return // pas une frappe vers l'avant : on n'interfère pas
+
+      const textBefore = editor.state.doc.textBetween(Math.max(0, from - 60), from, '\n', '\n')
+      const suggestion = computeMentionSuggestion(textBefore, playersRef.current)
+      if (!suggestion) return
+
+      mentionSuggestingRef.current = true
+      editor.chain()
+        .insertContentAt(from, suggestion.suffix)
+        .setTextSelection({ from, to: from + suggestion.suffix.length })
+        .run()
+    },
   })
 
   useEffect(() => {
@@ -133,12 +186,13 @@ export function ChatPopup({ player, players, chat, inventory, roster, pokemonByN
     editor.commands.clearContent()
     setText('')
     setNow(Date.now())
+    mentionLastCursorRef.current = 0
   }
   useEffect(() => { handleSendRef.current = handleSend })
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-0 sm:p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 sm:p-4 safe-overlay"
       style={viewport ? { height: viewport.height, top: viewport.offsetTop } : undefined}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >

@@ -110,7 +110,7 @@ export function CasinoPopup({ player, playerItems, pokedollarImageUrl, onClose }
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-0 sm:p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 sm:p-4 safe-overlay"
       onClick={(e) => { if (e.target === e.currentTarget && view === 'list') onClose() }}
     >
       <div

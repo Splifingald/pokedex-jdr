@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePlayers } from '../hooks/usePlayers'
 import { useChatMessages } from '../hooks/useChatMessages'
 import { useAdminParameters } from '../hooks/useAdminParameters'
@@ -10,7 +10,7 @@ import { usePlayerPokemon } from '../hooks/usePlayerPokemon'
 import { useTrades } from '../hooks/useTrades'
 import type { Player, Trade } from '../types'
 import { tradeFallbackText, tradeStatusLabel } from '../lib/trade'
-import { findMentionedPlayers } from '../lib/chatMentions'
+import { findMentionedPlayers, computeMentionSuggestion } from '../lib/chatMentions'
 import { PlayerSearchInput } from './PlayerSearchInput'
 import { ConfirmPopup } from './ConfirmPopup'
 import { TradePopup } from './chat/TradePopup'
@@ -46,6 +46,20 @@ export function AdminChatPanel() {
   const [actingPlayer, setActingPlayer] = useState<Player | null>(null)
   const [tradeSimPopup, setTradeSimPopup] = useState<{ trade?: Trade } | null>(null)
 
+  // Auto-complétion "@Nom" du message PNJ : sélection à appliquer après le prochain
+  // rendu (le textarea étant contrôlé, on ne peut positionner le curseur qu'une fois
+  // la nouvelle valeur reflétée dans le DOM).
+  const npcTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const pendingMentionSelectionRef = useRef<[number, number] | null>(null)
+  const npcTextLastCaretRef = useRef(0)
+
+  useEffect(() => {
+    const selection = pendingMentionSelectionRef.current
+    if (!selection) return
+    npcTextareaRef.current?.setSelectionRange(selection[0], selection[1])
+    pendingMentionSelectionRef.current = null
+  }, [text])
+
   const playersById = new Map(players.map((p) => [p.id, p]))
   const npcOptions = players.filter((p) => p.is_npc)
   const overLimit = text.length > parameters.chat_max_message_length
@@ -54,6 +68,38 @@ export function AdminChatPanel() {
 
   const actingPlayerItems = usePlayerItems(actingPlayer?.id ?? null)
   const actingRoster = usePlayerPokemon(actingPlayer?.id ?? null)
+
+  const handleNpcTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value
+    const caret = e.target.selectionStart ?? value.length
+    const prevCaret = npcTextLastCaretRef.current
+    npcTextLastCaretRef.current = caret
+
+    // Ne suggérer qu'en frappe vers l'avant : un retour arrière/coller ne doit pas
+    // faire réapparaître une suggestion qu'on vient d'effacer.
+    if (caret > prevCaret) {
+      const suggestion = computeMentionSuggestion(value.slice(0, caret), players)
+      if (suggestion) {
+        setText(value.slice(0, caret) + suggestion.suffix + value.slice(caret))
+        pendingMentionSelectionRef.current = [caret, caret + suggestion.suffix.length]
+        npcTextLastCaretRef.current = caret
+        return
+      }
+    }
+    setText(value)
+  }
+
+  // Tab valide la suggestion en cours (le suffixe auto-complété est sélectionné
+  // juste après insertion) en repliant le curseur à sa fin, sans sortir du champ.
+  const handleNpcTextKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== 'Tab') return
+    const textarea = e.currentTarget
+    if (textarea.selectionStart === textarea.selectionEnd) return
+    e.preventDefault()
+    const end = textarea.selectionEnd
+    textarea.setSelectionRange(end, end)
+    npcTextLastCaretRef.current = end
+  }
 
   const handleSend = async () => {
     const trimmed = text.trim()
@@ -80,6 +126,7 @@ export function AdminChatPanel() {
       }
       setText('')
       setNpc(null)
+      npcTextLastCaretRef.current = 0
     } finally {
       setSending(false)
     }
@@ -129,8 +176,10 @@ export function AdminChatPanel() {
             <PlayerSearchInput options={npcOptions} onSelect={setNpc} placeholder="Choisir un PNJ…" />
           )}
           <textarea
+            ref={npcTextareaRef}
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={handleNpcTextChange}
+            onKeyDown={handleNpcTextKeyDown}
             placeholder="Message…"
             rows={3}
             className="w-full bg-white border-2 border-ink rounded-lg px-3 py-2 text-ink text-sm outline-none resize-none"

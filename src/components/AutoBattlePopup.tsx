@@ -126,6 +126,29 @@ export function AutoBattlePopup({
     setScrollShrink(Math.max(0, Math.min(1, t / BANNER_SHRINK_SCROLL_PX)))
   }
 
+  // Retour à la liste des parcours après un combat (gagné, perdu, ou simple
+  // retour arrière) : on recentre automatiquement la carte du dernier parcours
+  // joué pour que le joueur puisse enchaîner sans re-scroller à la main. La
+  // cible est mémorisée dans une ref au moment de resetToList (activeVariant
+  // est remis à null juste après) et consommée une seule fois par l'effet ci-
+  // dessous, une fois la liste rendue (le conteneur défilant a `key={view}`,
+  // il est donc remonté à scrollTop 0 avant qu'on le repositionne).
+  const pendingScrollVariantIdRef = useRef<number | null>(null)
+  const variantCardRefs = useRef(new Map<number, HTMLDivElement>())
+
+  useEffect(() => {
+    if (view !== 'list' || variantsLoading) return
+    const variantId = pendingScrollVariantIdRef.current
+    if (!variantId) return
+    const container = scrollContainerRef.current
+    const card = variantCardRefs.current.get(variantId)
+    if (!container || !card) return
+    pendingScrollVariantIdRef.current = null
+    const top = card.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
+    const centered = top - Math.max(0, (container.clientHeight - card.offsetHeight) / 2)
+    container.scrollTo({ top: Math.max(0, centered), behavior: 'smooth' })
+  }, [view, variantsLoading, variants, progressByVariant])
+
   const [now, setNow] = useState(() => Date.now())
   const [activeVariant, setActiveVariant] = useState<AutoBattleVariant | null>(null)
   const [activeLevel, setActiveLevel] = useState<AutoBattleLevel | null>(null)
@@ -427,6 +450,7 @@ export function AutoBattlePopup({
   }
 
   const resetToList = () => {
+    pendingScrollVariantIdRef.current = activeVariant?.id ?? null
     setActiveVariant(null)
     setActiveLevel(null)
     setSelectedPokemon(null)
@@ -485,7 +509,7 @@ export function AutoBattlePopup({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-0 sm:p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 sm:p-4 safe-overlay"
       onClick={(e) => { if (e.target === e.currentTarget && view === 'list') onClose() }}
     >
       <div
@@ -555,7 +579,14 @@ export function AutoBattlePopup({
                     const progress = progressByVariant.get(variant.id)
                     const completed = progress?.variant_completed ?? false
                     return (
-                      <div key={variant.id} className={`p-3 rounded ${PIXEL_BORDER_SM} bg-cream-secondary flex flex-col gap-1`}>
+                      <div
+                        key={variant.id}
+                        ref={(el) => {
+                          if (el) variantCardRefs.current.set(variant.id, el)
+                          else variantCardRefs.current.delete(variant.id)
+                        }}
+                        className={`p-3 rounded ${PIXEL_BORDER_SM} bg-cream-secondary flex flex-col gap-1`}
+                      >
                         <AutoBattleVariantBanner
                           variant={variant}
                           levels={levels}

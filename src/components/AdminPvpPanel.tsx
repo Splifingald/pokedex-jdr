@@ -14,12 +14,13 @@ import { TypeBadge } from './TypeBadge'
 import { CloseIcon } from './icons/CloseIcon'
 import { ConfirmPopup } from './ConfirmPopup'
 import { PvpChallengeBanner } from './PvpChallengeBanner'
+import { PvpChampionBanner } from './PvpChampionBanner'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import type { PvpChallenge } from '../types'
 
 export function AdminPvpPanel() {
   const { config, loading, updateConfig } = usePvpConfig()
-  const { challenges, deleteChallenge } = usePvpChallenges()
+  const { challenges, deleteChallenge, promoteToChampion, clearChampion } = usePvpChallenges()
   const { attemptsByChallenge, deleteAttempt } = usePvpChallengeAttempts()
   const { players } = usePlayers()
   const { pokemon } = usePokemon()
@@ -31,12 +32,24 @@ export function AdminPvpPanel() {
   const pokemonByName = useMemo(() => new Map(pokemon.map((p) => [p.nom, p])), [pokemon])
   const dummySpecies = pokemon.find((p) => p.nom === config.trial_pokemon_nom)
   const dummyAbility = attacks.find((a) => a.nom === config.trial_ability_nom)
+  const championChallenge = challenges.find((c) => c.is_champion) ?? null
+  const regularChallenges = challenges.filter((c) => !c.is_champion)
 
   const handleConfirmDelete = async () => {
     if (!confirmingDelete) return
     const ok = await deleteChallenge(confirmingDelete.id)
     setConfirmingDelete(null)
     showToast(ok ? 'Défi supprimé.' : 'Suppression impossible pour le moment.')
+  }
+
+  const handleDethrone = async () => {
+    const ok = await clearChampion()
+    showToast(ok ? 'Champion dépossédé.' : 'Dépossession impossible pour le moment.')
+  }
+
+  const handlePromote = async (challengeId: number) => {
+    const ok = await promoteToChampion(challengeId)
+    showToast(ok ? 'Nouveau Champion nommé !' : 'Nomination impossible pour le moment.')
   }
 
   const handleDeletePast = async () => {
@@ -85,6 +98,26 @@ export function AdminPvpPanel() {
               value={config.icon_url}
               onChange={(e) => updateConfig({ icon_url: e.target.value })}
               placeholder="/website_icons/icon_pvp_game.png"
+              className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+            />
+          </div>
+          <div>
+            <label className="text-ink-muted-2 text-sm block mb-1">Bannière "Champion Actuel" (URL, optionnelle)</label>
+            <input
+              type="text"
+              defaultValue={config.champion_banner_url}
+              onBlur={(e) => updateConfig({ champion_banner_url: e.target.value.trim() })}
+              placeholder="https://…"
+              className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+            />
+          </div>
+          <div>
+            <label className="text-ink-muted-2 text-sm block mb-1">Bannière "Challengers" (URL, optionnelle)</label>
+            <input
+              type="text"
+              defaultValue={config.challengers_banner_url}
+              onBlur={(e) => updateConfig({ challengers_banner_url: e.target.value.trim() })}
+              placeholder="https://…"
               className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
             />
           </div>
@@ -176,12 +209,30 @@ export function AdminPvpPanel() {
       </div>
 
       <div className="bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] w-full p-6">
-        <h3 className="text-[#a3841a] text-lg font-bold mb-4">Défis actifs ({challenges.length})</h3>
-        {challenges.length === 0 ? (
+        <h3 className="text-[#a3841a] text-lg font-bold mb-2">🏆 Champion</h3>
+        <p className="text-ink-muted-2 text-xs mb-4">
+          Nommez directement un Challenger ci-dessous Champion (bouton "👑 Nommer Champion" sur chaque défi) — utile pour désigner le tout premier Champion, ou pour en changer à volonté. Une nomination dépossède automatiquement le Champion actuel.
+        </p>
+        <PvpChampionBanner
+          champion={championChallenge}
+          championPlayer={championChallenge ? playersById.get(championChallenge.defender_player_id) : undefined}
+          pokemonByName={pokemonByName}
+          attempts={championChallenge ? attemptsByChallenge.get(championChallenge.id) ?? [] : []}
+          playersById={playersById}
+          isOwnChampion={false}
+          viewerHasOwnChallenge={false}
+          onPlay={() => {}}
+          isAdmin
+          onDethrone={() => void handleDethrone()}
+          onDeleteAttempt={(attemptId) => void deleteAttempt(attemptId)}
+        />
+
+        <h3 className="text-[#a3841a] text-lg font-bold mt-6 mb-4">Défis actifs ({regularChallenges.length})</h3>
+        {regularChallenges.length === 0 ? (
           <p className="text-ink-muted-2 text-sm">Aucun défi actif pour le moment.</p>
         ) : (
           <div className="flex flex-col gap-4">
-            {challenges.map((c) => (
+            {regularChallenges.map((c) => (
               <PvpChallengeBanner
                 key={c.id}
                 challenge={c}
@@ -195,6 +246,7 @@ export function AdminPvpPanel() {
                 onWithdraw={() => {}}
                 onDeleteChallenge={() => setConfirmingDelete(c)}
                 onDeleteAttempt={(attemptId) => void deleteAttempt(attemptId)}
+                onPromoteChampion={() => void handlePromote(c.id)}
               />
             ))}
           </div>

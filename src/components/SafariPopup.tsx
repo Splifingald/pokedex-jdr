@@ -144,7 +144,7 @@ export function SafariPopup({ player, playerItems, itemsByName, pokedollarImageU
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-0 sm:p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 sm:p-4 safe-overlay"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div

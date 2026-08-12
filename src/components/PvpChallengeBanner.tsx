@@ -2,11 +2,16 @@ import { useState } from 'react'
 import type { Player, Pokemon, PvpChallenge, PvpChallengeAttempt } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
+import { formatAttemptTimestamp, bestAttemptPerPlayer } from '../lib/pvpAttempts'
 import { TrashIcon } from './icons/TrashIcon'
 
-function PvpAvatar({ player }: { player?: Player }) {
+/** size en px — 28 (w-7 h-7) par défaut ; PvpChampionBanner passe une taille plus grande (bannière premium). */
+export function PvpAvatar({ player, size = 28 }: { player?: Player; size?: number }) {
   return (
-    <div className="w-7 h-7 rounded-full overflow-hidden shrink-0 border-2" style={{ borderColor: player?.color ?? '#a3841a' }}>
+    <div
+      className="rounded-full overflow-hidden shrink-0 border-2"
+      style={{ width: size, height: size, borderColor: player?.color ?? '#a3841a' }}
+    >
       {player?.image_url ? (
         <img src={player.image_url} alt={player.name} className="w-full h-full object-cover" />
       ) : (
@@ -14,49 +19,6 @@ function PvpAvatar({ player }: { player?: Player }) {
       )}
     </div>
   )
-}
-
-// "Aujourd'hui à XXhXXm" / "Hier à XXhXXm" / "Le DD/MM" — jamais d'année (le
-// tableau des scores repart de toute façon à zéro à chaque retrait/repose
-// d'un défi, voir pvp_challenges, donc une tentative vieille de plus d'un an
-// n'a jamais lieu d'être affichée ici).
-function formatAttemptTimestamp(iso: string): string {
-  const date = new Date(iso)
-  const now = new Date()
-  const hh = String(date.getHours()).padStart(2, '0')
-  const mm = String(date.getMinutes()).padStart(2, '0')
-  const sameDay = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
-  if (sameDay(date, now)) return `Aujourd'hui à ${hh}h${mm}`
-  const yesterday = new Date(now)
-  yesterday.setDate(now.getDate() - 1)
-  if (sameDay(date, yesterday)) return `Hier à ${hh}h${mm}`
-  const dd = String(date.getDate()).padStart(2, '0')
-  const mo = String(date.getMonth() + 1).padStart(2, '0')
-  return `Le ${dd}/${mo}`
-}
-
-// Une victoire bat toujours une défaite ; entre deux victoires, celle en
-// MOINS de tours gagne (jeu au tour par tour, voir duration_turns) ; entre
-// deux défaites, celle qui a laissé le moins de PV au défenseur (donc la
-// plus proche de la victoire) gagne — sert à la fois à choisir la MEILLEURE
-// tentative de chaque joueur (vue par défaut) et à trier ces meilleures
-// tentatives entre elles (classement implicite).
-function compareAttemptQuality(a: PvpChallengeAttempt, b: PvpChallengeAttempt): number {
-  if (a.outcome !== b.outcome) return a.outcome === 'win' ? -1 : 1
-  if (a.outcome === 'win') return (a.duration_turns ?? Infinity) - (b.duration_turns ?? Infinity)
-  return (a.defender_hp_remaining ?? Infinity) - (b.defender_hp_remaining ?? Infinity)
-}
-
-// Vue par défaut (voir "Voir tout" plus bas pour l'historique complet) : une
-// seule ligne par joueur, sa MEILLEURE tentative contre ce défi précis.
-function bestAttemptPerPlayer(attempts: PvpChallengeAttempt[]): PvpChallengeAttempt[] {
-  const bestByPlayer = new Map<number, PvpChallengeAttempt>()
-  for (const a of attempts) {
-    const current = bestByPlayer.get(a.attacker_player_id)
-    if (!current || compareAttemptQuality(a, current) < 0) bestByPlayer.set(a.attacker_player_id, a)
-  }
-  return [...bestByPlayer.values()].sort(compareAttemptQuality)
 }
 
 interface Props {
@@ -74,6 +36,8 @@ interface Props {
   isAdmin?: boolean
   onDeleteChallenge?: () => void
   onDeleteAttempt?: (attemptId: number) => void
+  /** Vue admin uniquement : nomme directement ce défi Champion (voir pvp_promote_to_champion) — affiché en plus du bouton Supprimer, jamais à la place. */
+  onPromoteChampion?: () => void
 }
 
 // Une bannière par défi actif — pas de GameCard (voir CasinoGameCard) : ce
@@ -82,7 +46,7 @@ interface Props {
 // SANS filtre drop-shadow (contrairement aux sprites en combat/déambulation,
 // voir AutoBattleScreen/RoamingPokemonSprite) — même traitement "carte plate"
 // qu'AutoBattlePokemonPicker.
-export function PvpChallengeBanner({ challenge, defenderPlayer, pokemonByName, attempts, playersById, isOwn, onPlay, onWithdraw, readOnly, isAdmin, onDeleteChallenge, onDeleteAttempt }: Props) {
+export function PvpChallengeBanner({ challenge, defenderPlayer, pokemonByName, attempts, playersById, isOwn, onPlay, onWithdraw, readOnly, isAdmin, onDeleteChallenge, onDeleteAttempt, onPromoteChampion }: Props) {
   // false = meilleure tentative de chaque joueur (voir bestAttemptPerPlayer) ;
   // true = historique complet, du plus récent au plus ancien (voir "Voir
   // tout" — attempts arrive déjà trié ainsi par usePvpChallengeAttempts).
@@ -114,10 +78,17 @@ export function PvpChallengeBanner({ challenge, defenderPlayer, pokemonByName, a
           <p className="text-ink-muted-2 text-xs">{challenge.max_hp} PV</p>
         </div>
         {isAdmin ? (
-          <button onClick={onDeleteChallenge} className={`px-3 py-1.5 rounded text-xs font-bold shrink-0 flex items-center gap-1.5 ${BUTTON_STYLE.red}`}>
-            <TrashIcon className="w-3.5 h-3.5" />
-            Supprimer
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {onPromoteChampion && (
+              <button onClick={onPromoteChampion} className={`px-3 py-1.5 rounded text-xs font-bold ${BUTTON_STYLE.yellow}`}>
+                👑 Nommer Champion
+              </button>
+            )}
+            <button onClick={onDeleteChallenge} className={`px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 ${BUTTON_STYLE.red}`}>
+              <TrashIcon className="w-3.5 h-3.5" />
+              Supprimer
+            </button>
+          </div>
         ) : readOnly ? (
           <span className="text-ink-muted-2 text-xs shrink-0">
             Retiré{challenge.withdrawn_at ? ` le ${new Date(challenge.withdrawn_at).toLocaleDateString()}` : ''}

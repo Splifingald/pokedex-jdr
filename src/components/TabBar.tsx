@@ -79,7 +79,7 @@ export function TabBar({ activeTab, onTabChange, showPokedexTab, showTeamTab, sh
   }
 
   return (
-    <nav className={`shrink-0 flex md:hidden bg-tabbar-bg border-t-4 border-ink ${scrollable ? 'overflow-x-auto' : 'overflow-hidden'}`}>
+    <nav className={`shrink-0 flex md:hidden bg-tabbar-bg border-t-4 border-ink pb-safe ${scrollable ? 'overflow-x-auto' : 'overflow-hidden'}`}>
       {visibleTabs.map((tab) => {
         const active = activeTab === tab.id
         return (

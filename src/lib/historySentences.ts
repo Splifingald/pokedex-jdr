@@ -219,6 +219,9 @@ function pvpSentence(entry: DisplayHistoryEntry, ctx: SentenceContext): Sentence
   if (entry.action_type === 'pvp_attempt_win') {
     return [actor, { text: ' (' }, attackerMon, { text: ') a remporté le défi PvP de ' }, defender, { text: ' (' }, defenderMon, { text: ')' }]
   }
+  if (entry.action_type === 'pvp_champion_crowned') {
+    return [actor, { text: ' (' }, attackerMon, { text: ') devient le nouveau Champion PvP, détrônant ' }, defender, { text: ' (' }, defenderMon, { text: ')' }]
+  }
   // pvp_attempt_lose
   return [actor, { text: ' (' }, attackerMon, { text: ') a perdu contre le défi PvP de ' }, defender, { text: ' (' }, defenderMon, { text: ')' }]
 }

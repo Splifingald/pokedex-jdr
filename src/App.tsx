@@ -170,7 +170,7 @@ export default function App() {
       {/* En-tête persistant */}
       <header
         className="shrink-0 flex items-center gap-2.5 px-3.5 pb-2.5 bg-shell border-b-4 border-ink shadow-[0_4px_0_rgba(0,0,0,0.35)]"
-        style={{ paddingTop: 'calc(0.625rem + env(safe-area-inset-top))' }}
+        style={{ paddingTop: 'calc(0.625rem + var(--safe-top))' }}
       >
         <div className="w-5 h-5 rounded-full bg-[#7fd6ff] border-[3px] border-cream shadow-[0_0_6px_#7fd6ff] shrink-0" />
         <h1 className="flex-1 min-w-0 text-lg text-cream tracking-wide [text-shadow:2px_2px_0_rgba(0,0,0,0.35)] truncate">
@@ -199,7 +199,7 @@ export default function App() {
           className="absolute right-3 z-20 w-10 h-10 rounded-full overflow-hidden border-[3px] border-ink shadow-[var(--shadow-pixel)]"
           style={{
             backgroundColor: player.color,
-            top: 'calc(0.625rem + env(safe-area-inset-top) + 2.5rem + 0.625rem + 0.5rem)',
+            top: 'calc(0.625rem + var(--safe-top) + 2.5rem + 0.625rem + 0.5rem)',
           }}
         >
           {player.image_url && (
@@ -236,6 +236,8 @@ export default function App() {
               discovered={discovered}
               isAdmin={isAdmin}
               attacksByName={attacksByName}
+              pokemonByName={pokemonByName}
+              evolutionsByPokemonNom={evolutionsByPokemonNom}
               roster={roster}
               teamFull={teamFull}
               canAddToRoster={!!player}

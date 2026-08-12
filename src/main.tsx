@@ -6,6 +6,9 @@ import { DisplayPage } from './pages/DisplayPage.tsx'
 import { PlayerProvider } from './context/PlayerContext.tsx'
 import { ToastProvider } from './context/ToastContext.tsx'
 import { UnsavedChangesProvider } from './context/UnsavedChangesContext.tsx'
+import { initSafeArea } from './lib/safeArea.ts'
+
+initSafeArea()
 
 const isDisplayRoute = window.location.pathname.replace(/\/$/, '') === '/display'
 

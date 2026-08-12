@@ -14,11 +14,15 @@ self.addEventListener('push', (event) => {
 
   // Pas de champ "image" : sur Android, sa présence bascule Chrome en style
   // BigPicture et remplace l'icône de gauche par l'icône générique du navigateur.
-  // Avec seulement "icon", l'image custom s'affiche bien en petite icône à gauche.
+  // Avec seulement "icon", l'image custom (avatar joueur/PNJ, sprite pokémon...)
+  // s'affiche bien en grande icône à gauche. "badge" est la petite icône
+  // (monochrome sur Android, dans la barre de statut) : toujours l'icône de
+  // l'app, pour que ce soit bien l'icône contextuelle qui prime à gauche.
   event.waitUntil(
     self.registration.showNotification(title || 'Pokémon JDR', {
       body,
       icon: icon || '/pwa-icons/pwa-192x192.png',
+      badge: '/pwa-icons/pwa-192x192.png',
       data: { url: url || '/' },
     })
   )

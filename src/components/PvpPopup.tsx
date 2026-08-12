@@ -14,7 +14,9 @@ import { AutoBattleCoinToss } from './autoBattle/AutoBattleCoinToss'
 import { ManualBattleScreen } from './autoBattle/ManualBattleScreen'
 import { PvpAbilityLoadoutPicker } from './PvpAbilityLoadoutPicker'
 import { PvpChallengeBanner } from './PvpChallengeBanner'
+import { PvpChampionBanner } from './PvpChampionBanner'
 import { PvpTrialBattleScreen } from './PvpTrialBattleScreen'
+import { GameBanner } from './CasinoGameCard'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PixelIcon } from './icons/PixelIcon'
 import { CloseIcon } from './icons/CloseIcon'
@@ -41,6 +43,8 @@ const STATUS_MESSAGE: Record<string, string> = {
   challenge_inactive: 'Ce défi a été retiré entre-temps.',
   own_challenge: 'Vous ne pouvez pas attaquer votre propre défi.',
   not_started: 'Combat non initialisé, réessayez.',
+  champion_requires_own_challenge: "Vous devez d'abord poser votre pokémon en défi pour affronter le Champion.",
+  already_champion: "Vous êtes déjà Champion : impossible de poser un autre pokémon en défi tant que vous détenez le titre.",
 }
 
 interface Props {
@@ -89,8 +93,14 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
   const [pastLoading, setPastLoading] = useState(false)
   const submittingRef = useRef(false)
 
-  const ownChallenge = challenges.find((c) => c.defender_player_id === player.id) ?? null
-  const otherChallenges = challenges.filter((c) => c.defender_player_id !== player.id)
+  const championChallenge = challenges.find((c) => c.is_champion) ?? null
+  const isOwnChampion = championChallenge?.defender_player_id === player.id
+  // "ownChallenge"/"otherChallenges" ne portent QUE sur la liste "Challengers"
+  // — le Champion (s'il y en a un) a sa propre section au-dessus, voir
+  // PvpChampionBanner, et n'apparaît donc jamais ici même si c'est le joueur
+  // courant qui le détient.
+  const ownChallenge = challenges.find((c) => !c.is_champion && c.defender_player_id === player.id) ?? null
+  const otherChallenges = challenges.filter((c) => !c.is_champion && c.defender_player_id !== player.id)
 
   const resetToList = () => {
     setView('list')
@@ -233,6 +243,17 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
       attacker_pokemon_nom: attackSelectedPokemon.pokemon_nom,
       challenge_id: activeChallenge.id,
     })
+    // Le Champion vient de tomber (voir pvp_resolve_round côté serveur, qui
+    // vient de le promouvoir avec le pokémon déjà posté par ce joueur) : un
+    // second événement dédié pour le fil d'actualité (voir historySentences.ts).
+    if (result.outcome === 'win' && activeChallenge.is_champion) {
+      void logHistoryEvent('pvp', 'pvp_champion_crowned', player.id, {
+        defender_player_id: activeChallenge.defender_player_id,
+        defender_pokemon_nom: activeChallenge.pokemon_nom,
+        attacker_pokemon_nom: attackSelectedPokemon.pokemon_nom,
+        challenge_id: activeChallenge.id,
+      })
+    }
     setView(result.outcome === 'win' ? 'attack-win' : 'attack-lose')
   }
 
@@ -241,7 +262,7 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-0 sm:p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 sm:p-4 safe-overlay"
       onClick={(e) => { if (e.target === e.currentTarget && view === 'list') onClose() }}
     >
       <div
@@ -265,56 +286,81 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
                 <h3 className="text-ink text-lg font-bold flex-1">{config.nom}</h3>
               </div>
 
-              <div className="flex flex-col gap-4">
-                {ownChallenge ? (
-                  <>
-                    <button onClick={() => void handleShowPast()} className={`self-end text-xs px-2.5 py-1.5 rounded font-bold shrink-0 ${BUTTON_STYLE.gray}`}>
-                      📜 Voir les défis passés
-                    </button>
-                    <PvpChallengeBanner
-                      challenge={ownChallenge}
-                      defenderPlayer={player}
-                      pokemonByName={pokemonByName}
-                      attempts={attemptsByChallenge.get(ownChallenge.id) ?? []}
-                      playersById={playersById}
-                      isOwn
-                      onPlay={() => {}}
-                      onWithdraw={() => void handleWithdraw(ownChallenge)}
-                    />
-                  </>
-                ) : (
+              <div className="flex flex-col gap-5">
+                <div className="flex flex-col gap-2">
+                  {config.champion_banner_url && (
+                    <GameBanner bannerUrl={config.champion_banner_url} fallbackEmoji="🏆" className="aspect-[21/5] rounded-[var(--radius-pixel-sm)] border-2 border-ink" />
+                  )}
+                  <h4 className="text-ink text-sm font-bold uppercase tracking-wide">🏆 Champion Actuel</h4>
+                  <PvpChampionBanner
+                    champion={championChallenge}
+                    championPlayer={championChallenge ? playersById.get(championChallenge.defender_player_id) : undefined}
+                    pokemonByName={pokemonByName}
+                    attempts={championChallenge ? attemptsByChallenge.get(championChallenge.id) ?? [] : []}
+                    playersById={playersById}
+                    isOwnChampion={isOwnChampion}
+                    viewerHasOwnChallenge={!!ownChallenge}
+                    onPlay={() => championChallenge && handlePlayChallenge(championChallenge)}
+                  />
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  {config.challengers_banner_url && (
+                    <GameBanner bannerUrl={config.challengers_banner_url} fallbackEmoji="⚔️" className="aspect-[21/5] rounded-[var(--radius-pixel-sm)] border-2 border-ink" />
+                  )}
                   <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setView('post-pick-pokemon')}
-                      className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-bold ${BUTTON_STYLE.green}`}
-                    >
-                      ⚔️ Poster mon pokémon en défi
-                    </button>
-                    <button onClick={() => void handleShowPast()} className={`text-xs px-2.5 py-2.5 rounded font-bold shrink-0 ${BUTTON_STYLE.gray}`}>
+                    <h4 className="text-ink text-sm font-bold uppercase tracking-wide flex-1">Challengers</h4>
+                    <button onClick={() => void handleShowPast()} className={`text-xs px-2.5 py-1.5 rounded font-bold shrink-0 ${BUTTON_STYLE.gray}`}>
                       📜 Voir les défis passés
                     </button>
                   </div>
-                )}
 
-                {challengesLoading ? (
-                  <p className="text-ink-muted-2 text-sm">Chargement…</p>
-                ) : otherChallenges.length === 0 ? (
-                  <p className="text-ink-muted-2 text-sm text-center py-4">Aucun autre défi posté pour le moment.</p>
-                ) : (
-                  otherChallenges.map((challenge) => (
-                    <PvpChallengeBanner
-                      key={challenge.id}
-                      challenge={challenge}
-                      defenderPlayer={playersById.get(challenge.defender_player_id)}
-                      pokemonByName={pokemonByName}
-                      attempts={attemptsByChallenge.get(challenge.id) ?? []}
-                      playersById={playersById}
-                      isOwn={false}
-                      onPlay={() => handlePlayChallenge(challenge)}
-                      onWithdraw={() => {}}
-                    />
-                  ))
-                )}
+                  <div className="flex flex-col gap-4">
+                    {isOwnChampion ? (
+                      <p className="text-ink-muted-2 text-sm text-center py-2 font-bold">
+                        👑 Vous êtes le Champion actuel — défendez votre titre !
+                      </p>
+                    ) : ownChallenge ? (
+                      <PvpChallengeBanner
+                        challenge={ownChallenge}
+                        defenderPlayer={player}
+                        pokemonByName={pokemonByName}
+                        attempts={attemptsByChallenge.get(ownChallenge.id) ?? []}
+                        playersById={playersById}
+                        isOwn
+                        onPlay={() => {}}
+                        onWithdraw={() => void handleWithdraw(ownChallenge)}
+                      />
+                    ) : (
+                      <button
+                        onClick={() => setView('post-pick-pokemon')}
+                        className={`px-4 py-2.5 rounded-lg text-sm font-bold ${BUTTON_STYLE.green}`}
+                      >
+                        ⚔️ Poster mon pokémon en défi
+                      </button>
+                    )}
+
+                    {challengesLoading ? (
+                      <p className="text-ink-muted-2 text-sm">Chargement…</p>
+                    ) : otherChallenges.length === 0 ? (
+                      <p className="text-ink-muted-2 text-sm text-center py-4">Aucun autre défi posté pour le moment.</p>
+                    ) : (
+                      otherChallenges.map((challenge) => (
+                        <PvpChallengeBanner
+                          key={challenge.id}
+                          challenge={challenge}
+                          defenderPlayer={playersById.get(challenge.defender_player_id)}
+                          pokemonByName={pokemonByName}
+                          attempts={attemptsByChallenge.get(challenge.id) ?? []}
+                          playersById={playersById}
+                          isOwn={false}
+                          onPlay={() => handlePlayChallenge(challenge)}
+                          onWithdraw={() => {}}
+                        />
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
             </>
           )}
@@ -390,7 +436,6 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
               pokemonByName={pokemonByName}
               attacksByName={attacksByName}
               abilityRulesByName={abilityRulesByName}
-              isAdmin={isAdmin}
               onBack={() => setView('post-pick-abilities')}
             />
           )}

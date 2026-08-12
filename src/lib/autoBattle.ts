@@ -166,7 +166,11 @@ export function describeAbilityRule(rule: AutoBattleAbilityRule | undefined, abi
   } else if (rule.heal_type === 'use_stats') {
     lines.push('Soigne selon ses propres dégâts')
   }
-  if (rule.heal_dot_amount && rule.heal_dot_duration_turns) {
+  if (rule.heal_dot_duration_turns && (rule.heal_dot_type === 'percent_max_hp') && rule.heal_dot_percent) {
+    lines.push(`Soigne ${rule.heal_dot_percent}% de ses PV max/tour pendant ${rule.heal_dot_duration_turns} tours`)
+  } else if (rule.heal_dot_duration_turns && rule.heal_dot_type === 'percent_damage' && rule.heal_dot_percent) {
+    lines.push(`Soigne ${rule.heal_dot_percent}% des dégâts infligés/tour pendant ${rule.heal_dot_duration_turns} tours`)
+  } else if (rule.heal_dot_amount && rule.heal_dot_duration_turns) {
     lines.push(`Soigne ${rule.heal_dot_amount} PV/tour pendant ${rule.heal_dot_duration_turns} tours`)
   }
   if (rule.cancel_heal_duration_turns) {

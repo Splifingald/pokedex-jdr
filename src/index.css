@@ -27,6 +27,30 @@
 :root {
   --pokedex-red: var(--color-shell);
   font-family: 'Jersey 25', system-ui, sans-serif;
+
+  /* Zones sûres (encoche / barre d'état / barre d'accueil).
+     Ces variables peuvent être écrasées au démarrage par safeArea.ts quand
+     iOS Safari renvoie 0 alors que la page passe bord à bord sous la barre
+     d'état (voir src/lib/safeArea.ts). */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Marge haute/basse pour les overlays plein écran (mobile uniquement : au-delà
+   de 640px ce sont des modales centrées qui gèrent déjà leur propre padding) */
+@utility safe-overlay {
+  @media (width < 640px) {
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+  }
+}
+
+@utility pt-safe {
+  padding-top: var(--safe-top);
+}
+
+@utility pb-safe {
+  padding-bottom: var(--safe-bottom);
 }
 
 /* Échelle globale du texte (~130%) : appliqué uniquement sur html pour éviter

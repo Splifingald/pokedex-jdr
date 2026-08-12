@@ -18,7 +18,6 @@ interface Props {
   pokemonByName: Map<string, Pokemon>
   attacksByName: Map<string, Attack>
   abilityRulesByName: Map<string, AutoBattleAbilityRule>
-  isAdmin?: boolean
   /** Quitter le test à tout moment (avant, pendant ou après le combat) — retourne à la sélection de capacités, celle-ci reste intacte côté parent (voir PvpPopup, `selected` y est contrôlé). */
   onBack: () => void
 }
@@ -37,13 +36,13 @@ const STATUS_MESSAGE: Record<string, string> = {
 // round) : 100% automatique des deux côtés une fois lancé (aucune capacité
 // choisie interactivement, contrairement à ManualBattleScreen) — ce
 // composant se contente de rappeler pvp_trial_resolve_round en boucle dès
-// que la main revient, à 2× la vitesse d'animation normale (voir
+// que la main revient, à 1.5× la vitesse d'animation normale (voir
 // speedMultiplier sur AutoBattleScreen), jusqu'à l'issue. Le bouton "Quitter"
 // reste visible à tout moment (avant/pendant/après le combat) — aucune
 // récompense, aucun écran de fin dédié, juste un retour à la sélection.
 export function PvpTrialBattleScreen({
   player, playerPokemon, playerSpecies, abilityNoms, dummyPokemonNom, dummyMaxHp, pokemonByName,
-  attacksByName, abilityRulesByName, isAdmin, onBack,
+  attacksByName, abilityRulesByName, onBack,
 }: Props) {
   const { showToast } = useToast()
   const [view, setView] = useState<View>('choose-start')
@@ -183,8 +182,13 @@ export function PvpTrialBattleScreen({
         onContinue={handleAnimationCaughtUp}
         hideContinueButton
         skipCountdown
-        speedMultiplier={2}
-        isAdmin={isAdmin}
+        speedMultiplier={1.5}
+        // Toujours vrai ici (indépendamment du vrai statut admin du joueur) :
+        // dans ce mode d'essai uniquement, tout le monde voit le détail
+        // habituellement réservé aux admins (précision effective, dégâts,
+        // soin...) dans l'historique des tours — utile pour affiner sa boucle
+        // avant de poser un défi réel.
+        isAdmin
         attacksByName={attacksByName}
         abilityRulesByName={abilityRulesByName}
       />

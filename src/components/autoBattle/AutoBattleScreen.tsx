@@ -292,14 +292,35 @@ export function AutoBattleScreen({
   const opponentShieldSeenPlayerTurnRef = useRef(false)
 
   // Précision effective affichée en debug admin — reproduit EXACTEMENT
-  // GREATEST(0, ability.precision - v_status_precision_penalty) côté
-  // serveur (voir autobattle_resolve_battle), donc clampée à 0 seulement
-  // (jamais un plancher artificiel à 1 : le serveur peut légitimement
-  // amener la précision à 0, auquel cas l'attaque rate toujours).
-  const getEffectivePrecision = (basePrecision: number, status: AutoBattleStatusEffect | null): { effective: number; modifier: number; statusLabel?: string } => {
-    const modifier = status ? (PRECISION_MODIFIER_BY_STATUS[status] ?? 0) : 0
-    const effective = Math.max(0, basePrecision + modifier)
-    return { effective, modifier, statusLabel: status && modifier !== 0 ? STATUS_EFFECT_LABEL[status] : undefined }
+  // GREATEST(0, ability.precision - v_status_precision_penalty +
+  // precision_mod_amount) côté serveur (voir autobattle_resolve_round_core/
+  // autobattle_resolve_battle), donc clampée à 0 seulement (jamais un
+  // plancher artificiel à 1 : le serveur peut légitimement amener la
+  // précision à 0, auquel cas l'attaque rate toujours). precisionModAmount
+  // = turn.precision_mod_amount, déjà signé (buff positif / debuff négatif),
+  // voir AutoBattleAbilityRule.stat_mod_stat = 'precision'.
+  const getEffectivePrecision = (
+    basePrecision: number,
+    status: AutoBattleStatusEffect | null,
+    precisionModAmount: number
+  ): { effective: number; statusModifier: number; statusLabel?: string; precisionModAmount: number } => {
+    const statusModifier = status ? (PRECISION_MODIFIER_BY_STATUS[status] ?? 0) : 0
+    const effective = Math.max(0, basePrecision + statusModifier + precisionModAmount)
+    return { effective, statusModifier, statusLabel: status && statusModifier !== 0 ? STATUS_EFFECT_LABEL[status] : undefined, precisionModAmount }
+  }
+
+  // Détail complet du calcul de précision en admin, même esprit que
+  // damageFormula plus bas ("X (base) - Y (statut) + Z (buff) = total").
+  const buildPrecisionFormula = (basePrecision: number, info: ReturnType<typeof getEffectivePrecision>): string => {
+    let formula = `${basePrecision} (précision de base)`
+    if (info.statusModifier !== 0) {
+      formula += ` ${info.statusModifier > 0 ? '+' : '-'} ${Math.abs(info.statusModifier)} (${info.statusLabel})`
+    }
+    if (info.precisionModAmount !== 0) {
+      formula += ` ${info.precisionModAmount > 0 ? '+' : '-'} ${Math.abs(info.precisionModAmount)} (${info.precisionModAmount > 0 ? 'buff' : 'debuff'})`
+    }
+    formula += ` = ${info.effective}/10`
+    return formula
   }
 
   // Compte à rebours 3…2…1…GO ! avant le premier coup, même idiome que
@@ -364,7 +385,7 @@ export function AutoBattleScreen({
     const pushHistory = (
       side: Side,
       content: string | { before: string; status: AutoBattleStatusEffect; after: string },
-      extra?: { damage?: number; heal?: number; superEffective?: boolean; basePrecision?: number; effectivePrecision?: number; precisionStatus?: string; damageFormula?: string; healFormula?: string }
+      extra?: { damage?: number; heal?: number; superEffective?: boolean; precisionFormula?: string; damageFormula?: string; healFormula?: string }
     ) => {
       const info = sideInfo(side)
       historyIdRef.current += 1
@@ -378,9 +399,7 @@ export function AutoBattleScreen({
         damage: extra?.damage && extra.damage > 0 ? extra.damage : undefined,
         heal: extra?.heal && extra.heal > 0 ? extra.heal : undefined,
         superEffective: extra?.superEffective,
-        debugBasePrecision: extra?.basePrecision,
-        debugEffectivePrecision: extra?.effectivePrecision,
-        debugPrecisionStatus: extra?.precisionStatus,
+        debugPrecisionFormula: extra?.precisionFormula,
         debugDamageFormula: extra?.damageFormula,
         debugHealFormula: extra?.healFormula,
       }
@@ -622,12 +641,10 @@ export function AutoBattleScreen({
           const abilityNom = turn.ability_nom ?? (attackerSide === 'player' ? playerAbilityNom : opponentAbilityNom)
           const ability = attacksByName?.get(abilityNom)
           const basePrecision = ability?.precision ?? 10
-          const precisionInfo = isAdmin ? getEffectivePrecision(basePrecision, attackerPrecisionStatus) : null
+          const precisionInfo = isAdmin ? getEffectivePrecision(basePrecision, attackerPrecisionStatus, turn.precision_mod_amount ?? 0) : null
 
           pushHistory(attackerSide, `a manqué son attaque ${sideInfo(attackerSide, turn).ability}`, {
-            basePrecision: isAdmin ? basePrecision : undefined,
-            effectivePrecision: isAdmin ? precisionInfo?.effective : undefined,
-            precisionStatus: isAdmin ? precisionInfo?.statusLabel : undefined,
+            precisionFormula: isAdmin && precisionInfo ? buildPrecisionFormula(basePrecision, precisionInfo) : undefined,
           })
           // Peur/confusion : cette attaque ratée (ou non) est précisément
           // celle sous l'effet révélé par le tick précédent (turns[i-1]) —
@@ -660,7 +677,8 @@ export function AutoBattleScreen({
         const abilityNom = turn.ability_nom ?? (attackerSide === 'player' ? playerAbilityNom : opponentAbilityNom)
         const ability = attacksByName?.get(abilityNom)
         const basePrecision = ability?.precision ?? 10
-        const precisionInfo = isAdmin ? getEffectivePrecision(basePrecision, attackerPrecisionStatus) : null
+        const precisionInfo = isAdmin ? getEffectivePrecision(basePrecision, attackerPrecisionStatus, turn.precision_mod_amount ?? 0) : null
+        const precisionFormula = isAdmin && precisionInfo ? buildPrecisionFormula(basePrecision, precisionInfo) : undefined
 
         // Détail complet du calcul de dégâts/soin en admin — voir
         // AutoBattleTurn.damage_species_xp/damage_dice (fournis PAR TOUR par
@@ -720,9 +738,7 @@ export function AutoBattleScreen({
           damage: turn.damage,
           heal: turn.heal,
           superEffective: isSuperEffective,
-          basePrecision: isAdmin ? basePrecision : undefined,
-          effectivePrecision: isAdmin ? precisionInfo?.effective : undefined,
-          precisionStatus: isAdmin ? precisionInfo?.statusLabel : undefined,
+          precisionFormula,
           damageFormula,
           healFormula,
         })

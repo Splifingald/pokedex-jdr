@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
-import type { Pokemon, Attack, PlayerPokemon } from '../types'
+import type { Pokemon, Attack, PlayerPokemon, PokemonEvolution } from '../types'
 import { Chip } from './Chip'
 import { TypeBadge } from './TypeBadge'
 import { DiscoveryModal } from './DiscoveryModal'
@@ -22,6 +22,8 @@ interface Props {
   discovered: Set<string>
   isAdmin: boolean
   attacksByName: Map<string, Attack>
+  pokemonByName: Map<string, Pokemon>
+  evolutionsByPokemonNom: Map<string, PokemonEvolution[]>
   roster: PlayerPokemon[]
   teamFull: boolean
   canAddToRoster: boolean
@@ -43,6 +45,8 @@ export function PokedexTab({
   discovered,
   isAdmin,
   attacksByName,
+  pokemonByName,
+  evolutionsByPokemonNom,
   roster,
   teamFull,
   canAddToRoster,
@@ -318,6 +322,8 @@ export function PokedexTab({
           context="pokedex"
           pokemon={syncedSelected}
           attacksByName={attacksByName}
+          pokemonByName={pokemonByName}
+          evolutionsByPokemonNom={evolutionsByPokemonNom}
           isAdmin={isAdmin}
           isDiscovered={discovered.has(syncedSelected.nom)}
           teamFull={teamFull}

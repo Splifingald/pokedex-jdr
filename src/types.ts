@@ -938,6 +938,12 @@ export interface AutoBattleBannedAttack {
 // texte "Préparation") puis s'utilise normalement au 2e.
 export type AutoBattleTurnEffect = 'skip' | 'play_twice' | 'play_three' | 'play_random' | 'repeat_until_fail' | 'prepare_release'
 export type AutoBattleHealType = 'static' | 'percent_damage' | 'use_stats'
+// Type de montant du soin passif (heal_dot, voir heal_dot_amount/heal_dot_percent
+// ci-dessous) : 'flat' (ou NULL, valeur historique) = montant fixe par tour ;
+// 'percent_max_hp' = % des PV MAX de son utilisateur ; 'percent_damage' = % des
+// dégâts infligés par le coup qui a accordé l'effet. Résolu en un entier fixe
+// une seule fois à l'octroi, jamais recalculé à chaque tick.
+export type AutoBattleHealDotType = 'flat' | 'percent_max_hp' | 'percent_damage'
 // paralysis/frozen : passe le prochain tour, une seule fois. fear/confusion :
 // précision réduite de 3/5 au prochain tour, une seule fois. sleep : passe
 // son tour tant qu'un dé à 6 faces ne tombe pas sur 4/5/6 (relancé à chaque
@@ -1022,12 +1028,18 @@ export interface AutoBattleAbilityRule {
   stat_mod_duration_turns: number | null
   stat_mod_max_uses: number | null
   // Soin passif ("heal over time") : accordé à son utilisateur sur un coup
-  // réussi, tick de heal_dot_amount PV à chaque début de son propre tour
-  // pendant heal_dot_duration_turns tours de combat (compteur global, comme
+  // réussi, tick à chaque début de son propre tour pendant
+  // heal_dot_duration_turns tours de combat (compteur global, comme
   // stat_mod_duration_turns) — indépendant du soin instantané (heal_type
   // ci-dessus), les deux peuvent coexister sur la même capacité. Bloqué par
   // un Anti-Soin adverse actif (cancel_heal_duration_turns), voir plus bas.
+  // heal_dot_type = 'flat' (ou NULL) : heal_dot_amount PV par tour, fixe.
+  // heal_dot_type = 'percent_max_hp'/'percent_damage' : heal_dot_percent %
+  // (des PV max, ou des dégâts infligés par le coup qui a accordé l'effet) —
+  // dans ce cas heal_dot_amount reste NULL, voir AutoBattleHealDotType.
+  heal_dot_type: AutoBattleHealDotType | null
   heal_dot_amount: number | null
+  heal_dot_percent: number | null
   heal_dot_duration_turns: number | null
   // Anti-Soin : sur un coup réussi, annule TOUS les effets de soin de
   // l'adversaire (heal_type instantané, heal_dot, guérison du poison par un
@@ -1080,6 +1092,8 @@ export interface AutoBattleTurn {
   missed?: boolean
   invulnerable_miss?: boolean
   invulnerable_granted?: boolean
+  /** Modificateur de précision (buff/debuff, voir AutoBattleAbilityRule.stat_mod_stat = 'precision') actif sur l'ATTAQUANT au moment de ce tour — déjà signé (négatif = malus), 0 si aucun actif. Absent sur les coups où la précision n'entre pas en jeu (statuts, invulnérabilité...). Permet de reconstruire le détail complet en debug admin (voir AutoBattleScreen), au même titre que damage_species_xp pour les dégâts. */
+  precision_mod_amount?: number
   heal?: number
   recoil?: number
   attacker_hp_after?: number
@@ -1244,6 +1258,11 @@ export interface PvpConfig {
   trial_pokemon_nom: string
   trial_hp: number
   trial_ability_nom: string
+  // Bannières décoratives optionnelles (image via URL, voir GameBanner) au-
+  // dessus des titres "Champion Actuel"/"Challengers" dans le popup — vide
+  // par défaut, purement cosmétique.
+  champion_banner_url: string
+  challengers_banner_url: string
 }
 
 // Un défi = un instantané FIGÉ (espèce + PV/dégâts dérivés de l'XP au moment
@@ -1265,6 +1284,12 @@ export interface PvpChallenge {
   active: boolean
   withdrawn_at: string | null
   created_at: string
+  // Titre de Champion (voir pvp_promote_to_champion) : au plus un défi actif
+  // à la fois porte is_champion = true — une promotion crée TOUJOURS une
+  // NOUVELLE ligne (jamais un flip en place, voir schema.sql), donc
+  // created_at sert directement de "Champion depuis" côté client (voir
+  // PvpChampionBanner).
+  is_champion: boolean
 }
 
 // Une ligne par tentative résolue (gagnée ou perdue) — le tableau des scores
@@ -1285,7 +1310,7 @@ export interface PvpChallengeAttempt {
   created_at: string
 }
 
-export type PvpPostChallengeStatus = 'ok' | 'invalid_abilities' | 'ineligible_pokemon'
+export type PvpPostChallengeStatus = 'ok' | 'invalid_abilities' | 'ineligible_pokemon' | 'already_champion'
 export interface PvpPostChallengeResult {
   status: PvpPostChallengeStatus
   challenge_id?: number
@@ -1293,7 +1318,7 @@ export interface PvpPostChallengeResult {
 
 export type PvpWithdrawChallengeStatus = 'ok' | 'not_found' | 'not_owner' | 'already_withdrawn'
 
-export type PvpStartBattleStatus = 'ok' | 'not_found' | 'challenge_inactive' | 'own_challenge' | 'ineligible_pokemon'
+export type PvpStartBattleStatus = 'ok' | 'not_found' | 'challenge_inactive' | 'own_challenge' | 'ineligible_pokemon' | 'champion_requires_own_challenge'
 export interface PvpStartBattleResult {
   status: PvpStartBattleStatus
   first_attacker?: 'player' | 'opponent'
@@ -1484,6 +1509,7 @@ export type HistoryActionType =
   | 'pvp_challenge_withdrawn' // défi PvP retiré
   | 'pvp_attempt_win'   // tentative PvP remportée
   | 'pvp_attempt_lose'  // tentative PvP perdue
+  | 'pvp_champion_crowned' // devient le nouveau Champion PvP (dépossède l'ancien)
 
 // Sur une ligne brute en base, `delta` est signé (négatif pour un retrait).
 // Le regroupement à la lecture (src/lib/historyGrouping.ts) le normalise en
