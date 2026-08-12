@@ -10,6 +10,7 @@ import { usePlayerPokemon } from '../hooks/usePlayerPokemon'
 import { useTrades } from '../hooks/useTrades'
 import type { Player, Trade } from '../types'
 import { tradeFallbackText, tradeStatusLabel } from '../lib/trade'
+import { findMentionedPlayers } from '../lib/chatMentions'
 import { PlayerSearchInput } from './PlayerSearchInput'
 import { ConfirmPopup } from './ConfirmPopup'
 import { TradePopup } from './chat/TradePopup'
@@ -66,6 +67,16 @@ export function AdminChatPanel() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ messageId: message.id, senderPlayerId: npc.id }),
         }).catch((err) => console.error("Erreur lors de l'envoi de la notification :", err))
+      }
+      if (message) {
+        const mentioned = findMentionedPlayers(trimmed, players)
+        if (mentioned.length > 0) {
+          await fetch('/.netlify/functions/send-mention-notification', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ senderPlayerId: npc.id, mentionedPlayerIds: mentioned.map((p) => p.id) }),
+          }).catch((err) => console.error("Erreur lors de l'envoi de la notification de mention :", err))
+        }
       }
       setText('')
       setNpc(null)

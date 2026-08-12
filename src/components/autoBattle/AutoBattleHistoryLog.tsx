@@ -23,6 +23,10 @@ export interface AutoBattleHistoryEntryData {
   debugDiceRoll?: number
   /** Debug info: status effect affecting precision if any, used in admin mode */
   debugPrecisionStatus?: string
+  /** Debug info: full breakdown of the damage calculation (e.g. "10 (dégâts de base) x2 (super efficace) + 4 (dégâts de la capacité) + 4 (dé) = 28"), used in admin mode */
+  debugDamageFormula?: string
+  /** Debug info: full breakdown of the heal calculation, used in admin mode */
+  debugHealFormula?: string
 }
 
 function formatElapsed(ms: number): string {
@@ -92,6 +96,12 @@ export function AutoBattleHistoryLog({ entries, onHide, className = '', isAdmin 
                     )}
                     {e.debugDiceRoll != null && `🎲 Dé: ${e.debugDiceRoll}`}
                   </div>
+                )}
+                {isAdmin && e.debugDamageFormula && (
+                  <div className="text-ink-muted text-xs leading-snug mt-0.5">⚔️ {e.debugDamageFormula}</div>
+                )}
+                {isAdmin && e.debugHealFormula && (
+                  <div className="text-ink-muted text-xs leading-snug mt-0.5">💚 {e.debugHealFormula}</div>
                 )}
                 <p className="text-ink-muted-2 text-[10px]">{formatElapsed(e.elapsedMs)}</p>
               </div>

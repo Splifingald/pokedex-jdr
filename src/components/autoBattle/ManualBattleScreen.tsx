@@ -10,6 +10,8 @@ interface Props {
   opponentSpecies: Pokemon | undefined
   opponentNom: string
   opponentMaxHp: number
+  /** Qui attaque en premier CE combat (tiré au sort par autobattle_start_manual_battle, révélé au joueur via AutoBattleCoinToss AVANT le montage de cet écran, voir AutoBattlePopup) — fixe pour tout le combat, sert uniquement à afficher "(1er)"/"(2ème)" sur l'invite de sélection. */
+  firstAttacker: 'player' | 'opponent'
   attacksByName: Map<string, Attack>
   abilityRulesByName: Map<string, AutoBattleAbilityRule>
   bannedAttacks: Set<string>
@@ -30,9 +32,12 @@ interface Props {
 // sous le visuel, au-dessus de l'historique — requirement) est injectée via
 // AutoBattleScreen.midSlot ; hideContinueButton fait que c'est CET écran,
 // pas un clic joueur, qui décide de la suite une fois l'animation d'un tour
-// terminée (voir handleAnimationCaughtUp).
+// terminée (voir handleAnimationCaughtUp). Le tirage au sort "qui attaque en
+// premier" est joué AVANT le montage de cet écran (voir AutoBattlePopup —
+// autobattle_start_manual_battle décide first_attacker dès le choix du
+// pokémon, plus besoin de le différer ici jusqu'au 1er tour).
 export function ManualBattleScreen({
-  playerPokemon, playerSpecies, playerMaxHp, opponentSpecies, opponentNom, opponentMaxHp,
+  playerPokemon, playerSpecies, playerMaxHp, opponentSpecies, opponentNom, opponentMaxHp, firstAttacker,
   attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, isAdmin, onSubmitRound, onFinished,
 }: Props) {
   const [turns, setTurns] = useState<AutoBattleTurn[]>([])
@@ -142,7 +147,9 @@ export function ManualBattleScreen({
           {autoPlayAbility ? (
             <p className="text-ink text-sm font-bold text-center">Partie Automatique, une seule capacité possible</p>
           ) : !busy && !forcedAbility && (
-            <p className="text-ink text-sm font-bold text-center">Sélectionne la capacité à utiliser</p>
+            <p className="text-ink text-sm font-bold text-center">
+              Sélectionne la capacité à utiliser {firstAttacker === 'player' ? '(1er)' : '(2ème)'}
+            </p>
           )}
           <ManualBattleAbilityGrid
             playerPokemon={playerPokemon}

@@ -112,6 +112,10 @@ export interface Attack {
   // titre que le reste de l'attaque — voir AutoBattleStatusEffect plus bas.
   status_effect: AutoBattleStatusEffect | null
   status_chance: number | null
+  // Capacités non-offensives (soin pur, buff pur, statut sur soi...) :
+  // n'infligent AUCUN dégât (même passif espèce+XP) quand utilisées en
+  // Combat Auto/Manuel — importé depuis le CSV (colonne "Inflige dégâts").
+  deals_damage: boolean
 }
 
 export interface AttackCsvRow {
@@ -126,6 +130,7 @@ export interface AttackCsvRow {
   'Effet': string
   'Mini-game status': string
   'Status probability': string
+  'Inflige dégâts': string
 }
 
 export const ATTACK_CSV_REQUIRED_HEADERS: (keyof AttackCsvRow)[] = ['Attaque', 'Type']
@@ -1059,6 +1064,12 @@ export interface AutoBattleTurn {
   turn: number
   attacker: 'player' | 'opponent'
   damage: number
+  /** damage AVANT le dé (espèce + bonus XP + multiplicateur type + dégâts de base de la capacité) — fourni PAR TOUR, fiable en Combat Manuel où l'ability change à chaque round (contrairement à AutoBattleScreenProps.playerDamagePerHit/opponentDamagePerHit, figés pour tout le combat). Absent sur les coups ratés/statuts (non pertinent). */
+  damage_before_dice?: number
+  /** Composante espèce+XP seule, AVANT le multiplicateur de type — permet de reconstruire le détail complet du calcul en admin (ex. "10 (dégâts de base) x2 (super efficace) + 4 (dégâts de la capacité) + 4 (dé) = 28"), voir AutoBattleScreen. */
+  damage_species_xp?: number
+  /** Résultat du dé de dégâts (0 si la capacité n'en a pas) — distinct de damage_before_dice/damage pour isoler ce terme dans le détail du calcul. */
+  damage_dice?: number
   defender_hp_after: number
   ko: boolean
   skipped?: boolean
@@ -1158,7 +1169,18 @@ export interface AutoBattleResolveResult {
   opponent_ability_nom_override?: string | null
 }
 
-export type AutoBattleManualRoundStatus = AutoBattleResolveStatus | 'wrong_mode'
+export type AutoBattleManualRoundStatus = AutoBattleResolveStatus | 'wrong_mode' | 'not_started'
+
+// Réponse du RPC autobattle_start_manual_battle (voir supabase/schema.sql) —
+// crée la ligne autobattle_manual_battles et tire au sort first_attacker
+// AVANT que le joueur choisisse sa 1ère capacité, pour permettre d'afficher
+// le tirage au sort (AutoBattleCoinToss) juste après le choix du pokémon —
+// ne débite PAS de ticket (voir autobattle_resolve_manual_round, qui s'en
+// charge au 1er tour réellement joué).
+export interface AutoBattleStartManualBattleResult {
+  status: AutoBattleManualRoundStatus
+  first_attacker?: 'player' | 'opponent'
+}
 
 // Réponse du RPC autobattle_resolve_manual_round (voir supabase/schema.sql) —
 // résout UN SEUL tour (voir AutoBattleTurn) — mais un "tour" y couvre un

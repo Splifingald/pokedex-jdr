@@ -352,7 +352,7 @@ export function AutoBattleScreen({
     const pushHistory = (
       side: Side,
       content: string | { before: string; status: AutoBattleStatusEffect; after: string },
-      extra?: { damage?: number; heal?: number; superEffective?: boolean; basePrecision?: number; effectivePrecision?: number; diceRoll?: number; precisionStatus?: string }
+      extra?: { damage?: number; heal?: number; superEffective?: boolean; basePrecision?: number; effectivePrecision?: number; diceRoll?: number; precisionStatus?: string; damageFormula?: string; healFormula?: string }
     ) => {
       const info = sideInfo(side)
       historyIdRef.current += 1
@@ -370,6 +370,8 @@ export function AutoBattleScreen({
         debugEffectivePrecision: extra?.effectivePrecision,
         debugDiceRoll: extra?.diceRoll,
         debugPrecisionStatus: extra?.precisionStatus,
+        debugDamageFormula: extra?.damageFormula,
+        debugHealFormula: extra?.healFormula,
       }
       setHistoryEntries((prev) => [entry, ...prev])
     }
@@ -614,11 +616,14 @@ export function AutoBattleScreen({
         if (hitSide === 'player') setPlayerHp(turn.defender_hp_after)
         else setOpponentHp(turn.defender_hp_after)
         setShakeSide(hitSide)
-        setFlashSide(hitSide)
+        // Pas de flash rouge pour un coup à 0 dégât (capacité non-offensive,
+        // voir attacks.deals_damage) — rien n'a été touché, l'effet visuel
+        // d'impact n'a pas de sens.
+        if (turn.damage > 0) setFlashSide(hitSide)
         setLastDamage({ side: hitSide, damage: turn.damage, superEffective: isSuperEffective })
         setHitKey((k) => k + 1)
         window.setTimeout(() => setShakeSide(null), SHAKE_MS)
-        window.setTimeout(() => setFlashSide(null), FLASH_MS)
+        if (turn.damage > 0) window.setTimeout(() => setFlashSide(null), FLASH_MS)
 
         const abilityNom = turn.ability_nom ?? (attackerSide === 'player' ? playerAbilityNom : opponentAbilityNom)
         const ability = attacksByName?.get(abilityNom)
@@ -626,15 +631,68 @@ export function AutoBattleScreen({
         const precisionInfo = isAdmin ? getEffectivePrecision(basePrecision, attackerPrecisionStatus) : null
         // damagePerHit = tout ce qui compose turn.damage AVANT le dé (espèce +
         // XP + multiplicateur type + degats_base de la capacité, voir
-        // autobattle_resolve_battle v_player_damage/v_opponent_damage) —
-        // fourni tel quel par le serveur, jamais recalculé côté client
-        // (contrairement à ability.degats_base seul, qui omettait la
-        // composante espèce/XP/type et donnait une valeur de dé fausse). Non
-        // fiable en Combat Manuel (la capacité change à chaque tour, ce total
-        // ne correspond qu'à celle du tour où le combat a commencé) — le dé
-        // debug admin y est donc simplement masqué (voir diceValue ci-dessous).
-        const damagePerHit = turn.ability_nom ? undefined : (attackerSide === 'player' ? playerDamagePerHit : opponentDamagePerHit)
+        // autobattle_resolve_battle/autobattle_resolve_manual_round
+        // v_player_damage/v_opponent_damage). Préfère turn.damage_before_dice
+        // (fourni PAR TOUR par le serveur, voir AutoBattleTurn) quand présent
+        // — seul moyen fiable en Combat Manuel, où la capacité change à
+        // chaque tour et rend les props playerDamagePerHit/opponentDamagePerHit
+        // (figées pour tout le combat, Combat Auto uniquement) inutilisables.
+        const damagePerHit = turn.damage_before_dice ?? (turn.ability_nom ? undefined : (attackerSide === 'player' ? playerDamagePerHit : opponentDamagePerHit))
         const diceValue = isAdmin && damagePerHit != null ? turn.damage - damagePerHit : undefined
+
+        // Détail complet du calcul de dégâts/soin en admin — voir
+        // AutoBattleTurn.damage_species_xp/damage_dice (fournis PAR TOUR par
+        // le serveur, mêmes composantes que v_player_damage/v_opponent_damage
+        // — voir autobattle_resolve_battle/autobattle_resolve_manual_round).
+        // "additionnel" regroupe TOUT ce qui n'est ni la base ni le dé
+        // (modificateur de stat, dégâts additionnels conditionnels...) —
+        // volontairement pas détaillé, juste le delta constaté.
+        const rule = abilityRulesByName?.get(abilityNom)
+        let damageFormula: string | undefined
+        if (isAdmin && ability?.deals_damage !== false) {
+          if (turn.percent_hp_damage) {
+            const percent = rule?.percent_hp_damage_percent
+            if (percent != null) {
+              const hpBefore = turn.defender_hp_after + turn.damage
+              const computed = Math.floor(hpBefore * percent / 100)
+              const extra = turn.damage - computed
+              damageFormula = `${percent}% des PV restants de la cible (${hpBefore})`
+              if (extra !== 0) damageFormula += ` ${extra > 0 ? '+' : '-'} ${Math.abs(extra)} (additionnel)`
+              damageFormula += ` = ${turn.damage}`
+            }
+          } else if (turn.damage_species_xp != null && turn.damage_dice != null) {
+            const speciesXp = turn.damage_species_xp
+            const abilityBase = ability?.degats_base ?? 0
+            const dice = turn.damage_dice
+            const typeMult = isSuperEffective ? 2 : 1
+            const extra = turn.damage - (speciesXp * typeMult + abilityBase + dice)
+            damageFormula = `${speciesXp} (dégâts de base)`
+            if (typeMult > 1) damageFormula += ` x${typeMult} (super efficace)`
+            damageFormula += ` + ${abilityBase} (dégâts de la capacité)`
+            if (dice > 0) damageFormula += ` + ${dice} (dé)`
+            if (extra !== 0) damageFormula += ` ${extra > 0 ? '+' : '-'} ${Math.abs(extra)} (additionnel)`
+            damageFormula += ` = ${turn.damage}`
+          }
+        }
+
+        let healFormula: string | undefined
+        if (isAdmin && turn.heal != null && turn.heal > 0) {
+          if (rule?.heal_type === 'static') {
+            healFormula = `${rule.heal_amount ?? turn.heal} (montant fixe) = ${turn.heal}`
+          } else if (rule?.heal_type === 'percent_damage' && rule.heal_percent != null) {
+            healFormula = `${rule.heal_percent}% des dégâts infligés (${turn.damage}) = ${turn.heal}`
+          } else if (rule?.heal_type === 'use_stats' && turn.damage_species_xp != null) {
+            const speciesXp = turn.damage_species_xp
+            const abilityBase = ability?.degats_base ?? 0
+            const typeMult = isSuperEffective ? 2 : 1
+            const healDice = turn.heal - speciesXp * typeMult - abilityBase
+            healFormula = `${speciesXp} (dégâts de base)`
+            if (typeMult > 1) healFormula += ` x${typeMult} (super efficace)`
+            healFormula += ` + ${abilityBase} (dégâts de la capacité)`
+            if (healDice > 0) healFormula += ` + ${healDice} (dé)`
+            healFormula += ` = ${turn.heal}`
+          }
+        }
 
         pushHistory(attackerSide, `a utilisé ${sideInfo(attackerSide, turn).ability}`, {
           damage: turn.damage,
@@ -644,6 +702,8 @@ export function AutoBattleScreen({
           effectivePrecision: isAdmin ? precisionInfo?.effective : undefined,
           diceRoll: diceValue,
           precisionStatus: isAdmin ? precisionInfo?.statusLabel : undefined,
+          damageFormula,
+          healFormula,
         })
 
         // Peur/confusion : même principe que côté raté ci-dessus — cette
@@ -782,7 +842,7 @@ export function AutoBattleScreen({
             {flashSide === 'player' && (
               <div className="absolute inset-0 bg-hp-red rounded-full pointer-events-none" style={{ animation: `hit-flash ${FLASH_MS}ms ease-out` }} />
             )}
-            {lastDamage?.side === 'player' && (
+            {lastDamage?.side === 'player' && lastDamage.damage > 0 && (
               <AutoBattleDamageNumber damage={lastDamage.damage} animKey={hitKey} superEffective={lastDamage.superEffective} color={lastDamage.color} />
             )}
             {recoilFx?.side === 'player' && (
@@ -842,7 +902,7 @@ export function AutoBattleScreen({
             {flashSide === 'opponent' && (
               <div className="absolute inset-0 bg-hp-red rounded-full pointer-events-none" style={{ animation: `hit-flash ${FLASH_MS}ms ease-out` }} />
             )}
-            {lastDamage?.side === 'opponent' && (
+            {lastDamage?.side === 'opponent' && lastDamage.damage > 0 && (
               <AutoBattleDamageNumber damage={lastDamage.damage} animKey={hitKey} superEffective={lastDamage.superEffective} color={lastDamage.color} />
             )}
             {recoilFx?.side === 'opponent' && (

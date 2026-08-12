@@ -2750,6 +2750,12 @@ ALTER TABLE attacks ADD CONSTRAINT attacks_status_effect_check
 ALTER TABLE attacks DROP CONSTRAINT IF EXISTS attacks_status_chance_check;
 ALTER TABLE attacks ADD CONSTRAINT attacks_status_chance_check
   CHECK (status_effect IS NULL OR (status_chance IS NOT NULL AND status_chance >= 0 AND status_chance <= 100));
+-- Certaines capacités ne sont pas offensives du tout (soin pur, buff pur,
+-- statut sur soi...) et ne doivent infliger AUCUN dégât, même passif (espèce
+-- + XP du pokémon), quand elles sont utilisées — importé depuis le CSV des
+-- attaques (colonne "Inflige dégâts", vrai/faux) au même titre que le reste
+-- de la capacité, voir autobattle_resolve_battle/autobattle_resolve_manual_round.
+ALTER TABLE attacks ADD COLUMN IF NOT EXISTS deals_damage boolean NOT NULL DEFAULT true;
 -- Si autobattle_ability_rules existe déjà (migration précédente déjà appliquée) :
 ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS repeat_max_iterations integer;
 ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_turn_effect_check;
@@ -3173,6 +3179,11 @@ DECLARE
   v_stat_mod_expiry    integer;
   v_player_damage_original   integer;
   v_opponent_damage_original integer;
+  -- Composante espèce+XP seule (AVANT le multiplicateur de type), exposée
+  -- séparément dans le journal des tours (voir 'damage_species_xp' plus bas)
+  -- pour reconstruire le détail du calcul en admin (10 × 2 + 4 + dé...).
+  v_player_damage_species_xp   integer;
+  v_opponent_damage_species_xp integer;
   -- Soin passif (heal_dot) et Anti-Soin (cancel_heal) — voir
   -- autobattle_ability_rules. Config chargée une fois (côté source), état
   -- actif suivi séparément (côté affecté), même logique d'expiration par
@@ -3329,6 +3340,11 @@ BEGIN
   -- Métamorph est remplacé par celui de l'AUTRE camp le cas échéant.
   v_player_base_damage_component := CASE WHEN v_is_metamorph THEN v_level.opponent_base_damage ELSE v_player_species.degats_base END;
   v_opponent_base_damage_component := CASE WHEN v_is_opponent_metamorph THEN v_player_base_damage_component ELSE v_level.opponent_base_damage END;
+  -- Super efficace : en plus de la table de types (ci-dessous), la capacité
+  -- utilisée doit être du MÊME type que le pokémon qui l'utilise — un
+  -- pokémon peut apprendre des capacités d'autres types, mais celles-ci ne
+  -- profitent jamais du bonus super efficace, seulement celles qui
+  -- correspondent à son propre type (voir requirement).
   v_player_type_bonus := EXISTS (
     SELECT 1 FROM (VALUES
       (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_1 ELSE v_player_species.super_efficace_1 END),
@@ -3336,7 +3352,7 @@ BEGIN
       (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_3 ELSE v_player_species.super_efficace_3 END),
       (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_4 ELSE v_player_species.super_efficace_4 END)
     ) AS s(val) WHERE lower(trim(val)) = lower(trim(CASE WHEN v_is_opponent_metamorph THEN v_player_species.type ELSE v_opponent_species.type END))
-  );
+  ) AND lower(trim(v_ability.type)) = lower(trim(CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END));
   -- Dégâts de base (avant dé) : bonus de type inclus, jamais redoublé par le
   -- dé. Le dé (attacks.degats_de) est retiré au sort à CHAQUE coup dans la
   -- boucle ci-dessous (1..degats_de inclus), pas une seule fois pour tout le
@@ -3344,8 +3360,9 @@ BEGIN
   -- Métamorph part du dégât de BASE de l'adversaire (celui configuré pour ce
   -- niveau) plutôt que du sien, mais garde son propre bonus XP (l'XP reste
   -- une progression personnelle, pas quelque chose "copié").
-  v_player_damage := (COALESCE(v_player_base_damage_component, 0)
-    + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'DMG'))
+  v_player_damage_species_xp := COALESCE(v_player_base_damage_component, 0)
+    + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'DMG');
+  v_player_damage := v_player_damage_species_xp
     * (CASE WHEN v_player_type_bonus THEN 2 ELSE 1 END) + COALESCE(v_ability.degats_base, 0);
 
   v_opponent_type_bonus := EXISTS (
@@ -3355,8 +3372,9 @@ BEGIN
       (CASE WHEN v_is_opponent_metamorph THEN v_player_species.super_efficace_3 ELSE v_opponent_species.super_efficace_3 END),
       (CASE WHEN v_is_opponent_metamorph THEN v_player_species.super_efficace_4 ELSE v_opponent_species.super_efficace_4 END)
     ) AS s(val) WHERE lower(trim(val)) = lower(trim(CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END))
-  );
-  v_opponent_damage := COALESCE(v_opponent_base_damage_component, 0) * (CASE WHEN v_opponent_type_bonus THEN 2 ELSE 1 END)
+  ) AND lower(trim(v_opponent_ability.type)) = lower(trim(CASE WHEN v_is_opponent_metamorph THEN v_player_species.type ELSE v_opponent_species.type END));
+  v_opponent_damage_species_xp := COALESCE(v_opponent_base_damage_component, 0);
+  v_opponent_damage := v_opponent_damage_species_xp * (CASE WHEN v_opponent_type_bonus THEN 2 ELSE 1 END)
     + COALESCE(v_opponent_ability.degats_base, 0);
   -- Référence fixe pour tout le combat, utilisée par stat_mod_value_type =
   -- 'percent' (voir autobattle_ability_rules.stat_mod_percent) — jamais
@@ -3495,6 +3513,21 @@ BEGIN
     END IF;
     IF v_opponent_heal_disabled_expires IS NOT NULL AND v_turn_no > v_opponent_heal_disabled_expires THEN
       v_opponent_heal_disabled_expires := NULL;
+    END IF;
+
+    -- "A subi des dégâts au dernier tour adverse" (bonus_damage_condition
+    -- 'took_damage_last_turn') doit refléter EXACTEMENT le tour précédent de
+    -- l'attaquant adverse — pas un vieux coup réussi resté vrai depuis
+    -- plusieurs tours pendant que l'adversaire préparait/soignait/ratait
+    -- entretemps. Remis à faux ICI, à CHAQUE itération sans exception (avant
+    -- même de savoir si ce tour est raté/passé/statut/réussi), pour le camp
+    -- qui va agir ce tour-ci — seul le vrai coup réussi plus bas le repasse à
+    -- vrai le cas échéant ; un raté/tick de statut/tour passé le laisse à
+    -- faux, comme attendu.
+    IF v_attacker = 'player' THEN
+      v_opponent_took_damage := false;
+    ELSE
+      v_player_took_damage := false;
     END IF;
 
     IF v_block_remaining IS NULL THEN
@@ -3793,10 +3826,22 @@ BEGIN
     END IF;
 
     IF v_attacker = 'player' THEN
-      -- Invulnérabilité de l'adversaire (bouclier déjà retiré au début de
-      -- CE tour ci-dessus, voir v_opponent_invuln_pending_miss) : rate
-      -- automatiquement, ignore précision/statuts entièrement.
-      IF v_opponent_invuln_pending_miss THEN
+      -- Invulnérabilité de l'adversaire (bouclier déjà retiré au début de CE
+      -- tour ci-dessus, voir v_opponent_invuln_pending_miss) : rate
+      -- automatiquement, ignore précision/statuts entièrement — MAIS
+      -- seulement si la capacité jouée affecte réellement l'adversaire
+      -- (dégâts, statut qui lui est infligé, modificateur de stat qui le
+      -- cible, ou Anti-Soin posé sur lui) ; une capacité auto-ciblée (soin
+      -- sur soi, buff sur soi, invulnérabilité sur soi...) n'a rien à
+      -- bloquer et se résout normalement. Dure de toute façon EXACTEMENT 1
+      -- tour adverse : le flag est consommé ici dans les deux cas, qu'il ait
+      -- ou non effectivement bloqué quelque chose.
+      IF v_opponent_invuln_pending_miss AND (
+        v_ability.deals_damage
+        OR (v_ability.status_effect IS NOT NULL AND NOT v_player_status_reversed)
+        OR v_player_stat_mod_target = 'opponent'
+        OR v_player_cancel_heal_duration IS NOT NULL
+      ) THEN
         v_opponent_invuln_pending_miss := false;
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
           'turn', v_turn_no, 'attacker', 'player', 'damage', 0, 'missed', true, 'invulnerable_miss', true,
@@ -3806,6 +3851,7 @@ BEGIN
           v_block_remaining := 1;
         END IF;
       ELSE
+        v_opponent_invuln_pending_miss := false;
         v_missed := (NOT v_player_never_miss) AND
           random() >= ((CASE WHEN v_precision_enabled THEN GREATEST(0, COALESCE(v_ability.precision, 10) - v_status_precision_penalty + v_player_precision_mod_amount) ELSE 10 END * 10) / 100.0);
 
@@ -3821,42 +3867,52 @@ BEGIN
             v_block_remaining := 1;
           END IF;
         ELSE
-          v_hit_dice := CASE WHEN v_ability.degats_de IS NOT NULL AND v_ability.degats_de > 0
-            THEN 1 + floor(random() * v_ability.degats_de)::integer ELSE 0 END;
-          v_hit_damage := GREATEST(0, v_player_damage + v_hit_dice + v_player_damage_mod_amount);
+          -- Capacités non-offensives (attacks.deals_damage = false, voir CSV
+          -- "Inflige dégâts") : aucun dégât, même passif (espèce+XP du
+          -- pokémon) — les systèmes de modification de dégâts (% PV, bonus
+          -- conditionnels) ne s'appliquent donc pas non plus, ils n'auraient
+          -- rien à modifier.
+          IF v_ability.deals_damage THEN
+            v_hit_dice := CASE WHEN v_ability.degats_de IS NOT NULL AND v_ability.degats_de > 0
+              THEN 1 + floor(random() * v_ability.degats_de)::integer ELSE 0 END;
+            v_hit_damage := GREATEST(0, v_player_damage + v_hit_dice + v_player_damage_mod_amount);
 
-          -- Dégâts en % des PV restants (voir autobattle_ability_rules.
-          -- percent_hp_damage_percent) : remplace ENTIÈREMENT le calcul
-          -- ci-dessus, basé sur les PV ACTUELS de la cible avant ce coup —
-          -- les dégâts additionnels conditionnels/contre-coup/soin
-          -- s'appliquent ensuite normalement sur ce nouveau total.
-          v_percent_hp_damage_applied := v_player_percent_hp_damage_percent IS NOT NULL;
-          IF v_percent_hp_damage_applied THEN
-            v_hit_damage := GREATEST(0, floor(v_opponent_hp * v_player_percent_hp_damage_percent / 100.0)::integer);
-          END IF;
-
-          -- Dégâts additionnels conditionnels (voir bonus_damage_* et les 4
-          -- conditions possibles) — appliqués après le dé, avant le
-          -- contre-coup.
-          v_bonus_condition_met := v_player_bonus_condition = 'took_damage_last_turn' AND v_player_took_damage
-            OR v_player_bonus_condition = 'first_use' AND NOT v_player_used_ability
-            OR v_player_bonus_condition = 'dice_equals' AND v_hit_dice = v_player_bonus_dice_value
-            OR v_player_bonus_condition = 'has_status' AND v_player_status IS NOT NULL AND (v_player_bonus_status_filter IS NULL OR v_player_status = v_player_bonus_status_filter);
-          IF v_player_bonus_type IS NOT NULL AND v_bonus_condition_met THEN
-            IF v_player_bonus_type = 'multiply' THEN
-              v_hit_damage := floor(v_hit_damage * COALESCE(v_player_bonus_multiplier, 1))::integer;
-            ELSIF v_player_bonus_type = 'flat' THEN
-              v_hit_damage := v_hit_damage + COALESCE(v_player_bonus_flat, 0);
-            ELSIF v_player_bonus_type = 'range' THEN
-              v_hit_damage := v_hit_damage + (v_player_bonus_min + floor(random() * (v_player_bonus_max - v_player_bonus_min + 1))::integer);
+            -- Dégâts en % des PV restants (voir autobattle_ability_rules.
+            -- percent_hp_damage_percent) : remplace ENTIÈREMENT le calcul
+            -- ci-dessus, basé sur les PV ACTUELS de la cible avant ce coup —
+            -- les dégâts additionnels conditionnels/contre-coup/soin
+            -- s'appliquent ensuite normalement sur ce nouveau total.
+            v_percent_hp_damage_applied := v_player_percent_hp_damage_percent IS NOT NULL;
+            IF v_percent_hp_damage_applied THEN
+              v_hit_damage := GREATEST(0, floor(v_opponent_hp * v_player_percent_hp_damage_percent / 100.0)::integer);
             END IF;
-            v_hit_damage := GREATEST(0, v_hit_damage);
+
+            -- Dégâts additionnels conditionnels (voir bonus_damage_* et les 4
+            -- conditions possibles) — appliqués après le dé, avant le
+            -- contre-coup.
+            v_bonus_condition_met := v_player_bonus_condition = 'took_damage_last_turn' AND v_player_took_damage
+              OR v_player_bonus_condition = 'first_use' AND NOT v_player_used_ability
+              OR v_player_bonus_condition = 'dice_equals' AND v_hit_dice = v_player_bonus_dice_value
+              OR v_player_bonus_condition = 'has_status' AND v_opponent_status IS NOT NULL AND (v_player_bonus_status_filter IS NULL OR v_opponent_status = v_player_bonus_status_filter);
+            IF v_player_bonus_type IS NOT NULL AND v_bonus_condition_met THEN
+              IF v_player_bonus_type = 'multiply' THEN
+                v_hit_damage := floor(v_hit_damage * COALESCE(v_player_bonus_multiplier, 1))::integer;
+              ELSIF v_player_bonus_type = 'flat' THEN
+                v_hit_damage := v_hit_damage + COALESCE(v_player_bonus_flat, 0);
+              ELSIF v_player_bonus_type = 'range' THEN
+                v_hit_damage := v_hit_damage + (v_player_bonus_min + floor(random() * (v_player_bonus_max - v_player_bonus_min + 1))::integer);
+              END IF;
+              v_hit_damage := GREATEST(0, v_hit_damage);
+            END IF;
+          ELSE
+            v_hit_dice := 0;
+            v_hit_damage := 0;
+            v_percent_hp_damage_applied := false;
           END IF;
           v_player_used_ability := true;
-          v_player_took_damage := false;
 
           v_opponent_hp := v_opponent_hp - v_hit_damage;
-          v_opponent_took_damage := true;
+          v_opponent_took_damage := v_hit_damage > 0;
 
           v_heal_amt := NULL;
           IF v_player_heal_type = 'static' THEN
@@ -3866,11 +3922,12 @@ BEGIN
           ELSIF v_player_heal_type = 'use_stats' THEN
             v_heal_dice := CASE WHEN v_ability.degats_de IS NOT NULL AND v_ability.degats_de > 0
               THEN 1 + floor(random() * v_ability.degats_de)::integer ELSE 0 END;
-            v_heal_amt := COALESCE(v_ability.degats_base, 0) + v_heal_dice;
+            v_heal_amt := v_player_damage_original + v_heal_dice;
           END IF;
 
           v_turn_entry := jsonb_build_object(
-            'turn', v_turn_no, 'attacker', 'player', 'damage', v_hit_damage,
+            'turn', v_turn_no, 'attacker', 'player', 'damage', v_hit_damage, 'damage_before_dice', v_player_damage,
+            'damage_species_xp', v_player_damage_species_xp, 'damage_dice', v_hit_dice,
             'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', v_opponent_hp <= 0
           );
           IF v_percent_hp_damage_applied THEN
@@ -3917,7 +3974,14 @@ BEGIN
                 ELSE 0
               END;
               v_stat_mod_amount := CASE WHEN v_player_stat_mod_target = 'opponent' THEN -abs(v_stat_mod_amount) ELSE abs(v_stat_mod_amount) END;
-              v_stat_mod_expiry := CASE WHEN v_player_stat_mod_duration_type = 'battle_end' THEN 999999 ELSE v_turn_no + COALESCE(v_player_stat_mod_duration_turns, 1) END;
+              -- v_turn_no avance de 1 à CHAQUE itération de boucle (joueur ET
+              -- adversaire confondus, voir plus haut), donc "1 tour" pour le
+              -- lanceur (son PROCHAIN tour, pas celui-ci — voir requirement)
+              -- correspond à 2 incréments de v_turn_no en alternance normale
+              -- (son tour de repli, puis le tour adverse, puis son tour
+              -- suivant) : d'où × 2 ci-dessous, plutôt qu'un simple + N qui
+              -- expirerait le bonus AVANT même d'avoir pu servir une fois.
+              v_stat_mod_expiry := CASE WHEN v_player_stat_mod_duration_type = 'battle_end' THEN 999999 ELSE v_turn_no + 2 * COALESCE(v_player_stat_mod_duration_turns, 1) END;
               IF v_player_stat_mod_target = 'self' AND v_player_stat_mod_stat = 'damage' THEN
                 v_player_damage_mod_amount := v_stat_mod_amount; v_player_damage_mod_expires := v_stat_mod_expiry;
               ELSIF v_player_stat_mod_target = 'self' AND v_player_stat_mod_stat = 'precision' THEN
@@ -3978,7 +4042,15 @@ BEGIN
         END IF;
       END IF;
     ELSE
-      IF v_player_invuln_pending_miss THEN
+      -- Voir la même remarque côté joueur ci-dessus : ne bloque que si cette
+      -- capacité affecte réellement le joueur, et consomme le flag (1 tour
+      -- adverse) dans les deux cas.
+      IF v_player_invuln_pending_miss AND (
+        v_opponent_ability.deals_damage
+        OR (v_opponent_ability.status_effect IS NOT NULL AND NOT v_opponent_status_reversed)
+        OR v_opponent_stat_mod_target = 'opponent'
+        OR v_opponent_cancel_heal_duration IS NOT NULL
+      ) THEN
         v_player_invuln_pending_miss := false;
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
           'turn', v_turn_no, 'attacker', 'opponent', 'damage', 0, 'missed', true, 'invulnerable_miss', true,
@@ -3988,6 +4060,7 @@ BEGIN
           v_block_remaining := 1;
         END IF;
       ELSE
+        v_player_invuln_pending_miss := false;
         v_missed := (NOT v_opponent_never_miss) AND
           random() >= ((CASE WHEN v_precision_enabled THEN GREATEST(0, COALESCE(v_opponent_ability.precision, 10) - v_status_precision_penalty + v_opponent_precision_mod_amount) ELSE 10 END * 10) / 100.0);
 
@@ -4000,34 +4073,41 @@ BEGIN
             v_block_remaining := 1;
           END IF;
         ELSE
-          v_hit_dice := CASE WHEN v_opponent_ability.degats_de IS NOT NULL AND v_opponent_ability.degats_de > 0
-            THEN 1 + floor(random() * v_opponent_ability.degats_de)::integer ELSE 0 END;
-          v_hit_damage := GREATEST(0, v_opponent_damage + v_hit_dice + v_opponent_damage_mod_amount);
+          -- Capacités non-offensives (voir même remarque côté joueur) : pas
+          -- de dégâts, système % PV / bonus conditionnels ignorés aussi.
+          IF v_opponent_ability.deals_damage THEN
+            v_hit_dice := CASE WHEN v_opponent_ability.degats_de IS NOT NULL AND v_opponent_ability.degats_de > 0
+              THEN 1 + floor(random() * v_opponent_ability.degats_de)::integer ELSE 0 END;
+            v_hit_damage := GREATEST(0, v_opponent_damage + v_hit_dice + v_opponent_damage_mod_amount);
 
-          v_percent_hp_damage_applied := v_opponent_percent_hp_damage_percent IS NOT NULL;
-          IF v_percent_hp_damage_applied THEN
-            v_hit_damage := GREATEST(0, floor(v_player_hp * v_opponent_percent_hp_damage_percent / 100.0)::integer);
-          END IF;
-
-          v_bonus_condition_met := v_opponent_bonus_condition = 'took_damage_last_turn' AND v_opponent_took_damage
-            OR v_opponent_bonus_condition = 'first_use' AND NOT v_opponent_used_ability
-            OR v_opponent_bonus_condition = 'dice_equals' AND v_hit_dice = v_opponent_bonus_dice_value
-            OR v_opponent_bonus_condition = 'has_status' AND v_opponent_status IS NOT NULL AND (v_opponent_bonus_status_filter IS NULL OR v_opponent_status = v_opponent_bonus_status_filter);
-          IF v_opponent_bonus_type IS NOT NULL AND v_bonus_condition_met THEN
-            IF v_opponent_bonus_type = 'multiply' THEN
-              v_hit_damage := floor(v_hit_damage * COALESCE(v_opponent_bonus_multiplier, 1))::integer;
-            ELSIF v_opponent_bonus_type = 'flat' THEN
-              v_hit_damage := v_hit_damage + COALESCE(v_opponent_bonus_flat, 0);
-            ELSIF v_opponent_bonus_type = 'range' THEN
-              v_hit_damage := v_hit_damage + (v_opponent_bonus_min + floor(random() * (v_opponent_bonus_max - v_opponent_bonus_min + 1))::integer);
+            v_percent_hp_damage_applied := v_opponent_percent_hp_damage_percent IS NOT NULL;
+            IF v_percent_hp_damage_applied THEN
+              v_hit_damage := GREATEST(0, floor(v_player_hp * v_opponent_percent_hp_damage_percent / 100.0)::integer);
             END IF;
-            v_hit_damage := GREATEST(0, v_hit_damage);
+
+            v_bonus_condition_met := v_opponent_bonus_condition = 'took_damage_last_turn' AND v_opponent_took_damage
+              OR v_opponent_bonus_condition = 'first_use' AND NOT v_opponent_used_ability
+              OR v_opponent_bonus_condition = 'dice_equals' AND v_hit_dice = v_opponent_bonus_dice_value
+              OR v_opponent_bonus_condition = 'has_status' AND v_player_status IS NOT NULL AND (v_opponent_bonus_status_filter IS NULL OR v_player_status = v_opponent_bonus_status_filter);
+            IF v_opponent_bonus_type IS NOT NULL AND v_bonus_condition_met THEN
+              IF v_opponent_bonus_type = 'multiply' THEN
+                v_hit_damage := floor(v_hit_damage * COALESCE(v_opponent_bonus_multiplier, 1))::integer;
+              ELSIF v_opponent_bonus_type = 'flat' THEN
+                v_hit_damage := v_hit_damage + COALESCE(v_opponent_bonus_flat, 0);
+              ELSIF v_opponent_bonus_type = 'range' THEN
+                v_hit_damage := v_hit_damage + (v_opponent_bonus_min + floor(random() * (v_opponent_bonus_max - v_opponent_bonus_min + 1))::integer);
+              END IF;
+              v_hit_damage := GREATEST(0, v_hit_damage);
+            END IF;
+          ELSE
+            v_hit_dice := 0;
+            v_hit_damage := 0;
+            v_percent_hp_damage_applied := false;
           END IF;
           v_opponent_used_ability := true;
-          v_opponent_took_damage := false;
 
           v_player_hp := v_player_hp - v_hit_damage;
-          v_player_took_damage := true;
+          v_player_took_damage := v_hit_damage > 0;
 
           v_heal_amt := NULL;
           IF v_opponent_heal_type = 'static' THEN
@@ -4037,11 +4117,12 @@ BEGIN
           ELSIF v_opponent_heal_type = 'use_stats' THEN
             v_heal_dice := CASE WHEN v_opponent_ability.degats_de IS NOT NULL AND v_opponent_ability.degats_de > 0
               THEN 1 + floor(random() * v_opponent_ability.degats_de)::integer ELSE 0 END;
-            v_heal_amt := COALESCE(v_opponent_ability.degats_base, 0) + v_heal_dice;
+            v_heal_amt := v_opponent_damage_original + v_heal_dice;
           END IF;
 
           v_turn_entry := jsonb_build_object(
-            'turn', v_turn_no, 'attacker', 'opponent', 'damage', v_hit_damage,
+            'turn', v_turn_no, 'attacker', 'opponent', 'damage', v_hit_damage, 'damage_before_dice', v_opponent_damage,
+            'damage_species_xp', v_opponent_damage_species_xp, 'damage_dice', v_hit_dice,
             'defender_hp_after', GREATEST(0, v_player_hp), 'ko', v_player_hp <= 0
           );
           IF v_percent_hp_damage_applied THEN
@@ -4076,7 +4157,7 @@ BEGIN
                 ELSE 0
               END;
               v_stat_mod_amount := CASE WHEN v_opponent_stat_mod_target = 'opponent' THEN -abs(v_stat_mod_amount) ELSE abs(v_stat_mod_amount) END;
-              v_stat_mod_expiry := CASE WHEN v_opponent_stat_mod_duration_type = 'battle_end' THEN 999999 ELSE v_turn_no + COALESCE(v_opponent_stat_mod_duration_turns, 1) END;
+              v_stat_mod_expiry := CASE WHEN v_opponent_stat_mod_duration_type = 'battle_end' THEN 999999 ELSE v_turn_no + 2 * COALESCE(v_opponent_stat_mod_duration_turns, 1) END;
               IF v_opponent_stat_mod_target = 'self' AND v_opponent_stat_mod_stat = 'damage' THEN
                 v_opponent_damage_mod_amount := v_stat_mod_amount; v_opponent_damage_mod_expires := v_stat_mod_expiry;
               ELSIF v_opponent_stat_mod_target = 'self' AND v_opponent_stat_mod_stat = 'precision' THEN
@@ -4214,6 +4295,121 @@ GRANT EXECUTE ON FUNCTION autobattle_resolve_battle(bigint, bigint, bigint, text
 GRANT EXECUTE ON FUNCTION autobattle_xp_bonus(text, integer, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION autobattle_max_xp(text) TO anon, authenticated;
 
+-- Démarre un combat en mode Manuel (variant.game_mode = 'manual') : crée la
+-- ligne autobattle_manual_battles et tire au sort first_attacker AVANT que
+-- le joueur choisisse sa 1ère capacité — permet au client d'afficher le
+-- tirage au sort (AutoBattleCoinToss, comme en mode Auto) juste après le
+-- choix du pokémon, avant même la grille de sélection de capacité (voir
+-- requirement). Le ticket est débité ICI, au moment du tirage au sort —
+-- reculer AVANT ce point (pendant le choix du pokémon) ne coûte rien, mais
+-- une fois le tirage lancé c'est définitif, même si le joueur recule ensuite
+-- sans jouer un seul tour (voir requirement) : autobattle_resolve_manual_
+-- round ne touche plus du tout aux tickets. Toute ligne déjà existante pour
+-- ce joueur/niveau (combat terminé, ou abandonné en cours) est TOUJOURS
+-- purgée ici et remplacée par un combat neuf — voir le même requirement que
+-- le correctif p_is_new_battle précédent, désormais porté par ce point
+-- d'entrée plutôt que par le 1er tour.
+CREATE OR REPLACE FUNCTION autobattle_start_manual_battle(
+  p_player_id bigint,
+  p_level_id bigint,
+  p_player_pokemon_id bigint,
+  p_idempotency_key uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_level          record;
+  v_variant        record;
+  v_progress       record;
+  v_pp             record;
+  v_player_species record;
+  v_row            autobattle_manual_battles%ROWTYPE;
+  v_ticket_item_nom text := 'Ticket Combat';
+  v_player_max_hp  integer;
+  v_first_attacker text;
+  v_result         jsonb;
+BEGIN
+  SELECT * INTO v_level FROM autobattle_levels WHERE id = p_level_id;
+  IF v_level IS NULL THEN
+    RETURN jsonb_build_object('status', 'not_found');
+  END IF;
+
+  SELECT * INTO v_variant FROM autobattle_variants WHERE id = v_level.variant_id;
+  IF v_variant IS NULL OR v_variant.enabled = false THEN
+    RETURN jsonb_build_object('status', 'variant_disabled');
+  END IF;
+  IF v_variant.game_mode <> 'manual' THEN
+    RETURN jsonb_build_object('status', 'wrong_mode');
+  END IF;
+
+  INSERT INTO autobattle_player_variant_progress (player_id, variant_id)
+  VALUES (p_player_id, v_variant.id)
+  ON CONFLICT (player_id, variant_id) DO NOTHING;
+
+  SELECT * INTO v_progress FROM autobattle_player_variant_progress
+    WHERE player_id = p_player_id AND variant_id = v_variant.id FOR UPDATE;
+
+  IF v_progress.variant_completed THEN
+    RETURN jsonb_build_object('status', 'variant_completed');
+  END IF;
+  IF v_progress.current_level_index <> v_level.level_index THEN
+    RETURN jsonb_build_object('status', 'wrong_level');
+  END IF;
+
+  SELECT * INTO v_pp FROM player_pokemon WHERE id = p_player_pokemon_id AND player_id = p_player_id;
+  IF v_pp IS NULL OR v_pp.in_daycare THEN
+    RETURN jsonb_build_object('status', 'ineligible_pokemon');
+  END IF;
+
+  SELECT * INTO v_player_species FROM pokemon WHERE nom = v_pp.pokemon_nom;
+  IF v_player_species IS NULL THEN
+    RETURN jsonb_build_object('status', 'ineligible_pokemon');
+  END IF;
+
+  SELECT * INTO v_row FROM autobattle_manual_battles
+    WHERE player_id = p_player_id AND level_id = p_level_id FOR UPDATE;
+
+  -- Rejeu idempotent : redémarrage redemandé (retry réseau) → même réponse,
+  -- sans re-tirer first_attacker ni re-débiter de ticket.
+  IF v_row.id IS NOT NULL AND v_row.last_idempotency_key = p_idempotency_key THEN
+    RETURN v_row.last_result;
+  END IF;
+
+  IF v_row.id IS NOT NULL THEN
+    DELETE FROM autobattle_manual_battles WHERE id = v_row.id;
+  END IF;
+
+  -- Le ticket est débité ICI, au moment du tirage au sort — PAS au 1er tour
+  -- réellement joué (voir requirement : "avant [le tirage au sort] le joueur
+  -- peut encore reculer", donc gratuit ; une fois le tirage lancé, c'est
+  -- définitif, y compris si le joueur recule ensuite sans jouer un seul
+  -- tour). autobattle_resolve_manual_round ne touche plus du tout aux
+  -- tickets.
+  UPDATE player_items SET quantity = quantity - 1
+    WHERE player_id = p_player_id AND item_nom = v_ticket_item_nom AND quantity >= 1;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('status', 'no_ticket');
+  END IF;
+
+  v_player_max_hp := COALESCE(v_player_species.pv_base, 0) + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'PV');
+  v_first_attacker := CASE WHEN random() < 0.5 THEN 'player' ELSE 'opponent' END;
+  v_result := jsonb_build_object('status', 'ok', 'first_attacker', v_first_attacker);
+
+  INSERT INTO autobattle_manual_battles (
+    player_id, level_id, variant_id, player_pokemon_id, first_attacker, turn_no,
+    player_hp, player_max_hp, opponent_hp, last_idempotency_key, last_result
+  ) VALUES (
+    p_player_id, p_level_id, v_variant.id, p_player_pokemon_id, v_first_attacker, 0,
+    GREATEST(1, v_player_max_hp), GREATEST(1, v_player_max_hp), v_level.opponent_hp, p_idempotency_key, v_result
+  );
+
+  RETURN v_result;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION autobattle_start_manual_battle(bigint, bigint, bigint, uuid) TO anon, authenticated;
+
 -- Résout UN SEUL tour de combat en mode Manuel (variant.game_mode =
 -- 'manual', voir autobattle_manual_battles) : contrairement à
 -- autobattle_resolve_battle (tout le combat d'un coup, une capacité fixe
@@ -4238,13 +4434,19 @@ GRANT EXECUTE ON FUNCTION autobattle_max_xp(text) TO anon, authenticated;
 -- mémorisée (player_preparing_ability_nom/opponent_preparing_ability_nom),
 -- pas nécessairement p_ability_nom (le joueur peut cliquer autre chose
 -- entretemps, ce choix ne compte que pour le tour SUIVANT).
+-- DROP nécessaire avant CREATE OR REPLACE : la signature perd le paramètre
+-- p_is_new_battle (voir autobattle_start_manual_battle ci-dessus, qui porte
+-- désormais cette responsabilité) — CREATE OR REPLACE ne permet jamais de
+-- retirer un paramètre existant, seulement d'en ajouter avec valeur par
+-- défaut. Couvre les deux signatures possibles selon l'état de la base.
+DROP FUNCTION IF EXISTS autobattle_resolve_manual_round(bigint, bigint, bigint, text, uuid);
+DROP FUNCTION IF EXISTS autobattle_resolve_manual_round(bigint, bigint, bigint, text, uuid, boolean);
 CREATE OR REPLACE FUNCTION autobattle_resolve_manual_round(
   p_player_id bigint,
   p_level_id bigint,
   p_player_pokemon_id bigint,
   p_ability_nom text,
-  p_idempotency_key uuid,
-  p_is_new_battle boolean DEFAULT false
+  p_idempotency_key uuid
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -4259,8 +4461,6 @@ DECLARE
   v_opponent_species    record;
   v_opponent_ability    record;
   v_row                 autobattle_manual_battles%ROWTYPE;
-  v_is_new              boolean;
-  v_ticket_item_nom     text := 'Ticket Combat';
   v_precision_enabled   boolean;
   v_player_max_hp       integer;
   v_player_hp           integer;
@@ -4271,6 +4471,8 @@ DECLARE
   v_opponent_damage     integer;
   v_player_damage_original   integer;
   v_opponent_damage_original integer;
+  v_player_damage_species_xp   integer;
+  v_opponent_damage_species_xp integer;
   v_turn_no             integer;
   v_first_attacker      text;
   v_attacker            text;
@@ -4485,45 +4687,29 @@ BEGIN
     RETURN v_row.last_result;
   END IF;
 
-  -- Une ligne existante pour un NOUVEAU tour (clé d'idempotence différente de
-  -- la dernière connue) est un vestige d'un combat précédent sur ce niveau
-  -- si soit (a) elle est terminée (outcome renseigné : gagné/perdu, puis
-  -- réessayé), soit (b) le client signale explicitement le lancement d'un
-  -- TOUT NOUVEAU combat (p_is_new_battle, envoyé uniquement au 1er tour) —
-  -- ce 2e cas couvre un combat quitté EN COURS (outcome encore NULL) : sans
-  -- lui, la ligne abandonnée restait vivante et un nouveau combat sur ce
-  -- niveau reprenait à tort ses PV/statuts au lieu de redémarrer à zéro,
-  -- alors que le client, lui, ré-affichait des PV pleins (d'où un gros saut
-  -- de PV incohérent au coup suivant). Dans les deux cas on purge et on
-  -- redémarre à zéro, comme s'il n'y avait pas de ligne du tout.
-  IF v_row.id IS NOT NULL AND (v_row.outcome IS NOT NULL OR p_is_new_battle) THEN
+  -- Une ligne déjà terminée (outcome renseigné : gagné/perdu, puis réessayé)
+  -- pour un NOUVEAU tour est un vestige d'un combat précédent — filet de
+  -- sécurité défensif, ne devrait normalement jamais arriver : le point
+  -- d'entrée normal d'un nouveau combat est désormais autobattle_start_
+  -- manual_battle, qui purge et recrée systématiquement AVANT tout tour joué
+  -- (voir son commentaire — c'est lui qui porte la logique "quitter un
+  -- combat en cours et en relancer un nouveau ne doit jamais reprendre les
+  -- PV/statuts de l'ancien", plus le 1er tour ici).
+  IF v_row.id IS NOT NULL AND v_row.outcome IS NOT NULL THEN
     DELETE FROM autobattle_manual_battles WHERE id = v_row.id;
     v_row := NULL;
   END IF;
 
-  v_is_new := v_row.id IS NULL;
-
-  IF v_is_new THEN
-    UPDATE player_items SET quantity = quantity - 1
-      WHERE player_id = p_player_id AND item_nom = v_ticket_item_nom AND quantity >= 1;
-    IF NOT FOUND THEN
-      RETURN jsonb_build_object('status', 'no_ticket');
-    END IF;
-
-    v_player_max_hp := COALESCE(v_player_species.pv_base, 0) + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'PV');
-    v_first_attacker := CASE WHEN random() < 0.5 THEN 'player' ELSE 'opponent' END;
-
-    INSERT INTO autobattle_manual_battles (
-      player_id, level_id, variant_id, player_pokemon_id, first_attacker, turn_no,
-      player_hp, player_max_hp, opponent_hp
-    ) VALUES (
-      p_player_id, p_level_id, v_variant.id, p_player_pokemon_id, v_first_attacker, 0,
-      GREATEST(1, v_player_max_hp), GREATEST(1, v_player_max_hp), v_level.opponent_hp
-    ) RETURNING * INTO v_row;
+  -- La ligne doit déjà exister (créée par autobattle_start_manual_battle,
+  -- qui décide first_attacker ET débite le ticket AVANT le 1er choix de
+  -- capacité — voir son commentaire) : ce tour ne la crée plus lui-même et
+  -- ne touche plus du tout aux tickets.
+  IF v_row.id IS NULL THEN
+    RETURN jsonb_build_object('status', 'not_started');
   END IF;
 
-  -- État persisté (créé à l'instant, ou chargé depuis un tour précédent) :
-  -- copié dans les variables de travail.
+  -- État persisté (chargé depuis autobattle_start_manual_battle ou un tour
+  -- précédent) : copié dans les variables de travail.
   v_player_hp := v_row.player_hp;
   v_player_max_hp := v_row.player_max_hp;
   v_opponent_hp := v_row.opponent_hp;
@@ -4621,13 +4807,19 @@ BEGIN
     v_opponent_heal_disabled_expires := NULL;
   END IF;
 
+  -- Super efficace : la capacité utilisée doit être du MÊME type que le
+  -- pokémon qui l'utilise, en plus d'être favorable dans la table de types
+  -- (voir même remarque en mode Auto, autobattle_resolve_battle) — recalculé
+  -- CHAQUE round ici (contrairement au mode Auto, figé pour tout le combat)
+  -- puisque la capacité jouée change à chaque tour.
   v_player_type_bonus := EXISTS (
     SELECT 1 FROM (VALUES
       (v_player_species.super_efficace_1), (v_player_species.super_efficace_2),
       (v_player_species.super_efficace_3), (v_player_species.super_efficace_4)
     ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_opponent_species.type))
-  );
-  v_player_damage := (COALESCE(v_player_species.degats_base, 0) + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'DMG'))
+  ) AND lower(trim(v_ability.type)) = lower(trim(v_player_species.type));
+  v_player_damage_species_xp := COALESCE(v_player_species.degats_base, 0) + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'DMG');
+  v_player_damage := v_player_damage_species_xp
     * (CASE WHEN v_player_type_bonus THEN 2 ELSE 1 END) + COALESCE(v_ability.degats_base, 0);
   v_player_damage_original := v_player_damage;
 
@@ -4636,8 +4828,9 @@ BEGIN
       (v_opponent_species.super_efficace_1), (v_opponent_species.super_efficace_2),
       (v_opponent_species.super_efficace_3), (v_opponent_species.super_efficace_4)
     ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_player_species.type))
-  );
-  v_opponent_damage := COALESCE(v_level.opponent_base_damage, 0) * (CASE WHEN v_opponent_type_bonus THEN 2 ELSE 1 END)
+  ) AND lower(trim(v_opponent_ability.type)) = lower(trim(v_opponent_species.type));
+  v_opponent_damage_species_xp := COALESCE(v_level.opponent_base_damage, 0);
+  v_opponent_damage := v_opponent_damage_species_xp * (CASE WHEN v_opponent_type_bonus THEN 2 ELSE 1 END)
     + COALESCE(v_opponent_ability.degats_base, 0);
   v_opponent_damage_original := v_opponent_damage;
 
@@ -4729,6 +4922,21 @@ BEGIN
     END IF;
     IF v_opponent_heal_disabled_expires IS NOT NULL AND v_turn_no > v_opponent_heal_disabled_expires THEN
       v_opponent_heal_disabled_expires := NULL;
+    END IF;
+
+    -- "A subi des dégâts au dernier tour adverse" (bonus_damage_condition
+    -- 'took_damage_last_turn') doit refléter EXACTEMENT le tour précédent de
+    -- l'attaquant adverse — pas un vieux coup réussi resté vrai depuis
+    -- plusieurs tours pendant que l'adversaire préparait/soignait/ratait
+    -- entretemps. Remis à faux ICI, à CHAQUE itération sans exception (avant
+    -- même de savoir si ce tour est raté/passé/statut/réussi), pour le camp
+    -- qui va agir ce tour-ci — seul le vrai coup réussi plus bas le repasse à
+    -- vrai le cas échéant ; un raté/tick de statut/tour passé le laisse à
+    -- faux, comme attendu.
+    IF v_attacker = 'player' THEN
+      v_opponent_took_damage := false;
+    ELSE
+      v_player_took_damage := false;
     END IF;
 
     IF v_block_remaining IS NULL THEN
@@ -5008,7 +5216,15 @@ BEGIN
     END IF;
 
     IF v_attacker = 'player' THEN
-      IF v_opponent_invuln_pending_miss THEN
+      -- Voir la même remarque en mode Auto (autobattle_resolve_battle) : ne
+      -- bloque que si la capacité jouée affecte réellement l'adversaire,
+      -- consomme le flag (1 tour adverse) dans les deux cas.
+      IF v_opponent_invuln_pending_miss AND (
+        v_ability.deals_damage
+        OR (v_ability.status_effect IS NOT NULL AND NOT v_player_status_reversed)
+        OR v_player_stat_mod_target = 'opponent'
+        OR v_player_cancel_heal_duration IS NOT NULL
+      ) THEN
         v_opponent_invuln_pending_miss := false;
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
           'turn', v_turn_no, 'attacker', 'player', 'damage', 0, 'missed', true, 'invulnerable_miss', true,
@@ -5018,6 +5234,7 @@ BEGIN
           v_block_remaining := 1;
         END IF;
       ELSE
+        v_opponent_invuln_pending_miss := false;
         v_missed := (NOT v_player_never_miss) AND
           random() >= ((CASE WHEN v_precision_enabled THEN GREATEST(0, COALESCE(v_ability.precision, 10) - v_status_precision_penalty + v_player_precision_mod_amount) ELSE 10 END * 10) / 100.0);
 
@@ -5030,34 +5247,42 @@ BEGIN
             v_block_remaining := 1;
           END IF;
         ELSE
-          v_hit_dice := CASE WHEN v_ability.degats_de IS NOT NULL AND v_ability.degats_de > 0
-            THEN 1 + floor(random() * v_ability.degats_de)::integer ELSE 0 END;
-          v_hit_damage := GREATEST(0, v_player_damage + v_hit_dice + v_player_damage_mod_amount);
+          -- Capacités non-offensives (voir même remarque en mode Auto,
+          -- autobattle_resolve_battle) : pas de dégâts, système % PV / bonus
+          -- conditionnels ignorés aussi.
+          IF v_ability.deals_damage THEN
+            v_hit_dice := CASE WHEN v_ability.degats_de IS NOT NULL AND v_ability.degats_de > 0
+              THEN 1 + floor(random() * v_ability.degats_de)::integer ELSE 0 END;
+            v_hit_damage := GREATEST(0, v_player_damage + v_hit_dice + v_player_damage_mod_amount);
 
-          v_percent_hp_damage_applied := v_player_percent_hp_damage_percent IS NOT NULL;
-          IF v_percent_hp_damage_applied THEN
-            v_hit_damage := GREATEST(0, floor(v_opponent_hp * v_player_percent_hp_damage_percent / 100.0)::integer);
-          END IF;
-
-          v_bonus_condition_met := v_player_bonus_condition = 'took_damage_last_turn' AND v_player_took_damage
-            OR v_player_bonus_condition = 'first_use' AND NOT v_player_used_ability
-            OR v_player_bonus_condition = 'dice_equals' AND v_hit_dice = v_player_bonus_dice_value
-            OR v_player_bonus_condition = 'has_status' AND v_player_status IS NOT NULL AND (v_player_bonus_status_filter IS NULL OR v_player_status = v_player_bonus_status_filter);
-          IF v_player_bonus_type IS NOT NULL AND v_bonus_condition_met THEN
-            IF v_player_bonus_type = 'multiply' THEN
-              v_hit_damage := floor(v_hit_damage * COALESCE(v_player_bonus_multiplier, 1))::integer;
-            ELSIF v_player_bonus_type = 'flat' THEN
-              v_hit_damage := v_hit_damage + COALESCE(v_player_bonus_flat, 0);
-            ELSIF v_player_bonus_type = 'range' THEN
-              v_hit_damage := v_hit_damage + (v_player_bonus_min + floor(random() * (v_player_bonus_max - v_player_bonus_min + 1))::integer);
+            v_percent_hp_damage_applied := v_player_percent_hp_damage_percent IS NOT NULL;
+            IF v_percent_hp_damage_applied THEN
+              v_hit_damage := GREATEST(0, floor(v_opponent_hp * v_player_percent_hp_damage_percent / 100.0)::integer);
             END IF;
-            v_hit_damage := GREATEST(0, v_hit_damage);
+
+            v_bonus_condition_met := v_player_bonus_condition = 'took_damage_last_turn' AND v_player_took_damage
+              OR v_player_bonus_condition = 'first_use' AND NOT v_player_used_ability
+              OR v_player_bonus_condition = 'dice_equals' AND v_hit_dice = v_player_bonus_dice_value
+              OR v_player_bonus_condition = 'has_status' AND v_opponent_status IS NOT NULL AND (v_player_bonus_status_filter IS NULL OR v_opponent_status = v_player_bonus_status_filter);
+            IF v_player_bonus_type IS NOT NULL AND v_bonus_condition_met THEN
+              IF v_player_bonus_type = 'multiply' THEN
+                v_hit_damage := floor(v_hit_damage * COALESCE(v_player_bonus_multiplier, 1))::integer;
+              ELSIF v_player_bonus_type = 'flat' THEN
+                v_hit_damage := v_hit_damage + COALESCE(v_player_bonus_flat, 0);
+              ELSIF v_player_bonus_type = 'range' THEN
+                v_hit_damage := v_hit_damage + (v_player_bonus_min + floor(random() * (v_player_bonus_max - v_player_bonus_min + 1))::integer);
+              END IF;
+              v_hit_damage := GREATEST(0, v_hit_damage);
+            END IF;
+          ELSE
+            v_hit_dice := 0;
+            v_hit_damage := 0;
+            v_percent_hp_damage_applied := false;
           END IF;
           v_player_used_ability := true;
-          v_player_took_damage := false;
 
           v_opponent_hp := v_opponent_hp - v_hit_damage;
-          v_opponent_took_damage := true;
+          v_opponent_took_damage := v_hit_damage > 0;
 
           v_heal_amt := NULL;
           IF v_player_heal_type = 'static' THEN
@@ -5067,11 +5292,12 @@ BEGIN
           ELSIF v_player_heal_type = 'use_stats' THEN
             v_heal_dice := CASE WHEN v_ability.degats_de IS NOT NULL AND v_ability.degats_de > 0
               THEN 1 + floor(random() * v_ability.degats_de)::integer ELSE 0 END;
-            v_heal_amt := COALESCE(v_ability.degats_base, 0) + v_heal_dice;
+            v_heal_amt := v_player_damage_original + v_heal_dice;
           END IF;
 
           v_turn_entry := jsonb_build_object(
-            'turn', v_turn_no, 'attacker', 'player', 'damage', v_hit_damage,
+            'turn', v_turn_no, 'attacker', 'player', 'damage', v_hit_damage, 'damage_before_dice', v_player_damage,
+            'damage_species_xp', v_player_damage_species_xp, 'damage_dice', v_hit_dice,
             'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', v_opponent_hp <= 0
           );
           IF v_percent_hp_damage_applied THEN
@@ -5108,7 +5334,14 @@ BEGIN
                 ELSE 0
               END;
               v_stat_mod_amount := CASE WHEN v_player_stat_mod_target = 'opponent' THEN -abs(v_stat_mod_amount) ELSE abs(v_stat_mod_amount) END;
-              v_stat_mod_expiry := CASE WHEN v_player_stat_mod_duration_type = 'battle_end' THEN 999999 ELSE v_turn_no + COALESCE(v_player_stat_mod_duration_turns, 1) END;
+              -- v_turn_no avance de 1 à CHAQUE itération de boucle (joueur ET
+              -- adversaire confondus, voir plus haut), donc "1 tour" pour le
+              -- lanceur (son PROCHAIN tour, pas celui-ci — voir requirement)
+              -- correspond à 2 incréments de v_turn_no en alternance normale
+              -- (son tour de repli, puis le tour adverse, puis son tour
+              -- suivant) : d'où × 2 ci-dessous, plutôt qu'un simple + N qui
+              -- expirerait le bonus AVANT même d'avoir pu servir une fois.
+              v_stat_mod_expiry := CASE WHEN v_player_stat_mod_duration_type = 'battle_end' THEN 999999 ELSE v_turn_no + 2 * COALESCE(v_player_stat_mod_duration_turns, 1) END;
               IF v_player_stat_mod_target = 'self' AND v_player_stat_mod_stat = 'damage' THEN
                 v_player_damage_mod_amount := v_stat_mod_amount; v_player_damage_mod_expires := v_stat_mod_expiry;
               ELSIF v_player_stat_mod_target = 'self' AND v_player_stat_mod_stat = 'precision' THEN
@@ -5156,7 +5389,15 @@ BEGIN
         END IF;
       END IF;
     ELSE
-      IF v_player_invuln_pending_miss THEN
+      -- Voir la même remarque côté joueur ci-dessus : ne bloque que si cette
+      -- capacité affecte réellement le joueur, et consomme le flag (1 tour
+      -- adverse) dans les deux cas.
+      IF v_player_invuln_pending_miss AND (
+        v_opponent_ability.deals_damage
+        OR (v_opponent_ability.status_effect IS NOT NULL AND NOT v_opponent_status_reversed)
+        OR v_opponent_stat_mod_target = 'opponent'
+        OR v_opponent_cancel_heal_duration IS NOT NULL
+      ) THEN
         v_player_invuln_pending_miss := false;
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
           'turn', v_turn_no, 'attacker', 'opponent', 'damage', 0, 'missed', true, 'invulnerable_miss', true,
@@ -5166,6 +5407,7 @@ BEGIN
           v_block_remaining := 1;
         END IF;
       ELSE
+        v_player_invuln_pending_miss := false;
         v_missed := (NOT v_opponent_never_miss) AND
           random() >= ((CASE WHEN v_precision_enabled THEN GREATEST(0, COALESCE(v_opponent_ability.precision, 10) - v_status_precision_penalty + v_opponent_precision_mod_amount) ELSE 10 END * 10) / 100.0);
 
@@ -5178,34 +5420,41 @@ BEGIN
             v_block_remaining := 1;
           END IF;
         ELSE
-          v_hit_dice := CASE WHEN v_opponent_ability.degats_de IS NOT NULL AND v_opponent_ability.degats_de > 0
-            THEN 1 + floor(random() * v_opponent_ability.degats_de)::integer ELSE 0 END;
-          v_hit_damage := GREATEST(0, v_opponent_damage + v_hit_dice + v_opponent_damage_mod_amount);
+          -- Capacités non-offensives (voir même remarque côté joueur) : pas
+          -- de dégâts, système % PV / bonus conditionnels ignorés aussi.
+          IF v_opponent_ability.deals_damage THEN
+            v_hit_dice := CASE WHEN v_opponent_ability.degats_de IS NOT NULL AND v_opponent_ability.degats_de > 0
+              THEN 1 + floor(random() * v_opponent_ability.degats_de)::integer ELSE 0 END;
+            v_hit_damage := GREATEST(0, v_opponent_damage + v_hit_dice + v_opponent_damage_mod_amount);
 
-          v_percent_hp_damage_applied := v_opponent_percent_hp_damage_percent IS NOT NULL;
-          IF v_percent_hp_damage_applied THEN
-            v_hit_damage := GREATEST(0, floor(v_player_hp * v_opponent_percent_hp_damage_percent / 100.0)::integer);
-          END IF;
-
-          v_bonus_condition_met := v_opponent_bonus_condition = 'took_damage_last_turn' AND v_opponent_took_damage
-            OR v_opponent_bonus_condition = 'first_use' AND NOT v_opponent_used_ability
-            OR v_opponent_bonus_condition = 'dice_equals' AND v_hit_dice = v_opponent_bonus_dice_value
-            OR v_opponent_bonus_condition = 'has_status' AND v_opponent_status IS NOT NULL AND (v_opponent_bonus_status_filter IS NULL OR v_opponent_status = v_opponent_bonus_status_filter);
-          IF v_opponent_bonus_type IS NOT NULL AND v_bonus_condition_met THEN
-            IF v_opponent_bonus_type = 'multiply' THEN
-              v_hit_damage := floor(v_hit_damage * COALESCE(v_opponent_bonus_multiplier, 1))::integer;
-            ELSIF v_opponent_bonus_type = 'flat' THEN
-              v_hit_damage := v_hit_damage + COALESCE(v_opponent_bonus_flat, 0);
-            ELSIF v_opponent_bonus_type = 'range' THEN
-              v_hit_damage := v_hit_damage + (v_opponent_bonus_min + floor(random() * (v_opponent_bonus_max - v_opponent_bonus_min + 1))::integer);
+            v_percent_hp_damage_applied := v_opponent_percent_hp_damage_percent IS NOT NULL;
+            IF v_percent_hp_damage_applied THEN
+              v_hit_damage := GREATEST(0, floor(v_player_hp * v_opponent_percent_hp_damage_percent / 100.0)::integer);
             END IF;
-            v_hit_damage := GREATEST(0, v_hit_damage);
+
+            v_bonus_condition_met := v_opponent_bonus_condition = 'took_damage_last_turn' AND v_opponent_took_damage
+              OR v_opponent_bonus_condition = 'first_use' AND NOT v_opponent_used_ability
+              OR v_opponent_bonus_condition = 'dice_equals' AND v_hit_dice = v_opponent_bonus_dice_value
+              OR v_opponent_bonus_condition = 'has_status' AND v_player_status IS NOT NULL AND (v_opponent_bonus_status_filter IS NULL OR v_player_status = v_opponent_bonus_status_filter);
+            IF v_opponent_bonus_type IS NOT NULL AND v_bonus_condition_met THEN
+              IF v_opponent_bonus_type = 'multiply' THEN
+                v_hit_damage := floor(v_hit_damage * COALESCE(v_opponent_bonus_multiplier, 1))::integer;
+              ELSIF v_opponent_bonus_type = 'flat' THEN
+                v_hit_damage := v_hit_damage + COALESCE(v_opponent_bonus_flat, 0);
+              ELSIF v_opponent_bonus_type = 'range' THEN
+                v_hit_damage := v_hit_damage + (v_opponent_bonus_min + floor(random() * (v_opponent_bonus_max - v_opponent_bonus_min + 1))::integer);
+              END IF;
+              v_hit_damage := GREATEST(0, v_hit_damage);
+            END IF;
+          ELSE
+            v_hit_dice := 0;
+            v_hit_damage := 0;
+            v_percent_hp_damage_applied := false;
           END IF;
           v_opponent_used_ability := true;
-          v_opponent_took_damage := false;
 
           v_player_hp := v_player_hp - v_hit_damage;
-          v_player_took_damage := true;
+          v_player_took_damage := v_hit_damage > 0;
 
           v_heal_amt := NULL;
           IF v_opponent_heal_type = 'static' THEN
@@ -5215,11 +5464,12 @@ BEGIN
           ELSIF v_opponent_heal_type = 'use_stats' THEN
             v_heal_dice := CASE WHEN v_opponent_ability.degats_de IS NOT NULL AND v_opponent_ability.degats_de > 0
               THEN 1 + floor(random() * v_opponent_ability.degats_de)::integer ELSE 0 END;
-            v_heal_amt := COALESCE(v_opponent_ability.degats_base, 0) + v_heal_dice;
+            v_heal_amt := v_opponent_damage_original + v_heal_dice;
           END IF;
 
           v_turn_entry := jsonb_build_object(
-            'turn', v_turn_no, 'attacker', 'opponent', 'damage', v_hit_damage,
+            'turn', v_turn_no, 'attacker', 'opponent', 'damage', v_hit_damage, 'damage_before_dice', v_opponent_damage,
+            'damage_species_xp', v_opponent_damage_species_xp, 'damage_dice', v_hit_dice,
             'defender_hp_after', GREATEST(0, v_player_hp), 'ko', v_player_hp <= 0
           );
           IF v_percent_hp_damage_applied THEN
@@ -5256,7 +5506,7 @@ BEGIN
                 ELSE 0
               END;
               v_stat_mod_amount := CASE WHEN v_opponent_stat_mod_target = 'opponent' THEN -abs(v_stat_mod_amount) ELSE abs(v_stat_mod_amount) END;
-              v_stat_mod_expiry := CASE WHEN v_opponent_stat_mod_duration_type = 'battle_end' THEN 999999 ELSE v_turn_no + COALESCE(v_opponent_stat_mod_duration_turns, 1) END;
+              v_stat_mod_expiry := CASE WHEN v_opponent_stat_mod_duration_type = 'battle_end' THEN 999999 ELSE v_turn_no + 2 * COALESCE(v_opponent_stat_mod_duration_turns, 1) END;
               IF v_opponent_stat_mod_target = 'self' AND v_opponent_stat_mod_stat = 'damage' THEN
                 v_opponent_damage_mod_amount := v_stat_mod_amount; v_opponent_damage_mod_expires := v_stat_mod_expiry;
               ELSIF v_opponent_stat_mod_target = 'self' AND v_opponent_stat_mod_stat = 'precision' THEN
@@ -5417,7 +5667,7 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION autobattle_resolve_manual_round(bigint, bigint, bigint, text, uuid, boolean) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION autobattle_resolve_manual_round(bigint, bigint, bigint, text, uuid) TO anon, authenticated;
 
 -- history_events.category doit accepter la nouvelle catégorie 'autobattle'
 ALTER TABLE history_events DROP CONSTRAINT IF EXISTS history_events_category_check;

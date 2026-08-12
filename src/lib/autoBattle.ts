@@ -196,7 +196,7 @@ export function describeAbilityRule(rule: AutoBattleAbilityRule | undefined, abi
       : rule.bonus_damage_condition === 'first_use' ? "à la 1ère utilisation"
       : rule.bonus_damage_condition === 'dice_equals' ? `si le dé tombe sur ${rule.bonus_damage_condition_dice_value}`
       : rule.bonus_damage_condition === 'has_status'
-        ? (rule.bonus_damage_status_filter ? `s'il est ${STATUS_EFFECT_LABEL[rule.bonus_damage_status_filter].toLowerCase()}` : "s'il est affecté par un statut (n'importe lequel)")
+        ? (rule.bonus_damage_status_filter ? `si l'adversaire est ${STATUS_EFFECT_LABEL[rule.bonus_damage_status_filter].toLowerCase()}` : "si l'adversaire est affecté par un statut (n'importe lequel)")
       : ''
     const bonusLabel = rule.bonus_damage_type === 'multiply' ? `dégâts ×${rule.bonus_damage_multiplier}`
       : rule.bonus_damage_type === 'flat' ? `+${rule.bonus_damage_flat} dégâts`

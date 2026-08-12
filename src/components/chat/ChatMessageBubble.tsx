@@ -1,8 +1,9 @@
-import { Fragment } from 'react'
+import { Fragment, useMemo } from 'react'
 import type { Player, ChatMessage, Item, Pokemon, Trade } from '../../types'
 import type { ReferenceEntry, ReferenceIndex } from '../../hooks/useReferenceIndex'
 import { findTradeForMessage } from '../../lib/trade'
 import { formatChatMessageTime } from '../../lib/chatMessageTime'
+import { buildMentionMatcher, type MentionMatcher } from '../../lib/chatMentions'
 import { TradeCard } from './TradeCard'
 import { TradeCompletedCard } from './TradeCompletedCard'
 
@@ -20,10 +21,10 @@ interface Props {
   onReplayTrade: (trade: Trade) => void
 }
 
-// Découpe le texte du message sur les correspondances de l'index de référence
+// Découpe un segment de texte sur les correspondances de l'index de référence
 // (objet/pokémon/lieu déjà filtré en amont) et rend chaque match comme un span
 // cliquable — équivalent en lecture seule du surlignage Tiptap de l'éditeur.
-function renderContent(content: string, index: ReferenceIndex, onReferenceClick: (entry: ReferenceEntry) => void) {
+function renderReferences(content: string, index: ReferenceIndex, onReferenceClick: (entry: ReferenceEntry) => void) {
   const { matcher, lookup } = index
   matcher.lastIndex = 0
   const parts: React.ReactNode[] = []
@@ -57,10 +58,44 @@ function renderContent(content: string, index: ReferenceIndex, onReferenceClick:
   return parts
 }
 
+// Passe préalable : isole les mentions "@Joueur" (PNJ exclus, cf. buildMentionMatcher)
+// et applique le surlignage de référence sur le texte restant entre les mentions.
+function renderContent(content: string, index: ReferenceIndex, onReferenceClick: (entry: ReferenceEntry) => void, mentions: MentionMatcher) {
+  if (!mentions.regex) return renderReferences(content, index, onReferenceClick)
+
+  const { regex, lookup } = mentions
+  regex.lastIndex = 0
+  const parts: React.ReactNode[] = []
+  let lastIndex = 0
+  let m: RegExpExecArray | null
+  let key = 0
+
+  while ((m = regex.exec(content))) {
+    const player = lookup.get(m[1].toLowerCase())
+    if (player) {
+      if (m.index > lastIndex) {
+        parts.push(<Fragment key={key++}>{renderReferences(content.slice(lastIndex, m.index), index, onReferenceClick)}</Fragment>)
+      }
+      parts.push(
+        <span key={key++} className="font-bold" style={{ color: 'var(--color-xp-blue)' }}>
+          {m[0]}
+        </span>
+      )
+      lastIndex = m.index + m[0].length
+    }
+    if (m.index === regex.lastIndex) regex.lastIndex++
+  }
+  if (lastIndex < content.length) {
+    parts.push(<Fragment key={key}>{renderReferences(content.slice(lastIndex), index, onReferenceClick)}</Fragment>)
+  }
+  return parts
+}
+
 export function ChatMessageBubble({ message, sender, mine, referenceIndex, onReferenceClick, trades, players, itemsByName, pokemonByName, onOpenTrade, onReplayTrade }: Props) {
   const color = sender?.color ?? '#a3841a'
   const name = sender?.name ?? (message.is_npc ? 'PNJ' : 'Joueur inconnu')
   const trade = message.message_type !== 'text' ? findTradeForMessage(message, trades) : undefined
+  const mentions = useMemo(() => buildMentionMatcher(players), [players])
 
   return (
     <div className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
@@ -84,7 +119,7 @@ export function ChatMessageBubble({ message, sender, mine, referenceIndex, onRef
           className="max-w-[80%] rounded-lg px-3 py-2 text-sm text-ink bg-cream break-words whitespace-pre-wrap border-2"
           style={{ borderColor: color }}
         >
-          {renderContent(message.content, referenceIndex, onReferenceClick)}
+          {renderContent(message.content, referenceIndex, onReferenceClick, mentions)}
         </div>
       )}
     </div>

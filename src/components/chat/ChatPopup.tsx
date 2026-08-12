@@ -10,6 +10,7 @@ import { useTrades } from '../../hooks/useTrades'
 import { useReferenceIndex, type ReferenceEntry } from '../../hooks/useReferenceIndex'
 import { ReferenceHighlight, forceReferenceRecompute } from '../../lib/referenceExtension'
 import { chatCooldownSeconds } from '../../lib/chatSpam'
+import { findMentionedPlayers } from '../../lib/chatMentions'
 import { ChatMessageBubble } from './ChatMessageBubble'
 import { ChatReferenceDispatcher } from './ChatReferenceDispatcher'
 import { TradePopup } from './TradePopup'
@@ -120,7 +121,15 @@ export function ChatPopup({ player, players, chat, inventory, roster, pokemonByN
 
   const handleSend = () => {
     if (!canSend || !editor) return
-    void chat.sendMessage(player.id, trimmed, false)
+    const mentioned = findMentionedPlayers(trimmed, players).filter((p) => p.id !== player.id)
+    void chat.sendMessage(player.id, trimmed, false).then((message) => {
+      if (!message || mentioned.length === 0) return
+      fetch('/.netlify/functions/send-mention-notification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ senderPlayerId: player.id, mentionedPlayerIds: mentioned.map((p) => p.id) }),
+      }).catch((err) => console.error("Erreur lors de l'envoi de la notification de mention :", err))
+    })
     editor.commands.clearContent()
     setText('')
     setNow(Date.now())

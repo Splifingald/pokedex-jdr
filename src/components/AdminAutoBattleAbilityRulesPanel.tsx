@@ -45,7 +45,7 @@ const BONUS_DAMAGE_CONDITION_LABEL: Record<AutoBattleBonusDamageCondition, strin
   took_damage_last_turn: 'A subi des dégâts au dernier tour adverse',
   first_use: "C'est la toute première capacité utilisée par ce camp",
   dice_equals: 'Le dé de dégâts de cette capacité tombe sur une valeur précise',
-  has_status: 'Le pokémon est actuellement affecté par un statut',
+  has_status: "L'adversaire est actuellement affecté par un statut",
 }
 
 const ANIMATION_STYLE_LABEL: Record<AutoBattleAnimationStyle, string> = {

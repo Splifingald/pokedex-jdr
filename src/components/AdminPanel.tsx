@@ -69,6 +69,15 @@ function mapCsvRow(row: CsvRow) {
   }
 }
 
+// "Inflige dégâts" (vrai/faux, insensible à la casse) — colonne optionnelle :
+// absente ou vide = true (comportement historique, la quasi-totalité des
+// capacités sont offensives), seule une valeur reconnue comme fausse
+// (faux/false) désactive explicitement les dégâts.
+function parseDealsDamageCsv(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase()
+  return normalized !== 'faux' && normalized !== 'false'
+}
+
 function mapAttackCsvRow(row: AttackCsvRow) {
   const statusEffect = parseStatusEffectCsvLabel(row['Mini-game status'])
   return {
@@ -85,6 +94,7 @@ function mapAttackCsvRow(row: AttackCsvRow) {
     // status_chance ignoré si aucun statut valide n'est reconnu.
     status_effect: statusEffect,
     status_chance: statusEffect && row['Status probability']?.trim() ? parseInt(row['Status probability']) : null,
+    deals_damage: parseDealsDamageCsv(row['Inflige dégâts']),
   }
 }
 

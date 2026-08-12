@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import type { Player, PlayerPokemon, Pokemon, Attack, PokemonEvolution, Item, AutoBattleVariant, AutoBattleLevel, AutoBattleResolveResult, AutoBattleManualRoundResult, AutoBattleAbilityRule } from '../types'
+import type { Player, PlayerPokemon, Pokemon, Attack, PokemonEvolution, Item, AutoBattleVariant, AutoBattleLevel, AutoBattleResolveResult, AutoBattleManualRoundResult, AutoBattleStartManualBattleResult, AutoBattleAbilityRule } from '../types'
 import { TICKET_AUTOBATTLE_ITEM_NAME, POKEDOLLAR_ITEM_NAME, ownedPokemonName } from '../types'
 import { supabase } from '../lib/supabase'
 import { usePlayerItems } from '../hooks/usePlayerItems'
@@ -30,7 +30,7 @@ import { CloseIcon } from './icons/CloseIcon'
 import { PokedollarIcon } from './PokedollarIcon'
 import { logHistoryEvent } from '../lib/historyLog'
 
-type View = 'list' | 'pick-pokemon' | 'pick-ability' | 'coin-toss' | 'battle' | 'manual-battle' | 'reward' | 'lose'
+type View = 'list' | 'pick-pokemon' | 'pick-ability' | 'coin-toss' | 'battle' | 'manual-coin-toss' | 'manual-battle' | 'reward' | 'lose'
 
 // Messages affichés au joueur pour chaque statut non-'ok' renvoyé par le RPC
 // autobattle_resolve_battle (voir supabase/schema.sql) — évite qu'un rejet
@@ -46,6 +46,7 @@ const STATUS_MESSAGE: Record<string, string> = {
   duplicate_request: 'Combat déjà résolu.',
   not_found: 'Niveau introuvable.',
   wrong_mode: 'Ce parcours a changé de mode de jeu, réessayez.',
+  not_started: 'Combat non initialisé, réessayez.',
 }
 
 interface Props {
@@ -81,6 +82,50 @@ export function AutoBattlePopup({
   }, [abilityRules])
 
   const [view, setView] = useState<View>('list')
+  // Bannière du combat (GameBanner, voir plus bas) : reste toujours visible en
+  // haut (hors de la zone défilante), mais se réduit progressivement jusqu'à
+  // la moitié de sa hauteur de base pendant qu'on scrolle dans le contenu en
+  // dessous, pour laisser plus de place à ce contenu. bannerFullHeight suit
+  // la largeur réelle du conteneur (ResizeObserver, jamais sa propre hauteur —
+  // qu'on modifie nous-mêmes ci-dessous — pour ne pas créer de boucle) et en
+  // déduit la hauteur "pleine" via le même ratio 10/3 que l'ancien aspect-
+  // [10/3] qu'elle remplace. scrollShrink (0 → 1) vient du scrollTop de la
+  // zone défilante, remis à 0 à chaque changement de vue.
+  const bannerWrapRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const [bannerFullHeight, setBannerFullHeight] = useState<number | null>(null)
+  const [scrollShrink, setScrollShrink] = useState(0)
+  const BANNER_SHRINK_SCROLL_PX = 100
+
+  // Ajuste l'état pendant le rendu plutôt que dans un effet (pattern
+  // recommandé par React pour "réinitialiser un état quand une prop change",
+  // voir react.dev/learn/you-might-not-need-an-effect) — scrollContainerRef a
+  // aussi `key={view}` plus bas, qui démonte/remonte le conteneur défilant à
+  // chaque changement de vue et remet donc son scrollTop à 0 nativement, sans
+  // avoir besoin d'une manipulation DOM impérative ici.
+  const [prevView, setPrevView] = useState(view)
+  if (view !== prevView) {
+    setPrevView(view)
+    setScrollShrink(0)
+  }
+
+  useEffect(() => {
+    if (view !== 'battle' && view !== 'manual-battle') return
+    const el = bannerWrapRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width
+      if (width) setBannerFullHeight(width * 3 / 10)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [view])
+
+  const handleScrollContainerScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const t = e.currentTarget.scrollTop
+    setScrollShrink(Math.max(0, Math.min(1, t / BANNER_SHRINK_SCROLL_PX)))
+  }
+
   const [now, setNow] = useState(() => Date.now())
   const [activeVariant, setActiveVariant] = useState<AutoBattleVariant | null>(null)
   const [activeLevel, setActiveLevel] = useState<AutoBattleLevel | null>(null)
@@ -96,12 +141,17 @@ export function AutoBattlePopup({
   // RPC exécutées) alors qu'un seul restait visible à l'écran (le second
   // résultat écrasant le premier), rendant le bug quasi invisible.
   const submittingRef = useRef(false)
-  // Combat Manuel : le ticket n'est débité (optimiste, comme le mode Auto)
-  // qu'au 1er tour du combat, pas à chaque appel RPC (voir autobattle_
-  // resolve_manual_round, qui ne débite lui aussi qu'à la création de la
-  // ligne autobattle_manual_battles) — ce ref suit si c'est déjà fait pour
-  // le combat en cours.
-  const manualTicketSpentRef = useRef(false)
+  // Combat Manuel : verrou contre un double-appel de handleStartManualBattle
+  // (double-tap sur le picker, réseau lent) — sans lui, un tirage au sort
+  // demandé une seule fois par le joueur pouvait débiter deux tickets (voir
+  // handleStartManualBattle).
+  const startingRef = useRef(false)
+  // Combat Manuel : qui attaque en premier, tiré au sort par
+  // autobattle_start_manual_battle dès le choix du pokémon (voir
+  // handleStartManualBattle) — révélé via AutoBattleCoinToss (view
+  // 'manual-coin-toss') puis transmis à ManualBattleScreen pour le badge
+  // "(1er)"/"(2ème)" sur l'invite de sélection de capacité.
+  const [manualFirstAttacker, setManualFirstAttacker] = useState<'player' | 'opponent' | null>(null)
 
   const ticketRow = playerItems.inventory.find((r) => r.item_nom === TICKET_AUTOBATTLE_ITEM_NAME)
   const ticketCount = ticketRow?.quantity ?? 0
@@ -151,39 +201,75 @@ export function AutoBattlePopup({
     setBattleResult(null)
     setEvolutionEligible(false)
     setShowEvolvePrompt(false)
-    manualTicketSpentRef.current = false
+    setManualFirstAttacker(null)
+    startingRef.current = false
     setView('pick-pokemon')
+  }
+
+  // Combat Manuel : appelée quand le joueur choisit son pokémon — crée le
+  // combat côté serveur et tire au sort qui attaque en premier (voir
+  // autobattle_start_manual_battle) AVANT même la grille de sélection de
+  // capacité, pour pouvoir jouer le tirage au sort (AutoBattleCoinToss, voir
+  // view 'manual-coin-toss') dès ce moment-là, comme en Combat Auto. Le
+  // ticket est débité ICI, au moment où le tirage au sort est lancé — voir
+  // requirement : reculer AVANT ce point (pendant le choix du pokémon) ne
+  // coûte rien, mais une fois le tirage lancé c'est définitif, même si le
+  // joueur recule ensuite sans jouer un seul tour (autobattle_resolve_
+  // manual_round ne touche plus du tout aux tickets). startingRef (voir plus
+  // haut) évite un double-appel (double-tap sur le picker, réseau lent) qui
+  // débiterait deux tickets pour un seul tirage au sort demandé.
+  const handleStartManualBattle = async (pp: PlayerPokemon) => {
+    if (!activeLevel || startingRef.current) return
+    if (ticketCount < 1 || !ticketRow) {
+      showToast('Aucun ticket disponible.')
+      return
+    }
+    startingRef.current = true
+    setSelectedPokemon(pp)
+
+    let result: AutoBattleStartManualBattleResult | null = null
+    let rpcError: unknown
+    try {
+      const idempotencyKey = generateIdempotencyKey()
+      const { data, error } = await supabase.rpc('autobattle_start_manual_battle', {
+        p_player_id: player.id,
+        p_level_id: activeLevel.id,
+        p_player_pokemon_id: pp.id,
+        p_idempotency_key: idempotencyKey,
+      })
+      result = (data ?? null) as AutoBattleStartManualBattleResult | null
+      rpcError = error
+    } catch (err) {
+      rpcError = err
+    }
+
+    if (rpcError || !result || result.status !== 'ok' || !result.first_attacker) {
+      if (rpcError) console.error('Erreur lors du démarrage du combat Combat Manuel :', rpcError)
+      startingRef.current = false
+      showToast(STATUS_MESSAGE[result?.status ?? ''] ?? 'Combat impossible pour le moment.')
+      return
+    }
+
+    const spentTotal = ticketRow.quantity - 1
+    void playerItems.setQuantity(ticketRow, spentTotal)
+    void logHistoryEvent('inventory', 'item_autobattle_spend', player.id, {
+      item_nom: TICKET_AUTOBATTLE_ITEM_NAME,
+      delta: 1,
+      total: spentTotal,
+      source: activeVariant?.nom ?? config.nom,
+    })
+
+    setManualFirstAttacker(result.first_attacker)
+    setView('manual-coin-toss')
   }
 
   // Combat Manuel : appelée par ManualBattleScreen à chaque capacité choisie
   // par le joueur (un tour = un appel RPC, voir autobattle_resolve_manual_
-  // round). Retourne null en cas d'erreur réseau/RPC — ManualBattleScreen
+  // round — le ticket a déjà été débité par handleStartManualBattle ci-
+  // dessus). Retourne null en cas d'erreur réseau/RPC — ManualBattleScreen
   // se contente alors de redonner la main sans planter, le toast suffit.
   const handleSubmitManualRound = async (pp: PlayerPokemon, ability: Attack): Promise<AutoBattleManualRoundResult | null> => {
     if (!activeLevel) return null
-    const isFirstRound = !manualTicketSpentRef.current
-    if (isFirstRound) {
-      if (ticketCount < 1 || !ticketRow) {
-        showToast('Aucun ticket disponible.')
-        return null
-      }
-      manualTicketSpentRef.current = true
-      const spentTotal = ticketRow.quantity - 1
-      // Pas d'await ici : setQuantity applique déjà la mise à jour optimiste
-      // du compteur de tickets de façon SYNCHRONE avant son propre appel
-      // réseau (voir usePlayerItems.setQuantity) — le faire attendre avant
-      // de lancer le RPC du 1er tour ne ferait qu'ajouter un aller-retour
-      // réseau complet au temps mort perçu avant que l'animation démarre,
-      // pour rien (l'UI est déjà à jour, et le débit serveur du ticket est
-      // de toute façon fait indépendamment par le RPC lui-même).
-      void playerItems.setQuantity(ticketRow, spentTotal)
-      void logHistoryEvent('inventory', 'item_autobattle_spend', player.id, {
-        item_nom: TICKET_AUTOBATTLE_ITEM_NAME,
-        delta: 1,
-        total: spentTotal,
-        source: activeVariant?.nom ?? config.nom,
-      })
-    }
 
     let result: AutoBattleManualRoundResult | null = null
     let rpcError: unknown
@@ -195,7 +281,6 @@ export function AutoBattlePopup({
         p_player_pokemon_id: pp.id,
         p_ability_nom: ability.nom,
         p_idempotency_key: idempotencyKey,
-        p_is_new_battle: isFirstRound,
       })
       result = (data ?? null) as AutoBattleManualRoundResult | null
       rpcError = error
@@ -205,16 +290,6 @@ export function AutoBattlePopup({
 
     if (rpcError || !result || result.status !== 'ok') {
       if (rpcError) console.error('Erreur lors de la résolution du tour Combat Manuel :', rpcError)
-      if (isFirstRound) {
-        manualTicketSpentRef.current = false
-        await playerItems.addItems(TICKET_AUTOBATTLE_ITEM_NAME, 1)
-        void logHistoryEvent('inventory', 'item_add', player.id, {
-          item_nom: TICKET_AUTOBATTLE_ITEM_NAME,
-          delta: 1,
-          total: ticketCount,
-          source: 'combat refusé',
-        })
-      }
       showToast(STATUS_MESSAGE[result?.status ?? ''] ?? 'Combat impossible pour le moment.')
       return null
     }
@@ -395,7 +470,7 @@ export function AutoBattlePopup({
         className="relative bg-cream w-full h-full overflow-hidden flex flex-col
           sm:h-auto sm:max-w-md sm:max-h-[85vh] sm:rounded-[var(--radius-pixel)] sm:border-[3px] sm:border-ink sm:shadow-[var(--shadow-pixel-lg)]"
       >
-        {view !== 'coin-toss' && view !== 'battle' && view !== 'manual-battle' && (
+        {view !== 'coin-toss' && view !== 'battle' && view !== 'manual-coin-toss' && view !== 'manual-battle' && (
           <button
             onClick={onClose}
             className="absolute right-3 top-3 z-20 w-8 h-8 rounded-full border-2 border-ink bg-cream shadow-[var(--shadow-pixel)] flex items-center justify-center text-ink hover:bg-black/10 active:shadow-none active:translate-x-[1px] active:translate-y-[1px] transition-all"
@@ -405,10 +480,19 @@ export function AutoBattlePopup({
         )}
 
         {(view === 'battle' || view === 'manual-battle') && activeLevel && (
-          <GameBanner bannerUrl={activeVariant?.banner_url ?? ''} fallbackEmoji="⚔️" className="aspect-[10/3] shrink-0" />
+          <div
+            ref={bannerWrapRef}
+            className="w-full shrink-0 overflow-hidden"
+            style={{
+              height: bannerFullHeight != null ? bannerFullHeight * (1 - scrollShrink * 0.5) : undefined,
+              transition: 'height 120ms ease-out',
+            }}
+          >
+            <GameBanner bannerUrl={activeVariant?.banner_url ?? ''} fallbackEmoji="⚔️" className="w-full h-full" />
+          </div>
         )}
 
-        <div className="flex-1 overflow-y-auto p-4 sm:p-5">
+        <div key={view} ref={scrollContainerRef} onScroll={handleScrollContainerScroll} className="flex-1 overflow-y-auto p-4 sm:p-5">
           {view === 'list' && (
             <>
               <div className="flex items-center gap-2 mb-4">
@@ -500,15 +584,28 @@ export function AutoBattlePopup({
               opponentSpecies={activeLevel ? pokemonByName.get(activeLevel.opponent_pokemon_nom) : undefined}
               opponentDiscovered={activeLevel ? (stateByLevel.get(activeLevel.id)?.discovered ?? false) : false}
               onSelect={(pp) => {
-                setSelectedPokemon(pp)
-                setView(activeVariant?.game_mode === 'manual' ? 'manual-battle' : 'pick-ability')
+                if (activeVariant?.game_mode === 'manual') {
+                  void handleStartManualBattle(pp)
+                } else {
+                  setSelectedPokemon(pp)
+                  setView('pick-ability')
+                }
               }}
               onBack={resetToList}
             />
           )}
 
-          {view === 'manual-battle' && activeLevel && selectedPokemon && (
+          {view === 'manual-coin-toss' && manualFirstAttacker && (
+            <AutoBattleCoinToss
+              player={player}
+              firstAttacker={manualFirstAttacker}
+              onDone={() => setView('manual-battle')}
+            />
+          )}
+
+          {view === 'manual-battle' && activeLevel && selectedPokemon && manualFirstAttacker && (
             <ManualBattleScreen
+              firstAttacker={manualFirstAttacker}
               playerPokemon={selectedPokemon}
               playerSpecies={activeSpecies}
               playerMaxHp={Math.max(1, getHpBreakdown(activeSpecies, selectedPokemon.xp).total)}
@@ -519,6 +616,7 @@ export function AutoBattlePopup({
               abilityRulesByName={abilityRulesByName}
               bannedAttacks={bannedNames}
               precisionEnabled={config.precision_enabled}
+              isAdmin={isAdmin}
               onSubmitRound={(ability) => handleSubmitManualRound(selectedPokemon, ability)}
               onFinished={handleManualBattleFinished}
             />
