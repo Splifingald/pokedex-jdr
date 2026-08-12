@@ -2,6 +2,16 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Pokemon, PlayerPokemon, Attack, AutoBattleAbilityRule, AutoBattleTurn, AutoBattleManualRoundResult } from '../../types'
 import { AutoBattleScreen } from './AutoBattleScreen'
 import { ManualBattleAbilityGrid } from './ManualBattleAbilityGrid'
+import { PixelIcon } from '../icons/PixelIcon'
+import { AUTOBATTLE_TICKET_ICON } from '../../lib/icons'
+import { BUTTON_STYLE } from '../../lib/buttonStyles'
+
+// Nombre de rounds complets (chacun résout jusqu'à 2 flips, un tour de
+// chaque camp — voir autobattle_resolve_manual_round) sans le moindre PV
+// perdu d'aucun côté avant de proposer d'abandonner en match nul — évite
+// les combats où deux pokémon s'annulent indéfiniment (aucun des deux ne
+// peut jamais entamer l'autre) sans issue possible autrement.
+const STALEMATE_ROUNDS_THRESHOLD = 3
 
 interface Props {
   playerPokemon: PlayerPokemon
@@ -10,6 +20,8 @@ interface Props {
   opponentSpecies: Pokemon | undefined
   opponentNom: string
   opponentMaxHp: number
+  /** Capacités CONFIGURÉES sur le niveau pour l'adversaire (jusqu'à 10, voir AutoBattleLevel.opponent_ability_nom_2..10) — remplace le mouvepool du joueur dans la grille de sélection si son pokémon est Métamorph (copie le mouvepool adverse, voir requirement dédié ; contrairement à l'adversaire Métamorph qui pioche au hasard dans CELUI du joueur, ici le joueur choisit toujours laquelle jouer). */
+  opponentAbilityPool: string[]
   /** Qui attaque en premier CE combat (tiré au sort par autobattle_start_manual_battle, révélé au joueur via AutoBattleCoinToss AVANT le montage de cet écran, voir AutoBattlePopup) — fixe pour tout le combat, sert uniquement à afficher "(1er)"/"(2ème)" sur l'invite de sélection. */
   firstAttacker: 'player' | 'opponent'
   attacksByName: Map<string, Attack>
@@ -20,6 +32,8 @@ interface Props {
   /** Envoie le tour au serveur (voir autobattle_resolve_manual_round) — renvoie null en cas d'erreur réseau/RPC (déjà signalée par le parent via toast). */
   onSubmitRound: (ability: Attack) => Promise<AutoBattleManualRoundResult | null>
   onFinished: (result: AutoBattleManualRoundResult) => void
+  /** Bouton "Déclarer égalité" (voir STALEMATE_ROUNDS_THRESHOLD) : crédite 1 Ticket Combat et ramène à la sélection du parcours — géré par le parent (AutoBattlePopup), pas cet écran, qui ne touche jamais à l'inventaire lui-même. */
+  onDeclareTie: () => void
 }
 
 // Écran de combat Manuel — requirement : animations STRICTEMENT identiques
@@ -37,12 +51,29 @@ interface Props {
 // autobattle_start_manual_battle décide first_attacker dès le choix du
 // pokémon, plus besoin de le différer ici jusqu'au 1er tour).
 export function ManualBattleScreen({
-  playerPokemon, playerSpecies, playerMaxHp, opponentSpecies, opponentNom, opponentMaxHp, firstAttacker,
-  attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, isAdmin, onSubmitRound, onFinished,
+  playerPokemon, playerSpecies, playerMaxHp, opponentSpecies, opponentNom, opponentMaxHp, firstAttacker, opponentAbilityPool,
+  attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, isAdmin, onSubmitRound, onFinished, onDeclareTie,
 }: Props) {
   const [turns, setTurns] = useState<AutoBattleTurn[]>([])
   const [busy, setBusy] = useState(false)
   const [pendingResult, setPendingResult] = useState<AutoBattleManualRoundResult | null>(null)
+  const [roundCount, setRoundCount] = useState(0)
+
+  // Métamorph JOUEUR : le mouvepool "connu" pour ce combat n'est plus le
+  // sien mais l'ensemble des capacités configurées sur le niveau adverse
+  // (dédupliqué — plusieurs positions peuvent pointer vers la même capacité,
+  // voir opponentAbilityPool) — connu dès le montage (playerSpecies vient du
+  // roster, pas d'un résultat de tour), pas besoin d'attendre le 1er round.
+  const isPlayerMetamorph = playerSpecies?.nom === 'Métamorph'
+  const abilityNoms = useMemo(
+    () => isPlayerMetamorph ? [...new Set(opponentAbilityPool)] : playerPokemon.moves,
+    [isPlayerMetamorph, opponentAbilityPool, playerPokemon.moves]
+  )
+  // Badge Super Efficace par capacité (voir ManualBattleAbilityGrid) : type
+  // et liste "super efficace" EFFECTIFS, ceux copiés de l'adversaire si
+  // Métamorph — jamais les siens propres dans ce cas (voir autobattle_
+  // resolve_manual_round, même règle côté serveur pour le calcul réel).
+  const effectivePlayerSpecies = isPlayerMetamorph ? opponentSpecies : playerSpecies
 
   // Une seule capacité réellement jouable (soit le pokémon n'en connaît
   // qu'une, soit toutes les autres sont bannies, voir autobattle_banned_
@@ -51,10 +82,10 @@ export function ManualBattleScreen({
   // mais onSelect est déclenché automatiquement à chaque tour au lieu
   // d'attendre un tap (voir l'effet ci-dessous).
   const eligibleAbilities = useMemo(
-    () => playerPokemon.moves
+    () => abilityNoms
       .map((nom) => attacksByName.get(nom))
       .filter((a): a is Attack => a != null && !bannedAttacks.has(a.nom)),
-    [playerPokemon.moves, attacksByName, bannedAttacks]
+    [abilityNoms, attacksByName, bannedAttacks]
   )
   const autoPlayAbility = eligibleAbilities.length === 1 ? eligibleAbilities[0] : null
 
@@ -89,6 +120,7 @@ export function ManualBattleScreen({
     }))
     setTurns((prev) => [...prev, ...taggedTurns])
     setPendingResult(result)
+    setRoundCount((c) => c + 1)
 
     if (!autoPlayAbility) {
       if (forced) {
@@ -123,16 +155,28 @@ export function ManualBattleScreen({
     setBusy(false)
   }
 
+  // Voir STALEMATE_ROUNDS_THRESHOLD : les deux pokémon n'ont pas perdu un
+  // seul PV après ce nombre de rounds complets — situation de blocage
+  // mutuel (aucun des deux ne peut jamais entamer l'autre) sans autre issue
+  // que d'abandonner. pendingResult.outcome !IS NULL exclurait cet écran de
+  // toute façon (transition vers récompense/défaite), pas besoin de le
+  // revérifier ici.
+  const isStalemate = roundCount >= STALEMATE_ROUNDS_THRESHOLD
+    && pendingResult?.player_hp === playerMaxHp
+    && pendingResult?.opponent_hp === opponentMaxHp
+
   return (
     <AutoBattleScreen
       playerPokemon={playerPokemon}
       playerSpecies={playerSpecies}
       playerMaxHp={playerMaxHp}
       playerAbilityNom=""
+      playerImageOverride={pendingResult?.player_image_override ?? undefined}
       opponentSpecies={opponentSpecies}
       opponentMaxHp={opponentMaxHp}
       opponentNom={opponentNom}
       opponentAbilityNom=""
+      opponentImageOverride={pendingResult?.opponent_image_override ?? undefined}
       turns={turns}
       playerTypeBonus={pendingResult?.player_type_bonus ?? false}
       opponentTypeBonus={pendingResult?.opponent_type_bonus ?? false}
@@ -152,7 +196,9 @@ export function ManualBattleScreen({
             </p>
           )}
           <ManualBattleAbilityGrid
-            playerPokemon={playerPokemon}
+            abilityNoms={abilityNoms}
+            playerSpecies={effectivePlayerSpecies}
+            opponentSpecies={opponentSpecies}
             attacksByName={attacksByName}
             abilityRulesByName={abilityRulesByName}
             bannedAttacks={bannedAttacks}
@@ -160,6 +206,18 @@ export function ManualBattleScreen({
             disabled={busy || !!autoPlayAbility || !!forcedAbility}
             onSelect={(ability) => void handleSelect(ability, false)}
           />
+          {isStalemate && (
+            <button
+              onClick={onDeclareTie}
+              disabled={busy}
+              className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-bold ${busy ? 'opacity-40 cursor-not-allowed' : BUTTON_STYLE.gray}`}
+            >
+              Déclarer égalité
+              <span className="flex items-center gap-1">
+                +1 <PixelIcon src={AUTOBATTLE_TICKET_ICON} size={16} colored />
+              </span>
+            </button>
+          )}
         </div>
       }
     />

@@ -70,6 +70,8 @@ interface Props {
   midSlot?: ReactNode
   /** Combat Manuel : pas de compte à rebours 3-2-1-GO, le combat "commence" dès le montage (voir useEffect du countdown). */
   skipCountdown?: boolean
+  /** Multiplie la vitesse des phases d'attaque (voir computeDurations) — 2 = deux fois plus rapide (durées divisées par 2). Utilisé par le mode "Tester" du PvP (combat 100% automatique des deux côtés, voir PvpTrialBattleScreen) pour un retour rapide ; absent partout ailleurs (défaut 1, comportement inchangé). */
+  speedMultiplier?: number
 }
 
 const COUNTDOWN_STEPS = ['3', '2', '1', 'GO !']
@@ -228,7 +230,7 @@ function statusOverlayStyle(status: AutoBattleStatusEffect, spriteUrl: string): 
 export function AutoBattleScreen({
   playerPokemon, playerSpecies, playerMaxHp, playerAbilityNom, playerImageOverride, opponentSpecies, opponentMaxHp, opponentNom, opponentAbilityNom, opponentImageOverride, turns,
   playerTypeBonus, opponentTypeBonus, onContinue, isAdmin = false, attacksByName, abilityRulesByName, playerDamagePerHit, opponentDamagePerHit,
-  hideContinueButton = false, midSlot, skipCountdown = false,
+  hideContinueButton = false, midSlot, skipCountdown = false, speedMultiplier = 1,
 }: Props) {
   const [countdownStep, setCountdownStep] = useState(-1)
   const [fighting, setFighting] = useState(skipCountdown)
@@ -280,6 +282,14 @@ export function AutoBattleScreen({
   const battleStartRef = useRef<number | null>(null)
   const playerShieldActiveRef = useRef(false)
   const opponentShieldActiveRef = useRef(false)
+  // Voir le commentaire détaillé plus bas (autobattle_resolve_battle a le
+  // même concept côté serveur, v_round_no) : le bouclier ne s'éteint QUE
+  // quand son propriétaire recommence à jouer APRÈS avoir vu l'adversaire
+  // jouer au moins un coup depuis qu'il a été accordé — pas juste "au tour
+  // suivant", pour survivre à une rafale adverse entière (play_twice/
+  // play_three/...) plutôt que de disparaître dès son 1er coup.
+  const playerShieldSeenOpponentTurnRef = useRef(false)
+  const opponentShieldSeenPlayerTurnRef = useRef(false)
 
   // Précision effective affichée en debug admin — reproduit EXACTEMENT
   // GREATEST(0, ability.precision - v_status_precision_penalty) côté
@@ -330,13 +340,15 @@ export function AutoBattleScreen({
     if (battleStartRef.current == null) battleStartRef.current = Date.now()
     const battleStart = battleStartRef.current
     // Suivi local du bouclier d'invulnérabilité — expire au tout début du
-    // tour adverse suivant, que ce tour soit une vraie attaque ou non (voir
-    // autobattle_resolve_battle) : même règle appliquée ici côté client,
-    // sans dépendre d'un champ serveur dédié, pour rester synchronisé même
-    // quand le bouclier expire "silencieusement" (préparation/tour passé/
-    // tick de statut adverse) plutôt que via un raté explicite.
+    // PROCHAIN TOUR de son propriétaire (avant que sa capacité ne soit
+    // résolue), pas "au coup adverse suivant" : il bloque donc TOUTE la
+    // prochaine rafale adverse s'il y en a une (voir autobattle_resolve_
+    // battle/autobattle_resolve_manual_round, v_round_no) — même règle
+    // appliquée ici côté client, sans dépendre d'un champ serveur dédié.
     let playerShieldActive = playerShieldActiveRef.current
     let opponentShieldActive = opponentShieldActiveRef.current
+    let playerShieldSeenOpponentTurn = playerShieldSeenOpponentTurnRef.current
+    let opponentShieldSeenPlayerTurn = opponentShieldSeenPlayerTurnRef.current
     setBattleDone(false)
 
     // Nom/icône/capacité affichés dans l'historique pour un côté donné — voir
@@ -352,7 +364,7 @@ export function AutoBattleScreen({
     const pushHistory = (
       side: Side,
       content: string | { before: string; status: AutoBattleStatusEffect; after: string },
-      extra?: { damage?: number; heal?: number; superEffective?: boolean; basePrecision?: number; effectivePrecision?: number; diceRoll?: number; precisionStatus?: string; damageFormula?: string; healFormula?: string }
+      extra?: { damage?: number; heal?: number; superEffective?: boolean; basePrecision?: number; effectivePrecision?: number; precisionStatus?: string; damageFormula?: string; healFormula?: string }
     ) => {
       const info = sideInfo(side)
       historyIdRef.current += 1
@@ -368,7 +380,6 @@ export function AutoBattleScreen({
         superEffective: extra?.superEffective,
         debugBasePrecision: extra?.basePrecision,
         debugEffectivePrecision: extra?.effectivePrecision,
-        debugDiceRoll: extra?.diceRoll,
         debugPrecisionStatus: extra?.precisionStatus,
         debugDamageFormula: extra?.damageFormula,
         debugHealFormula: extra?.healFormula,
@@ -404,33 +415,29 @@ export function AutoBattleScreen({
           ? precedingTick.status
           : null
 
-      // Le bouclier d'invulnérabilité expire EXACTEMENT 1 tour après avoir
-      // été accordé, point — quel que soit le type de ce tour suivant et quel
-      // que soit son attaquant (voir autobattle_resolve_battle : ce n'est
-      // plus conditionné à "l'adversaire attaque", une rafale du même camp
-      // qui l'a accordé le retire tout aussi bien). granted ci-dessous est
-      // affecté à la fin de CETTE itération : ce test porte donc toujours sur
-      // un bouclier accordé lors d'une itération précédente. SAUF si ce tour
-      // est justement l'attaque adverse bloquée par ce bouclier
-      // (turn.invulnerable_miss) : dans ce cas, effacer l'effet visuel
-      // "estompé" dès maintenant (avant même que l'animation de cette
-      // attaque ne commence à jouer) donnerait l'impression que le bouclier
-      // a disparu AVANT d'avoir bloqué quoi que ce soit — on laisse alors le
-      // gestionnaire de raté plus bas (au moment de l'impact, quand
-      // "Invulnérable !" s'affiche) s'en charger, pour que le pokémon reste
-      // visuellement estompé jusqu'à cet instant précis.
-      if (playerShieldActive) {
+      // Le bouclier d'invulnérabilité expire au tout DÉBUT du prochain tour
+      // de son propriétaire, avant que sa capacité ne soit résolue — pas "1
+      // coup adverse" : tant que l'adversaire n'a pas encore joué depuis
+      // l'octroi (playerShieldSeenOpponentTurn / opponentShieldSeenPlayerTurn
+      // encore faux), le bouclier reste actif MÊME si CE tour-ci appartient
+      // déjà au propriétaire (rafale de sa propre capacité qui vient
+      // d'accorder le bouclier) — il ne s'éteint que la fois SUIVANTE où
+      // c'est son tour, une fois l'adversaire effectivement passé entretemps
+      // (voir autobattle_resolve_battle/autobattle_resolve_manual_round,
+      // v_round_no : un bouclier accordé au tour N reste actif tout le tour
+      // adverse N+1 — rafale comprise — et ne s'éteint qu'au tour N+2).
+      if (playerShieldActive && playerShieldSeenOpponentTurn && attackerSide === 'player') {
         playerShieldActive = false
-        if (!(turn.attacker === 'opponent' && turn.invulnerable_miss)) {
-          timers.push(window.setTimeout(() => setPlayerInvulnerable(false), turnStart))
-        }
+        playerShieldSeenOpponentTurn = false
+        timers.push(window.setTimeout(() => setPlayerInvulnerable(false), turnStart))
       }
-      if (opponentShieldActive) {
+      if (opponentShieldActive && opponentShieldSeenPlayerTurn && attackerSide === 'opponent') {
         opponentShieldActive = false
-        if (!(turn.attacker === 'player' && turn.invulnerable_miss)) {
-          timers.push(window.setTimeout(() => setOpponentInvulnerable(false), turnStart))
-        }
+        opponentShieldSeenPlayerTurn = false
+        timers.push(window.setTimeout(() => setOpponentInvulnerable(false), turnStart))
       }
+      if (playerShieldActive && attackerSide === 'opponent') playerShieldSeenOpponentTurn = true
+      if (opponentShieldActive && attackerSide === 'player') opponentShieldSeenPlayerTurn = true
       // Le suivi local (synchrone, pendant la programmation des timers) doit
       // être mis à jour ICI plutôt que dans les callbacks différés
       // (setTimeout) ci-dessous : ce .forEach programme TOUS les tours d'un
@@ -438,23 +445,24 @@ export function AutoBattleScreen({
       // affectation faite dans un callback différé ne serait jamais visible
       // par les itérations suivantes de cette même boucle synchrone.
       if (turn.invulnerable_granted) {
-        if (attackerSide === 'player') playerShieldActive = true
-        else opponentShieldActive = true
+        if (attackerSide === 'player') { playerShieldActive = true; playerShieldSeenOpponentTurn = false }
+        else { opponentShieldActive = true; opponentShieldSeenPlayerTurn = false }
       }
 
       // Position (1-based) de ce tour dans son bloc d'attaques consécutives
-      // du même camp — voir speedMultiplierForRepeat ci-dessus. 'skipped' et
-      // 'status_tick' n'appartiennent jamais à un tel bloc, cassent toujours
-      // la série (un tick de statut n'est pas "réutiliser la capacité").
-      if (turn.skipped || turn.status_tick) {
+      // du même camp — voir speedMultiplierForRepeat ci-dessus. 'skipped',
+      // 'status_tick' et 'heal_dot_tick' n'appartiennent jamais à un tel
+      // bloc, cassent toujours la série (un tick n'est pas "réutiliser la
+      // capacité").
+      if (turn.skipped || turn.status_tick || turn.heal_dot_tick) {
         streak = 0
         prevStreakAttacker = null
       } else {
         streak = attackerSide === prevStreakAttacker ? streak + 1 : 1
         prevStreakAttacker = attackerSide
       }
-      const multiplier = (turn.skipped || turn.status_tick) ? 1 : speedMultiplierForRepeat(streak)
-      const durations = computeDurations(multiplier)
+      const multiplier = (turn.skipped || turn.status_tick || turn.heal_dot_tick) ? 1 : speedMultiplierForRepeat(streak)
+      const durations = computeDurations(multiplier * speedMultiplier)
       const impactOffset = durations.anticipation + durations.lunge + durations.strikeRise + durations.strikeLand
       const turnDuration = impactOffset + durations.return + durations.gap
 
@@ -532,6 +540,32 @@ export function AutoBattleScreen({
         continue
       }
 
+      // Tick de soin passif (heal_dot, voir AutoBattleTurn.heal_dot_tick) :
+      // comme status_tick ci-dessus, ce n'est jamais l'usage d'une capacité
+      // (en Combat Manuel, turn.ability_nom porte le nom de la capacité
+      // choisie CE tour-ci, qui n'a souvent aucun rapport avec celle qui a
+      // accordé le soin passif à l'origine — le tour générique plus bas
+      // afficherait donc "a utilisé <mauvaise capacité>" et donnerait
+      // l'impression que cette capacité a soigné deux fois). Pas d'animation
+      // d'attaque : juste le HP qui remonte et une ligne d'historique dédiée.
+      if (turn.heal_dot_tick) {
+        timers.push(window.setTimeout(() => {
+          setShownTurnIndex(i)
+          if (turn.heal != null && turn.attacker_hp_after != null) {
+            const healAmount = turn.heal
+            const attackerHpAfter = turn.attacker_hp_after
+            if (attackerSide === 'player') setPlayerHp(attackerHpAfter)
+            else setOpponentHp(attackerHpAfter)
+            setHealSide(attackerSide)
+            setLastHeal({ side: attackerSide, amount: healAmount })
+            setHealKey((k) => k + 1)
+          }
+          pushHistory(attackerSide, 'récupère des PV grâce à son soin passif', { heal: turn.heal })
+        }, turnStart + durations.anticipation))
+        cursor += turnDuration
+        continue
+      }
+
       if (turn.skipped) {
         timers.push(window.setTimeout(() => {
           setShownTurnIndex(i)
@@ -579,12 +613,11 @@ export function AutoBattleScreen({
           setMissSide(turn.invulnerable_miss ? hitSide : attackerSide)
           setMissLabel(turn.invulnerable_miss ? 'Invulnérable !' : 'MANQUÉ')
           setMissKey((k) => k + 1)
-          if (turn.invulnerable_miss) {
-            // Le bouclier protège le CAMP VISÉ par cette attaque, pas
-            // l'attaquant lui-même (hitSide = celui qui vient d'esquiver).
-            if (hitSide === 'player') setPlayerInvulnerable(false)
-            else setOpponentInvulnerable(false)
-          }
+          // Le pokémon protégé reste estompé — le bouclier peut encore
+          // bloquer d'autres coups si l'adversaire enchaîne une rafale (voir
+          // playerShieldSeenOpponentTurn/opponentShieldSeenPlayerTurn plus
+          // haut) ; il ne s'efface qu'au début du PROCHAIN tour de son
+          // propriétaire, jamais ici.
 
           const abilityNom = turn.ability_nom ?? (attackerSide === 'player' ? playerAbilityNom : opponentAbilityNom)
           const ability = attacksByName?.get(abilityNom)
@@ -594,7 +627,6 @@ export function AutoBattleScreen({
           pushHistory(attackerSide, `a manqué son attaque ${sideInfo(attackerSide, turn).ability}`, {
             basePrecision: isAdmin ? basePrecision : undefined,
             effectivePrecision: isAdmin ? precisionInfo?.effective : undefined,
-            diceRoll: undefined,
             precisionStatus: isAdmin ? precisionInfo?.statusLabel : undefined,
           })
           // Peur/confusion : cette attaque ratée (ou non) est précisément
@@ -629,16 +661,6 @@ export function AutoBattleScreen({
         const ability = attacksByName?.get(abilityNom)
         const basePrecision = ability?.precision ?? 10
         const precisionInfo = isAdmin ? getEffectivePrecision(basePrecision, attackerPrecisionStatus) : null
-        // damagePerHit = tout ce qui compose turn.damage AVANT le dé (espèce +
-        // XP + multiplicateur type + degats_base de la capacité, voir
-        // autobattle_resolve_battle/autobattle_resolve_manual_round
-        // v_player_damage/v_opponent_damage). Préfère turn.damage_before_dice
-        // (fourni PAR TOUR par le serveur, voir AutoBattleTurn) quand présent
-        // — seul moyen fiable en Combat Manuel, où la capacité change à
-        // chaque tour et rend les props playerDamagePerHit/opponentDamagePerHit
-        // (figées pour tout le combat, Combat Auto uniquement) inutilisables.
-        const damagePerHit = turn.damage_before_dice ?? (turn.ability_nom ? undefined : (attackerSide === 'player' ? playerDamagePerHit : opponentDamagePerHit))
-        const diceValue = isAdmin && damagePerHit != null ? turn.damage - damagePerHit : undefined
 
         // Détail complet du calcul de dégâts/soin en admin — voir
         // AutoBattleTurn.damage_species_xp/damage_dice (fournis PAR TOUR par
@@ -682,13 +704,13 @@ export function AutoBattleScreen({
           } else if (rule?.heal_type === 'percent_damage' && rule.heal_percent != null) {
             healFormula = `${rule.heal_percent}% des dégâts infligés (${turn.damage}) = ${turn.heal}`
           } else if (rule?.heal_type === 'use_stats' && turn.damage_species_xp != null) {
+            // Contrairement aux dégâts, un soin basé sur les stats n'est
+            // JAMAIS doublé par l'efficacité de type (voir supabase/schema.sql
+            // autobattle_combatant_ability.type_bonus) — pas de typeMult ici.
             const speciesXp = turn.damage_species_xp
             const abilityBase = ability?.degats_base ?? 0
-            const typeMult = isSuperEffective ? 2 : 1
-            const healDice = turn.heal - speciesXp * typeMult - abilityBase
-            healFormula = `${speciesXp} (dégâts de base)`
-            if (typeMult > 1) healFormula += ` x${typeMult} (super efficace)`
-            healFormula += ` + ${abilityBase} (dégâts de la capacité)`
+            const healDice = turn.heal - speciesXp - abilityBase
+            healFormula = `${speciesXp} (dégâts de base) + ${abilityBase} (dégâts de la capacité)`
             if (healDice > 0) healFormula += ` + ${healDice} (dé)`
             healFormula += ` = ${turn.heal}`
           }
@@ -700,7 +722,6 @@ export function AutoBattleScreen({
           superEffective: isSuperEffective,
           basePrecision: isAdmin ? basePrecision : undefined,
           effectivePrecision: isAdmin ? precisionInfo?.effective : undefined,
-          diceRoll: diceValue,
           precisionStatus: isAdmin ? precisionInfo?.statusLabel : undefined,
           damageFormula,
           healFormula,
@@ -776,6 +797,8 @@ export function AutoBattleScreen({
     prevStreakAttackerRef.current = prevStreakAttacker
     playerShieldActiveRef.current = playerShieldActive
     opponentShieldActiveRef.current = opponentShieldActive
+    playerShieldSeenOpponentTurnRef.current = playerShieldSeenOpponentTurn
+    opponentShieldSeenPlayerTurnRef.current = opponentShieldSeenPlayerTurn
 
     timers.push(window.setTimeout(() => {
       setBattleDone(true)
@@ -831,6 +854,11 @@ export function AutoBattleScreen({
               <img
                 src={playerSpriteSrc}
                 alt=""
+                // Cas Métamorph (sprite copié de l'adversaire, voir
+                // playerImageOverride) : retourné en miroir sur l'axe X pour
+                // rester visuellement distinguable du vrai pokémon adverse,
+                // même sprite affiché des deux côtés du terrain.
+                style={playerImageOverride ? { transform: 'scaleX(-1)' } : undefined}
                 className={`pixelated w-full h-full object-contain transition-opacity duration-500 ${playerKo ? 'grayscale opacity-40' : playerInvulnerable ? 'opacity-10' : ''}`}
               />
             ) : (
@@ -891,6 +919,7 @@ export function AutoBattleScreen({
               <img
                 src={opponentSpriteSrc}
                 alt=""
+                style={opponentImageOverride ? { transform: 'scaleX(-1)' } : undefined}
                 className={`pixelated w-full h-full object-contain transition-opacity duration-500 ${opponentKo ? 'grayscale opacity-40' : opponentInvulnerable ? 'opacity-10' : ''}`}
               />
             ) : (

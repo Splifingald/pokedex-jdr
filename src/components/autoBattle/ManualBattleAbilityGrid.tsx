@@ -1,5 +1,6 @@
-import type { PlayerPokemon, Attack, AutoBattleAbilityRule } from '../../types'
+import type { Pokemon, Attack, AutoBattleAbilityRule } from '../../types'
 import { getStatusEffectDisplay, describeAbilityRule } from '../../lib/autoBattle'
+import { getSuperEfficace } from '../../lib/pokemonFacts'
 import { TypeBadge } from '../TypeBadge'
 import { PixelIcon } from '../icons/PixelIcon'
 import { STAT_ICON, DICE_GENERIC_ICON } from '../../lib/icons'
@@ -9,7 +10,11 @@ import { BUTTON_STYLE } from '../../lib/buttonStyles'
 import { useToast } from '../../context/ToastContext'
 
 interface Props {
-  playerPokemon: PlayerPokemon
+  /** Noms des capacités à afficher — le mouvepool du pokémon normalement, ou l'ensemble des capacités configurées sur le niveau adverse si le pokémon du joueur est Métamorph (voir ManualBattleScreen : le joueur choisit toujours laquelle jouer, contrairement à l'adversaire Métamorph qui pioche au hasard). */
+  abilityNoms: string[]
+  /** Espèce EFFECTIVEMENT combattante (celle copiée par Métamorph le cas échéant, voir AutoBattlePopup) — même badge Super Efficace par capacité que AutoBattleAbilityPicker. */
+  playerSpecies?: Pokemon
+  opponentSpecies?: Pokemon
   attacksByName: Map<string, Attack>
   abilityRulesByName: Map<string, AutoBattleAbilityRule>
   bannedAttacks: Set<string>
@@ -18,16 +23,18 @@ interface Props {
   onSelect: (ability: Attack) => void
 }
 
-// Grille 2 colonnes des capacités du pokémon en Combat Manuel (requirement :
+// Grille 2 colonnes des capacités jouables en Combat Manuel (requirement :
 // affichée sous le visuel de combat, au-dessus de l'historique, pendant tout
 // le combat — pas un écran de sélection séparé comme AutoBattleAbilityPicker
 // en mode Auto). `disabled` = un tour est en cours de résolution/animation
 // (attend le prochain round_no), la grille reste visible mais non cliquable.
-export function ManualBattleAbilityGrid({ playerPokemon, attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, disabled, onSelect }: Props) {
+export function ManualBattleAbilityGrid({ abilityNoms, playerSpecies, opponentSpecies, attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, disabled, onSelect }: Props) {
   const { showToast } = useToast()
-  const abilities = playerPokemon.moves
+  const abilities = abilityNoms
     .map((nom) => attacksByName.get(nom))
     .filter((a): a is Attack => a != null)
+  const isSuperEffectiveSpecies = opponentSpecies != null
+    && getSuperEfficace(playerSpecies).includes(opponentSpecies.type)
 
   return (
     <div className="grid grid-cols-2 gap-2">
@@ -35,6 +42,8 @@ export function ManualBattleAbilityGrid({ playerPokemon, attacksByName, abilityR
         const ineligible = bannedAttacks.has(a.nom)
         const rule = abilityRulesByName.get(a.nom)
         const effectLines = describeAbilityRule(rule, a)
+        const superEffective = isSuperEffectiveSpecies && playerSpecies != null
+          && a.type.toLowerCase().trim() === playerSpecies.type.toLowerCase().trim()
         return (
           <button
             key={a.nom}
@@ -56,6 +65,11 @@ export function ManualBattleAbilityGrid({ playerPokemon, attacksByName, abilityR
                 <span className="flex items-center gap-1 shrink-0">
                   <span className="text-xs">🛑</span>
                   <span className="text-ink text-xs font-bold">BAN</span>
+                </span>
+              )}
+              {!ineligible && superEffective && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white bg-[#d9761e] whitespace-nowrap shrink-0">
+                  Super Efficace
                 </span>
               )}
             </div>

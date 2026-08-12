@@ -27,6 +27,7 @@ const CATEGORY_LABELS: Record<HistoryCategory, string> = {
   safari: 'Safari',
   autobattle: 'Combat Auto',
   chat: 'Chat',
+  pvp: 'Défi PvP',
 }
 
 function Avatar({ player, size = 8 }: { player?: Player; size?: 5 | 8 }) {

@@ -145,7 +145,7 @@ function RewardEditor({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      {rewards.length === 0 && <p className="text-hp-red text-xs italic">Aucune récompense — le niveau ne peut pas être validé.</p>}
+      {rewards.length === 0 && <p className="text-ink-muted-2 text-xs italic">Aucune récompense — niveau de pacing, pas de gain à la clé.</p>}
       {rewards.map((r) => (
         <RewardRow key={r.id} reward={r} items={items} onUpdate={onUpdate} onRemove={onRemove} />
       ))}
@@ -240,7 +240,7 @@ function LevelEditor({
   const [expanded, setExpanded] = useState(false)
   const opponentSpecies = pokemon.find((p) => p.nom === level.opponent_pokemon_nom)
   const damagingAttacks = attacks.filter((a) => !bannedAttacks.has(a.nom))
-  const invalid = !level.opponent_pokemon_nom || !level.opponent_ability_nom || rewards.length === 0
+  const invalid = !level.opponent_pokemon_nom || !level.opponent_ability_nom
 
   return (
     <div className={`rounded ${PIXEL_BORDER_SM} ${invalid ? 'bg-red-50' : 'bg-cream-secondary'}`}>
@@ -394,6 +394,24 @@ export function AdminAutoBattleVariantsPanel() {
   const selectedLevels = selected ? levelsByVariant.get(selected) ?? [] : []
   const canEnable = !!selectedVariant?.nom.trim() && !!selectedVariant.banner_url.trim() && !!selectedVariant.icon_url.trim() && selectedLevels.length > 0
 
+  // Récapitulatif fusionné de toutes les récompenses de tous les niveaux de
+  // la variante sélectionnée : XP additionnée en un seul total, objets (item/
+  // badge — mécaniquement identiques, voir types.ts) regroupés par nom avec
+  // quantités additionnées.
+  const variantRewardTotals = selectedLevels.reduce(
+    (acc, level) => {
+      for (const r of rewardsByLevel.get(level.id) ?? []) {
+        if (r.reward_type === 'xp') {
+          acc.xp += r.xp_amount ?? 0
+        } else if (r.item_nom) {
+          acc.items.set(r.item_nom, (acc.items.get(r.item_nom) ?? 0) + (r.item_quantity ?? 0))
+        }
+      }
+      return acc
+    },
+    { xp: 0, items: new Map<string, number>() }
+  )
+
   const handleDuplicate = async (id: number) => {
     const copy = await duplicateVariant(id)
     if (copy) setSelected(copy.id)
@@ -542,6 +560,33 @@ export function AdminAutoBattleVariantsPanel() {
                 />
               ))}
             </div>
+          </div>
+
+          <div className="border-t-2 border-[#cfc7a8] pt-3 mt-3">
+            <p className="text-ink-muted-2 text-sm font-bold mb-2">Récompenses totales de la variante</p>
+            {variantRewardTotals.xp === 0 && variantRewardTotals.items.size === 0 ? (
+              <p className="text-ink-muted-2 text-xs italic">Aucune récompense configurée sur cette variante.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {variantRewardTotals.xp > 0 && (
+                  <span className="text-xs font-bold px-2 py-1 rounded bg-cream-secondary border-2 border-ink text-blue-600">
+                    {variantRewardTotals.xp} XP
+                  </span>
+                )}
+                {[...variantRewardTotals.items.entries()].map(([itemNom, qty]) => (
+                  <span key={itemNom} className="flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded bg-cream-secondary border-2 border-ink text-ink">
+                    <span className="w-4 h-4 shrink-0 flex items-center justify-center">
+                      {items.find((it) => it.nom === itemNom)?.image_url ? (
+                        <img src={items.find((it) => it.nom === itemNom)?.image_url ?? ''} alt="" className="w-full h-full object-contain" />
+                      ) : (
+                        <span className="text-xs">🎒</span>
+                      )}
+                    </span>
+                    {itemNom} ×{qty}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

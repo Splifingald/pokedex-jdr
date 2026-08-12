@@ -436,6 +436,24 @@ export function AutoBattlePopup({
     setView('list')
   }
 
+  // Combat Manuel : bouton "Déclarer égalité" (voir ManualBattleScreen,
+  // STALEMATE_ROUNDS_THRESHOLD) — crédite 1 ticket (le combat en a déjà
+  // coûté 1 au tirage au sort, voir handleStartManualBattle) et ramène à la
+  // sélection du parcours. Le combat en cours sur le serveur (autobattle_
+  // manual_battles) reste tel quel : une prochaine tentative sur ce niveau
+  // le purgera et en redémarrera un neuf, comme pour tout abandon en cours.
+  const handleDeclareTie = async () => {
+    const spentTotal = ticketCount + 1
+    await playerItems.addItems(TICKET_AUTOBATTLE_ITEM_NAME, 1)
+    void logHistoryEvent('inventory', 'item_add', player.id, {
+      item_nom: TICKET_AUTOBATTLE_ITEM_NAME,
+      delta: 1,
+      total: spentTotal,
+      source: 'Égalité déclarée en Combat Manuel',
+    })
+    resetToList()
+  }
+
   const handleRewardConfirm = () => {
     if (evolutionEligible && !showEvolvePrompt) {
       setShowEvolvePrompt(true)
@@ -453,6 +471,10 @@ export function AutoBattlePopup({
 
   const activeSpecies = selectedPokemon ? pokemonByName.get(selectedPokemon.pokemon_nom) : undefined
   const opponentSpecies = battleResult ? pokemonByName.get(battleResult.opponent_pokemon_nom ?? '') : undefined
+  // Espèce adverse du NIVEAU (pas du résultat de combat, pas encore résolu
+  // avant le 1er appel RPC) — sert au badge Super Efficace par capacité dans
+  // AutoBattleAbilityPicker, affiché AVANT que le combat ne soit lancé.
+  const activeLevelOpponentSpecies = activeLevel ? pokemonByName.get(activeLevel.opponent_pokemon_nom) : undefined
 
   // Variantes déjà terminées reléguées en bas de liste (ordre stable sinon).
   const sortedEnabledVariants = [...variants.filter((v) => v.enabled)].sort((a, b) => {
@@ -612,6 +634,12 @@ export function AutoBattlePopup({
               opponentSpecies={pokemonByName.get(activeLevel.opponent_pokemon_nom)}
               opponentNom={activeLevel.opponent_pokemon_nom}
               opponentMaxHp={activeLevel.opponent_hp}
+              opponentAbilityPool={[
+                activeLevel.opponent_ability_nom, activeLevel.opponent_ability_nom_2, activeLevel.opponent_ability_nom_3,
+                activeLevel.opponent_ability_nom_4, activeLevel.opponent_ability_nom_5, activeLevel.opponent_ability_nom_6,
+                activeLevel.opponent_ability_nom_7, activeLevel.opponent_ability_nom_8, activeLevel.opponent_ability_nom_9,
+                activeLevel.opponent_ability_nom_10,
+              ].filter((n): n is string => !!n)}
               attacksByName={attacksByName}
               abilityRulesByName={abilityRulesByName}
               bannedAttacks={bannedNames}
@@ -619,12 +647,15 @@ export function AutoBattlePopup({
               isAdmin={isAdmin}
               onSubmitRound={(ability) => handleSubmitManualRound(selectedPokemon, ability)}
               onFinished={handleManualBattleFinished}
+              onDeclareTie={() => void handleDeclareTie()}
             />
           )}
 
           {view === 'pick-ability' && selectedPokemon && (
             <AutoBattleAbilityPicker
               playerPokemon={selectedPokemon}
+              playerSpecies={activeSpecies}
+              opponentSpecies={activeLevelOpponentSpecies}
               attacksByName={attacksByName}
               abilityRulesByName={abilityRulesByName}
               bannedAttacks={bannedNames}

@@ -19,8 +19,6 @@ export interface AutoBattleHistoryEntryData {
   debugBasePrecision?: number
   /** Debug info: effective precision (1-10) after status effects, used in admin mode */
   debugEffectivePrecision?: number
-  /** Debug info: dice roll value (0-max), used in admin mode */
-  debugDiceRoll?: number
   /** Debug info: status effect affecting precision if any, used in admin mode */
   debugPrecisionStatus?: string
   /** Debug info: full breakdown of the damage calculation (e.g. "10 (dégâts de base) x2 (super efficace) + 4 (dégâts de la capacité) + 4 (dé) = 28"), used in admin mode */
@@ -86,15 +84,9 @@ export function AutoBattleHistoryLog({ entries, onHide, className = '', isAdmin 
                   )}
                   {e.heal != null && <span className="text-hp-green font-bold"> +{e.heal} PV</span>}
                 </p>
-                {isAdmin && (e.debugEffectivePrecision != null || e.debugDiceRoll != null) && (
+                {isAdmin && e.debugEffectivePrecision != null && (
                   <div className="text-ink-muted text-xs leading-snug mt-0.5">
-                    {e.debugEffectivePrecision != null && (
-                      <>
-                        🎯 Précision: {e.debugBasePrecision}/10{e.debugPrecisionStatus ? ` (${e.debugPrecisionStatus})` : ''} → {e.debugEffectivePrecision}/10
-                        {e.debugDiceRoll != null && ' | '}
-                      </>
-                    )}
-                    {e.debugDiceRoll != null && `🎲 Dé: ${e.debugDiceRoll}`}
+                    🎯 Précision: {e.debugBasePrecision}/10{e.debugPrecisionStatus ? ` (${e.debugPrecisionStatus})` : ''} → {e.debugEffectivePrecision}/10
                   </div>
                 )}
                 {isAdmin && e.debugDamageFormula && (

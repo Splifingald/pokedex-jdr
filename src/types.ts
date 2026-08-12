@@ -274,6 +274,8 @@ export interface PlayerPokemon {
   daycare_capped_notified: boolean
   daycare_xp_at_placement: number | null
   egg_reveal_seen: boolean
+  /** Combats gagnés par cette instance précise (pas l'espèce) — conservé à travers les évolutions, voir supabase/schema.sql. */
+  battles_won: number
   created_at: string
 }
 
@@ -301,6 +303,7 @@ export interface AdminParameters {
   feature_pension_enabled: boolean
   feature_safari_enabled: boolean
   feature_autobattle_enabled: boolean
+  feature_pvp_enabled: boolean
   feature_chat_enabled: boolean
   chat_max_message_length: number
   chat_spam_limit_per_minute: number
@@ -1188,9 +1191,13 @@ export interface AutoBattleStartManualBattleResult {
 // autobattle_ability_rules.turn_effect, pleinement actif en mode Manuel) —
 // pas le combat entier. turns ne contient que les entrées NOUVELLES de ce
 // tour, à concaténer côté client à la suite du journal déjà affiché plutôt
-// qu'à le remplacer. Pas de Métamorph JOUEUR en mode Manuel (limitation
-// volontaire) ; Métamorph ADVERSAIRE copie tout le movepool du joueur et
-// pioche au hasard dedans à chaque nouveau tour (voir requirement dédié).
+// qu'à le remplacer. Métamorph (joueur OU adversaire) copie sprite/type/
+// liste super efficace/dégâts de base du côté adverse — seuls les PV max et
+// le nom restent les siens propres (voir requirement dédié) ; ADVERSAIRE
+// copie tout le movepool du joueur et pioche au hasard dedans à chaque
+// nouveau tour, JOUEUR copie l'ensemble des capacités CONFIGURÉES sur le
+// niveau adverse (le joueur choisit toujours laquelle jouer, contrairement à
+// l'adversaire).
 export interface AutoBattleManualRoundResult {
   status: AutoBattleManualRoundStatus
   turn_no?: number
@@ -1209,9 +1216,144 @@ export interface AutoBattleManualRoundResult {
   variant_completed?: boolean
   next_level_index?: number
   opponent_pokemon_nom?: string
-  /** Capacité effectivement jouée par l'adversaire CE tour (séquence à jusqu'à 10 positions, voir autobattle_levels.opponent_ability_nom_2..10) — pas forcément la même d'un tour à l'autre. */
+  /** Capacité effectivement jouée par l'adversaire CE tour (séquence à jusqu'à 10 positions, voir autobattle_levels.opponent_ability_nom_2..10, ou piochée dans le movepool du joueur si Métamorph) — pas forcément la même d'un tour à l'autre. */
   opponent_ability_nom?: string
   /** Capacité jouée par le joueur ce tour (= p_ability_nom envoyé) — renvoyée pour simplifier l'affichage/historique côté client. */
+  player_ability_nom?: string
+  /** Cas Métamorph ADVERSAIRE : sprite du joueur copié pour ce combat — jamais présent sinon. */
+  opponent_image_override?: string | null
+  /** Cas Métamorph JOUEUR : sprite de l'adversaire copié pour ce combat — jamais présent sinon. */
+  player_image_override?: string | null
+}
+
+// ── Défi PvP (bannières de défi joueur contre joueur) ─────────
+// Gratuit, sans milestone, tentatives illimitées — voir supabase/schema.sql
+// pour le détail du moteur (pvp_resolve_round délègue au même moteur partagé
+// que Combat Auto en mode Manuel, autobattle_resolve_round_core).
+export interface PvpConfig {
+  id: number
+  nom: string
+  icon_url: string
+  precision_enabled: boolean
+  // Nombre maximum de capacités dans la boucle défensive d'un défi — les
+  // doublons comptent (voir PvpAbilityLoadoutPicker, pvp_post_challenge).
+  loadout_max: number
+  // Adversaire d'entraînement du bouton "Tester" (voir PvpTrialBattleScreen,
+  // pvp_trial_start) — vide tant que non configuré par l'admin, auquel cas
+  // "Tester" est désactivé côté client (statut 'trial_not_configured').
+  trial_pokemon_nom: string
+  trial_hp: number
+  trial_ability_nom: string
+}
+
+// Un défi = un instantané FIGÉ (espèce + PV/dégâts dérivés de l'XP au moment
+// du dépôt + jusqu'à pvp_config.loadout_max capacités DANS L'ORDRE, doublons
+// autorisés) posé par un joueur en tant que défenseur — voir
+// pvp_post_challenge. Le pokémon réel (source_player_pokemon_id) n'est
+// jamais bloqué et continue d'être utilisable normalement ailleurs.
+export interface PvpChallenge {
+  id: number
+  defender_player_id: number
+  source_player_pokemon_id: number
+  pokemon_nom: string
+  pokemon_numero: string | null
+  nickname: string | null
+  xp: number
+  max_hp: number
+  damage_species_xp: number
+  ability_noms: string[]
+  active: boolean
+  withdrawn_at: string | null
+  created_at: string
+}
+
+// Une ligne par tentative résolue (gagnée ou perdue) — le tableau des scores
+// affiché sous chaque bannière (voir PvpChallengeBanner), rattachée à
+// l'INSTANCE de défi (challenge_id) : repart à zéro à chaque retrait/repose.
+export interface PvpChallengeAttempt {
+  id: number
+  challenge_id: number
+  defender_player_id: number
+  attacker_player_id: number
+  attacker_player_pokemon_id: number
+  attacker_pokemon_nom: string
+  outcome: 'win' | 'lose'
+  // Nombre de tours (pas des secondes — jeu au tour par tour, voir
+  // pvp_resolve_round) qu'il a fallu à l'attaquant pour gagner.
+  duration_turns: number | null
+  defender_hp_remaining: number | null
+  created_at: string
+}
+
+export type PvpPostChallengeStatus = 'ok' | 'invalid_abilities' | 'ineligible_pokemon'
+export interface PvpPostChallengeResult {
+  status: PvpPostChallengeStatus
+  challenge_id?: number
+}
+
+export type PvpWithdrawChallengeStatus = 'ok' | 'not_found' | 'not_owner' | 'already_withdrawn'
+
+export type PvpStartBattleStatus = 'ok' | 'not_found' | 'challenge_inactive' | 'own_challenge' | 'ineligible_pokemon'
+export interface PvpStartBattleResult {
+  status: PvpStartBattleStatus
+  first_attacker?: 'player' | 'opponent'
+}
+
+export type PvpRoundStatus = PvpStartBattleStatus | 'ineligible_ability' | 'not_started'
+
+// Réponse du RPC pvp_resolve_round — mêmes champs qu'AutoBattleManualRoundResult
+// à dessein ('player' = l'attaquant, 'opponent' = le défenseur figé) pour que
+// ManualBattleScreen/AutoBattleScreen soient réutilisés côté client tels
+// quels, sans aucune modification (voir PvpPopup). Pas de rewards/
+// variant_completed/next_level_index (mode gratuit, sans progression).
+export interface PvpResolveRoundResult {
+  status: PvpRoundStatus
+  turn_no?: number
+  first_attacker?: 'player' | 'opponent'
+  player_hp?: number
+  player_max_hp?: number
+  opponent_hp?: number
+  opponent_max_hp?: number
+  player_damage_per_hit?: number
+  opponent_damage_per_hit?: number
+  player_type_bonus?: boolean
+  opponent_type_bonus?: boolean
+  turns?: AutoBattleTurn[]
+  outcome?: 'win' | 'lose'
+  opponent_pokemon_nom?: string
+  opponent_ability_nom?: string
+  player_ability_nom?: string
+}
+
+// ── Mode "Tester" (combat d'essai gratuit contre un pantin configuré en
+// admin, voir PvpTrialBattleScreen/pvp_trial_start/pvp_trial_resolve_round)
+export type PvpTrialStartStatus = 'ok' | 'invalid_abilities' | 'ineligible_pokemon' | 'trial_not_configured'
+export interface PvpTrialStartResult {
+  status: PvpTrialStartStatus
+  first_attacker?: 'player' | 'opponent'
+}
+
+export type PvpTrialRoundStatus = PvpTrialStartStatus | 'not_started' | 'not_found' | 'ineligible_ability'
+
+// Même forme qu'AutoBattleManualRoundResult/PvpResolveRoundResult à dessein
+// (voir leurs commentaires) — les deux camps cyclent automatiquement côté
+// serveur, aucune capacité choisie interactivement ici.
+export interface PvpTrialRoundResult {
+  status: PvpTrialRoundStatus
+  turn_no?: number
+  first_attacker?: 'player' | 'opponent'
+  player_hp?: number
+  player_max_hp?: number
+  opponent_hp?: number
+  opponent_max_hp?: number
+  player_damage_per_hit?: number
+  opponent_damage_per_hit?: number
+  player_type_bonus?: boolean
+  opponent_type_bonus?: boolean
+  turns?: AutoBattleTurn[]
+  outcome?: 'win' | 'lose'
+  opponent_pokemon_nom?: string
+  opponent_ability_nom?: string
   player_ability_nom?: string
 }
 
@@ -1307,7 +1449,7 @@ export const EMPTY_CHAPTER_CONTENT: import('@tiptap/core').JSONContent = {
 }
 
 // ── Historique (journal des actions joueurs) ──────────────────
-export type HistoryCategory = 'inventory' | 'pokedex' | 'team' | 'combat' | 'minigame' | 'daycare' | 'safari' | 'autobattle' | 'chat'
+export type HistoryCategory = 'inventory' | 'pokedex' | 'team' | 'combat' | 'minigame' | 'daycare' | 'safari' | 'autobattle' | 'chat' | 'pvp'
 
 export type HistoryActionType =
   | 'item_add'          // ajout générique (Sac, achat de ticket, recharge de tickets)
@@ -1338,6 +1480,10 @@ export type HistoryActionType =
   | 'ko'                // K.O. / sortie de K.O.
   | 'status_change'     // statut appliqué / retiré
   | 'chat_message'      // message envoyé dans le chat global
+  | 'pvp_challenge_posted'    // défi PvP posté
+  | 'pvp_challenge_withdrawn' // défi PvP retiré
+  | 'pvp_attempt_win'   // tentative PvP remportée
+  | 'pvp_attempt_lose'  // tentative PvP perdue
 
 // Sur une ligne brute en base, `delta` est signé (négatif pour un retrait).
 // Le regroupement à la lecture (src/lib/historyGrouping.ts) le normalise en
@@ -1422,6 +1568,17 @@ export interface HistoryChatPayload {
   is_npc: boolean
 }
 
+// entry.player_id est TOUJOURS l'auteur de l'action (celui qui poste/retire/
+// attaque) — defender_player_id désigne l'AUTRE joueur (le propriétaire du
+// défi), absent uniquement sur pvp_challenge_posted/withdrawn où l'auteur EST
+// le défenseur.
+export interface HistoryPvpPayload {
+  defender_player_id: number
+  defender_pokemon_nom: string
+  attacker_pokemon_nom?: string // présent seulement sur pvp_attempt_win/lose
+  challenge_id: number
+}
+
 export type HistoryPayload =
   | HistoryInventoryPayload
   | HistoryPokedexPayload
@@ -1433,6 +1590,7 @@ export type HistoryPayload =
   | HistorySafariPayload
   | HistoryAutoBattlePayload
   | HistoryChatPayload
+  | HistoryPvpPayload
 
 export interface HistoryEvent {
   id: number

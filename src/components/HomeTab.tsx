@@ -16,6 +16,7 @@ import { MiningPopup } from './MiningPopup'
 import { PensionPopup } from './PensionPopup'
 import { SafariPopup } from './SafariPopup'
 import { AutoBattlePopup } from './AutoBattlePopup'
+import { PvpPopup } from './PvpPopup'
 import { ChatPopup } from './chat/ChatPopup'
 import { useChatMessages } from '../hooks/useChatMessages'
 import { useChatUnread } from '../hooks/useChatUnread'
@@ -36,7 +37,7 @@ import { hasAnyMinigameAvailable } from '../lib/magikarpGame'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { PixelIcon } from './icons/PixelIcon'
-import { PHOTO_ICON, CASINO_MASCOT_ICON, MINIGAMES_ICON, MINING_ICON, PENSION_ICON, SAFARI_ICON, AUTOBATTLE_ICON } from '../lib/icons'
+import { PHOTO_ICON, CASINO_MASCOT_ICON, MINIGAMES_ICON, MINING_ICON, PENSION_ICON, SAFARI_ICON, AUTOBATTLE_ICON, PVP_ICON } from '../lib/icons'
 import { isGiftReady, resolveLootboxForSpecies, drawLootboxReward, randomNextGiftAt, maybeResetGiftTimerOnEntry } from '../lib/gifting'
 import { logHistoryEvent } from '../lib/historyLog'
 
@@ -103,6 +104,7 @@ export function HomeTab({ player, players, isAdmin, pokemonByName, discoveredPok
   const [showPension, setShowPension] = useState(false)
   const [showSafari, setShowSafari] = useState(false)
   const [showAutoBattle, setShowAutoBattle] = useState(false)
+  const [showPvp, setShowPvp] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const chat = useChatMessages()
   const { unreadCount, markSeen } = useChatUnread(chat.messages, player?.id ?? null)
@@ -375,6 +377,16 @@ export function HomeTab({ player, players, isAdmin, pokemonByName, discoveredPok
           </button>
         )}
 
+        {player && parameters.feature_pvp_enabled && (
+          <button
+            onClick={() => setShowPvp(true)}
+            title="Défi PvP"
+            className="w-10 h-10 sm:w-14 sm:h-14 rounded-full border-2 sm:border-[3px] border-ink bg-gradient-to-br from-[#e03e8a] to-[#7a0f4a] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+          >
+            <img src={PVP_ICON} alt="Défi PvP" className="pixelated w-6 h-6 sm:w-9 sm:h-9 object-contain" />
+          </button>
+        )}
+
         {canScan && (
           <button
             onClick={onScan}
@@ -494,6 +506,18 @@ export function HomeTab({ player, players, isAdmin, pokemonByName, discoveredPok
           onRequestPokemonDetail={(id) => { setShowAutoBattle(false); setSelectedElevated(false); setSelectedId(id) }}
           onClose={() => setShowAutoBattle(false)}
           isAdmin={isAdmin}
+        />
+      )}
+
+      {showPvp && player && (
+        <PvpPopup
+          player={player}
+          players={players}
+          roster={roster}
+          pokemonByName={pokemonByName}
+          attacksByName={attacksByName}
+          isAdmin={isAdmin}
+          onClose={() => setShowPvp(false)}
         />
       )}
 

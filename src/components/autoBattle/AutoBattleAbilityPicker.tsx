@@ -1,5 +1,6 @@
-import type { PlayerPokemon, Attack, AutoBattleAbilityRule } from '../../types'
+import type { Pokemon, PlayerPokemon, Attack, AutoBattleAbilityRule } from '../../types'
 import { getStatusEffectDisplay, describeAbilityRule } from '../../lib/autoBattle'
+import { getSuperEfficace } from '../../lib/pokemonFacts'
 import { TypeBadge } from '../TypeBadge'
 import { PixelIcon } from '../icons/PixelIcon'
 import { STAT_ICON, DICE_GENERIC_ICON } from '../../lib/icons'
@@ -10,6 +11,9 @@ import { useToast } from '../../context/ToastContext'
 
 interface Props {
   playerPokemon: PlayerPokemon
+  /** Espèce EFFECTIVEMENT combattante (celle copiée par Métamorph le cas échéant, voir AutoBattlePopup) — sert à déterminer le badge Super Efficace par capacité : celui-ci n'apparaît que si le pokémon est super efficace contre l'adversaire ET que le type de LA CAPACITÉ correspond au type du pokémon (voir requirement, même règle que le bonus de dégâts x2). */
+  playerSpecies?: Pokemon
+  opponentSpecies?: Pokemon
   attacksByName: Map<string, Attack>
   abilityRulesByName: Map<string, AutoBattleAbilityRule>
   bannedAttacks: Set<string>
@@ -28,11 +32,13 @@ interface Props {
 // d'indisponibilité au lieu d'appeler onSelect. Plus de restriction aux
 // capacités offensives : le système de ban gère désormais toutes les
 // limitations manuellement.
-export function AutoBattleAbilityPicker({ playerPokemon, attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, onSelect, onBack }: Props) {
+export function AutoBattleAbilityPicker({ playerPokemon, playerSpecies, opponentSpecies, attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, onSelect, onBack }: Props) {
   const { showToast } = useToast()
   const abilities = playerPokemon.moves
     .map((nom) => attacksByName.get(nom))
     .filter((a): a is Attack => a != null)
+  const isSuperEffectiveSpecies = opponentSpecies != null
+    && getSuperEfficace(playerSpecies).includes(opponentSpecies.type)
 
   return (
     <div className="flex flex-col gap-3">
@@ -44,6 +50,8 @@ export function AutoBattleAbilityPicker({ playerPokemon, attacksByName, abilityR
         {abilities.map((a) => {
           const ineligible = bannedAttacks.has(a.nom)
           const effectLines = describeAbilityRule(abilityRulesByName.get(a.nom), a)
+          const superEffective = isSuperEffectiveSpecies && playerSpecies != null
+            && a.type.toLowerCase().trim() === playerSpecies.type.toLowerCase().trim()
           return (
             <button
               key={a.nom}
@@ -58,6 +66,11 @@ export function AutoBattleAbilityPicker({ playerPokemon, attacksByName, abilityR
             >
               <TypeBadge type={a.type} small />
               <span className="flex-1 min-w-[6rem] text-ink text-sm font-bold truncate">{a.nom}</span>
+              {!ineligible && superEffective && (
+                <span className="text-xs font-bold px-2.5 py-1 rounded-full text-white bg-[#d9761e] whitespace-nowrap shrink-0">
+                  Super Efficace
+                </span>
+              )}
               {ineligible ? (
                 <span className="flex items-center gap-1 shrink-0">
                   <span className="text-sm">🛑</span>

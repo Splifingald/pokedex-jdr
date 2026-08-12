@@ -1,4 +1,4 @@
-import type { Player, Pokemon, Item, HistoryInventoryPayload, HistoryPokedexPayload, HistoryTeamPayload, HistoryCombatPayload, HistoryMinigamePayload, HistoryMiningPayload, HistoryDaycarePayload, HistorySafariPayload, HistoryAutoBattlePayload, HistoryChatPayload } from '../types'
+import type { Player, Pokemon, Item, HistoryInventoryPayload, HistoryPokedexPayload, HistoryTeamPayload, HistoryCombatPayload, HistoryMinigamePayload, HistoryMiningPayload, HistoryDaycarePayload, HistorySafariPayload, HistoryAutoBattlePayload, HistoryChatPayload, HistoryPvpPayload } from '../types'
 import { POKEDOLLAR_ITEM_NAME, TICKET_CASINO_ITEM_NAME, TICKET_TREMPETTE_ITEM_NAME, TICKET_MINING_ITEM_NAME } from '../types'
 import type { ReferenceEntry } from '../hooks/useReferenceIndex'
 import { getStatusInfo } from './status'
@@ -201,6 +201,28 @@ function chatSentence(entry: DisplayHistoryEntry, ctx: SentenceContext): Sentenc
   return [player, { text: prefix }, { text: payload.content }, { text: ' »' }]
 }
 
+// Seule catégorie avec DEUX identités joueur distinctes par ligne (l'auteur
+// de l'action ET le défenseur du défi visé) — voir HistoryPvpPayload.
+function pvpSentence(entry: DisplayHistoryEntry, ctx: SentenceContext): SentencePart[] {
+  const payload = entry.payload as HistoryPvpPayload
+  const actor = playerPart(ctx, entry.player_id)
+  const defender = playerPart(ctx, payload.defender_player_id)
+  const defenderMon = pokemonPart(ctx, payload.defender_pokemon_nom)
+
+  if (entry.action_type === 'pvp_challenge_posted') {
+    return [actor, { text: ' a posté un défi PvP avec ' }, defenderMon]
+  }
+  if (entry.action_type === 'pvp_challenge_withdrawn') {
+    return [actor, { text: ' a retiré son défi PvP' }]
+  }
+  const attackerMon = pokemonPart(ctx, payload.attacker_pokemon_nom ?? '')
+  if (entry.action_type === 'pvp_attempt_win') {
+    return [actor, { text: ' (' }, attackerMon, { text: ') a remporté le défi PvP de ' }, defender, { text: ' (' }, defenderMon, { text: ')' }]
+  }
+  // pvp_attempt_lose
+  return [actor, { text: ' (' }, attackerMon, { text: ') a perdu contre le défi PvP de ' }, defender, { text: ' (' }, defenderMon, { text: ')' }]
+}
+
 export function buildSentenceParts(entry: DisplayHistoryEntry, ctx: SentenceContext): SentencePart[] {
   switch (entry.category) {
     case 'inventory':
@@ -221,6 +243,8 @@ export function buildSentenceParts(entry: DisplayHistoryEntry, ctx: SentenceCont
       return autobattleSentence(entry, ctx)
     case 'chat':
       return chatSentence(entry, ctx)
+    case 'pvp':
+      return pvpSentence(entry, ctx)
     default:
       return [{ text: '' }]
   }
