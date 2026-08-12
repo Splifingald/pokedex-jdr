@@ -8,6 +8,7 @@ import { useDisplayAssets } from '../hooks/useDisplayAssets'
 import { useGiftLootboxes } from '../hooks/useGiftLootboxes'
 import { useToast } from '../context/ToastContext'
 import { RoamingPokemonSprite } from './RoamingPokemonSprite'
+import { setGlobalAttract } from '../hooks/useRoamPosition'
 import { PokemonDetailSheet } from './PokemonDetailSheet'
 import { GiftPopup, type GiftReward } from './GiftPopup'
 import { CasinoPopup } from './CasinoPopup'
@@ -257,11 +258,46 @@ export function HomeTab({ player, players, isAdmin, pokemonByName, discoveredPok
     showToast(`${pp ? ownedPokemonName(pp) : 'Pokémon'} supprimé.`)
   }
 
+  // Appel groupé : un appui maintenu (souris/doigt) directement sur le fond de
+  // la scène (jamais sur un sprite ni un autre élément, cf. le test de cible
+  // ci-dessous) fait converger toute l'équipe vers ce point, tant qu'il dure.
+  const attractPointerIdRef = useRef<number | null>(null)
+
+  const attractPointFromEvent = (e: React.PointerEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    return {
+      left: ((e.clientX - rect.left) / rect.width) * 100,
+      bottom: ((rect.bottom - e.clientY) / rect.height) * 100,
+    }
+  }
+
+  const handleScenePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget) return
+    attractPointerIdRef.current = e.pointerId
+    setGlobalAttract(true, attractPointFromEvent(e))
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+
+  const handleScenePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (attractPointerIdRef.current !== e.pointerId) return
+    setGlobalAttract(true, attractPointFromEvent(e))
+  }
+
+  const handleSceneAttractEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (attractPointerIdRef.current !== e.pointerId) return
+    attractPointerIdRef.current = null
+    setGlobalAttract(false)
+  }
+
   return (
     <div
       ref={sceneRef}
-      className="flex-1 relative overflow-hidden"
+      className="flex-1 relative overflow-hidden touch-none"
       style={homeBgStyle(parameters.accueil_image_url?.trim() || backgrounds[0]?.image_url || DEFAULT_ACCUEIL_IMAGE_URL)}
+      onPointerDown={handleScenePointerDown}
+      onPointerMove={handleScenePointerMove}
+      onPointerUp={handleSceneAttractEnd}
+      onPointerCancel={handleSceneAttractEnd}
     >
       {/* Équipe en déambulation */}
       {team.map((pp, idx) => (

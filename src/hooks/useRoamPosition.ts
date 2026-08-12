@@ -131,6 +131,27 @@ if (typeof window !== 'undefined') {
   window.addEventListener('resize', handleWindowResize)
 }
 
+// --- Coordination globale (appel groupé vers un point) ----------------------
+// Pendant un appui (souris/doigt) sur le fond de la scène, tous les sprites
+// convergent vers le point pressé, à leur propre allure habituelle (donc pas
+// de saut instantané comme le gel de drag ci-dessus : on laisse la position
+// changer normalement pour que la transition CSS existante s'anime). Relâché,
+// ils marquent une pause d'1s avant de reprendre leur déambulation normale.
+let attractActive = false
+let attractTarget: RoamPos | null = null
+const attractListeners = new Set<(active: boolean, target: RoamPos | null) => void>()
+
+export function setGlobalAttract(active: boolean, target?: RoamPos) {
+  attractActive = active
+  attractTarget = active ? (target ?? attractTarget) : null
+  attractListeners.forEach((cb) => cb(active, attractTarget))
+}
+
+function subscribeGlobalAttract(cb: (active: boolean, target: RoamPos | null) => void): () => void {
+  attractListeners.add(cb)
+  return () => { attractListeners.delete(cb) }
+}
+
 /**
  * Fait dériver un sprite vers une nouvelle position aléatoire en boucle, à
  * une allure dérivée de sa stat de distance de déplacement (0 = immobile, 5 =
@@ -157,6 +178,16 @@ export function useRoamPosition(id: number, distance: number, containerRef: RefO
 
   const posRef = useRef(pos)
   useEffect(() => { posRef.current = pos }, [pos])
+
+  // Rejoint tout de suite un appel groupé démarré avant le montage de ce
+  // sprite (ex. Pokémon qui rejoint l'équipe pendant que le point est tenu).
+  useEffect(() => {
+    if (!attractActive || !attractTarget) return
+    const clamped = clampToBounds(attractTarget, containerRef.current)
+    lastPos.set(id, clamped)
+    setPos(clamped)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Positions/mouvements déclenchés en dehors du flux normal de déambulation
   // (figé pendant un drag, téléporté après un redimensionnement) doivent
@@ -187,7 +218,7 @@ export function useRoamPosition(id: number, distance: number, containerRef: RefO
     const schedule = (delayMs: number) => {
       timer = window.setTimeout(() => {
         if (cancelled) return
-        if (dragActive) {
+        if (dragActive || attractActive) {
           waitedForOwnDrag = false
           schedule(200)
           return
@@ -201,8 +232,26 @@ export function useRoamPosition(id: number, distance: number, containerRef: RefO
       }, delayMs)
     }
     // distance 0 : ne se déplace jamais seul, mais reste soumis au
-    // téléportage de bornes ci-dessous.
+    // téléportage de bornes ci-dessous et à l'appel groupé ci-dessus.
     if (distance > 0) schedule(2000 + Math.random() * 3000)
+
+    // Appel groupé : tant qu'il dure, chaque nouveau point pressé/déplacé fait
+    // dériver ce sprite vers lui (transition CSS normale, même allure que la
+    // déambulation habituelle). À la relâche, on impose une pause d'1s avant
+    // de laisser la boucle ci-dessus reprendre son cycle normal.
+    const unsubscribeAttract = subscribeGlobalAttract((active, target) => {
+      if (cancelled) return
+      if (active && target) {
+        const clamped = clampToBounds(target, containerRef.current)
+        lastPos.set(id, clamped)
+        setPos(clamped)
+      } else if (distance > 0) {
+        // distance 0 : appelé comme les autres, mais ne reprend pas de
+        // déambulation propre à la relâche (il ne bouge jamais seul).
+        if (timer !== undefined) clearTimeout(timer)
+        schedule(1000)
+      }
+    })
 
     // Une fois la fenêtre stabilisée après un redimensionnement, on ramène
     // immédiatement la position dans les nouvelles bornes sûres plutôt que
@@ -225,6 +274,7 @@ export function useRoamPosition(id: number, distance: number, containerRef: RefO
     return () => {
       cancelled = true
       if (timer !== undefined) clearTimeout(timer)
+      unsubscribeAttract()
       unsubscribeResize()
     }
   }, [distance, duration, id, containerRef])

@@ -85,6 +85,18 @@ export function useAutoBattleVariants() {
     }
   }, [])
 
+  // Vue triée par sort_order pour l'affichage — le state brut `variants` peut
+  // se retrouver dans un ordre différent après un swap (l'event realtime
+  // UPDATE remplace juste l'objet à sa position existante sans retrier, voir
+  // le handler .on('UPDATE'...) ci-dessus), donc AUCUN composant ne doit lire
+  // `variants` directement : c'est ce qui rendait le réordonnancement muet
+  // tant que la page n'était pas rechargée (schema.sql sort_order recalculé
+  // au fetch seulement). Même principe que levelsByVariant pour les niveaux.
+  const sortedVariants = useMemo(
+    () => [...variants].sort((a, b) => a.sort_order - b.sort_order),
+    [variants]
+  )
+
   const levelsByVariant = useMemo(() => {
     const map = new Map<number, AutoBattleLevel[]>()
     for (const row of levels) {
@@ -126,6 +138,24 @@ export function useAutoBattleVariants() {
     const { error } = await supabase.from('autobattle_variants').update(patch).eq('id', id)
     if (error) {
       console.error('Erreur lors de la mise à jour de la variante Combat Auto :', error)
+      await fetchAll()
+    }
+  }, [fetchAll])
+
+  // Échange l'ordre de deux variantes adjacentes — même principe que
+  // swapLevelOrder, sur sort_order plutôt que level_index.
+  const swapVariantOrder = useCallback(async (variantA: AutoBattleVariant, variantB: AutoBattleVariant) => {
+    setVariants((prev) => prev.map((v) => {
+      if (v.id === variantA.id) return { ...v, sort_order: variantB.sort_order }
+      if (v.id === variantB.id) return { ...v, sort_order: variantA.sort_order }
+      return v
+    }))
+    const [resA, resB] = await Promise.all([
+      supabase.from('autobattle_variants').update({ sort_order: variantB.sort_order }).eq('id', variantA.id),
+      supabase.from('autobattle_variants').update({ sort_order: variantA.sort_order }).eq('id', variantB.id),
+    ])
+    if (resA.error || resB.error) {
+      console.error('Erreur lors du réordonnancement des variantes Combat Auto :', resA.error ?? resB.error)
       await fetchAll()
     }
   }, [fetchAll])
@@ -306,8 +336,8 @@ export function useAutoBattleVariants() {
   }, [variants, levelsByVariant, rewardsByLevel, fetchAll])
 
   return {
-    variants, levels, rewards, levelsByVariant, rewardsByLevel, loading, error,
-    addVariant, updateVariant, deleteVariant,
+    variants: sortedVariants, levels, rewards, levelsByVariant, rewardsByLevel, loading, error,
+    addVariant, updateVariant, deleteVariant, swapVariantOrder,
     addLevel, updateLevel, swapLevelOrder, deleteLevel,
     addReward, updateReward, removeReward,
     resetVariantProgress, duplicateVariant,

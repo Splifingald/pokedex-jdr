@@ -248,6 +248,18 @@ html, body, #root {
     drop-shadow(0.3cqh 0.6cqh 0.5cqh rgba(0, 0, 0, 0.4));
 }
 
+/* Variante silhouette du même effet (Pokémon pas encore découvert) : le PNG
+   est noirci avant le contour blanc, pour une ombre chinoise cerclée plutôt
+   que la couleur réelle. */
+.sticker-effect-silhouette {
+  filter:
+    brightness(0)
+    drop-shadow(0 0 0.8cqh #fff)
+    drop-shadow(0 0 0.8cqh #fff)
+    drop-shadow(0 0 0.8cqh #fff)
+    drop-shadow(0 0 0.8cqh #fff);
+}
+
 /* Scrollbar sombre */
 ::-webkit-scrollbar {
   width: 6px;

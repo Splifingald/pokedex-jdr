@@ -64,10 +64,11 @@ function LevelReward({
   )
 }
 
-// Bannière de progression d'une variante : image de fond assombrie (moitié
-// moins haute qu'avant — juste assez pour le compteur "niveau courant /
-// total" en haut à droite et le Pokémon actuel, révélé en couleur ou en
-// silhouette noire tant qu'il n'est pas découvert, requirement #30), suivie
+// Bannière de progression d'une variante : image de fond (moitié moins haute
+// qu'avant — juste assez pour le compteur "niveau courant / total" en haut à
+// droite et le Pokémon actuel, cerclé de blanc comme en mode Affichage
+// (sticker-effect), révélé en couleur ou en silhouette noire tant qu'il n'est
+// pas découvert, requirement #30), suivie
 // juste en dessous (sans grand espace) d'une jauge de progression défilable
 // horizontalement listant TOUS les niveaux (ligne de continuité noire
 // derrière les puces, requirement #29 — contour vert une fois le niveau
@@ -78,7 +79,8 @@ function LevelReward({
 // partagée par les 2 lignes qui défilent ensemble). Variante "Terminé" quand
 // la progression entière est complétée (pas de précédent existant pour un
 // mini-jeu à plusieurs niveaux dans ce codebase — traitement calqué sur
-// l'état "grille épuisée" de Fouille : bannière assombrie + mention explicite).
+// l'état "grille épuisée" de Fouille : mention explicite par-dessus la
+// bannière).
 export function AutoBattleVariantBanner({
   variant, levels, rewardsByLevel, progress, stateByLevel, pokemonByName, itemsByName, pokedollarImageUrl,
 }: Props) {
@@ -98,13 +100,12 @@ export function AutoBattleVariantBanner({
 
   return (
     <div className="flex flex-col gap-1">
-      <div className="relative w-full aspect-[4/1] rounded overflow-hidden border-2 border-ink">
+      <div className="relative w-full aspect-[4/1] rounded overflow-hidden border-2 border-ink [container-type:size]">
         {variant.banner_url ? (
           <img src={variant.banner_url} alt="" className="absolute inset-0 w-full h-full object-cover" />
         ) : (
           <div className="absolute inset-0 bg-cream-secondary" />
         )}
-        <div className="absolute inset-0 bg-black/50" />
 
         {levels.length > 0 && (
           <div className="absolute top-1 right-1.5 z-10 bg-black/40 rounded px-1.5 py-0.5">
@@ -130,8 +131,7 @@ export function AutoBattleVariantBanner({
             <img
               src={currentLevelSpecies.image_miniature}
               alt=""
-              className="pixelated w-20 h-20 object-contain"
-              style={discovered ? undefined : { filter: 'brightness(0)' }}
+              className={`pixelated w-20 h-20 object-contain ${discovered ? 'sticker-effect' : 'sticker-effect-silhouette'}`}
             />
           ) : (
             <span className="text-white text-2xl font-black [text-shadow:0_2px_2px_rgba(0,0,0,0.6)]">?</span>

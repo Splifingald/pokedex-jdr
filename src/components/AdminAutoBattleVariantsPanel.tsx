@@ -370,7 +370,7 @@ function LevelEditor({
 export function AdminAutoBattleVariantsPanel() {
   const {
     variants, levelsByVariant, rewardsByLevel, loading,
-    addVariant, updateVariant, deleteVariant,
+    addVariant, updateVariant, deleteVariant, swapVariantOrder,
     addLevel, updateLevel, swapLevelOrder, deleteLevel,
     addReward, updateReward, removeReward,
     resetVariantProgress, duplicateVariant,
@@ -454,19 +454,15 @@ export function AdminAutoBattleVariantsPanel() {
           <p className="text-ink-muted-2 text-sm">Aucune variante pour l'instant.</p>
         ) : (
           <div className="flex flex-col gap-2">
-            {variants.map((v) => (
+            {variants.map((v, i) => (
               <div key={v.id} className="flex items-center gap-2">
+                <button onClick={() => swapVariantOrder(v, variants[i - 1])} disabled={i === 0} className={`text-xs px-1.5 py-1 rounded ${BUTTON_STYLE.gray} disabled:opacity-30`}>▲</button>
+                <button onClick={() => swapVariantOrder(v, variants[i + 1])} disabled={i === variants.length - 1} className={`text-xs px-1.5 py-1 rounded ${BUTTON_STYLE.gray} disabled:opacity-30`}>▼</button>
                 <button
                   onClick={() => setSelected(selected === v.id ? null : v.id)}
                   className={`flex-1 text-left px-3 py-2 rounded text-sm font-bold ${PIXEL_BORDER_SM} ${selected === v.id ? 'bg-yellow-100 ring-2 ring-[#a3841a]' : 'bg-cream-secondary'}`}
                 >
                   {v.nom || '(sans nom)'} {v.enabled && <span className="text-[#2f6b3f]">●</span>}
-                </button>
-                <button onClick={() => handleDuplicate(v.id)} title="Dupliquer" className={`text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>
-                  📋
-                </button>
-                <button onClick={() => deleteVariant(v.id)} className={`text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>
-                  <CloseIcon className="w-3 h-3" />
                 </button>
               </div>
             ))}
@@ -476,7 +472,13 @@ export function AdminAutoBattleVariantsPanel() {
 
       {selectedVariant && (
         <div className="flex-1 min-w-0 bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] w-full p-6">
-          <div className="flex items-center justify-end mb-3">
+          <div className="flex items-center justify-end gap-2 mb-3">
+            <button onClick={() => handleDuplicate(selectedVariant.id)} title="Dupliquer" className={`text-xs px-2 py-1.5 rounded ${BUTTON_STYLE.gray}`}>
+              📋
+            </button>
+            <button onClick={() => deleteVariant(selectedVariant.id)} title="Supprimer" className={`text-xs px-2 py-1.5 rounded ${BUTTON_STYLE.gray}`}>
+              <CloseIcon className="w-3 h-3" />
+            </button>
             <button onClick={handleResetProgress} className={`text-xs px-3 py-1.5 rounded font-bold ${BUTTON_STYLE.gray}`}>
               ↺ Réinitialiser la progression (tous joueurs)
             </button>
