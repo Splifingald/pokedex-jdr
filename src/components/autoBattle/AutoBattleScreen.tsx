@@ -229,7 +229,7 @@ function statusOverlayStyle(status: AutoBattleStatusEffect, spriteUrl: string): 
 // que d'enchaîner automatiquement sur les récompenses/l'écran de défaite.
 export function AutoBattleScreen({
   playerPokemon, playerSpecies, playerMaxHp, playerAbilityNom, playerImageOverride, opponentSpecies, opponentMaxHp, opponentNom, opponentAbilityNom, opponentImageOverride, turns,
-  playerTypeBonus, opponentTypeBonus, onContinue, isAdmin = false, attacksByName, abilityRulesByName, playerDamagePerHit, opponentDamagePerHit,
+  playerTypeBonus, opponentTypeBonus, onContinue, isAdmin = false, attacksByName, abilityRulesByName,
   hideContinueButton = false, midSlot, skipCountdown = false, speedMultiplier = 1,
 }: Props) {
   const [countdownStep, setCountdownStep] = useState(-1)
