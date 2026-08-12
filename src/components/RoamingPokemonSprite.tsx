@@ -1,6 +1,6 @@
 import { useRef, useLayoutEffect, useEffect, type RefObject } from 'react'
 import type { Pokemon, PlayerPokemon } from '../types'
-import { useRoamPosition, setGlobalDragActive, subscribeGlobalDrag } from '../hooks/useRoamPosition'
+import { useRoamPosition, setGlobalDragActive, subscribeGlobalDrag, subscribeAttract, getAttractTarget, attractSpeedPxPerS, type RoamPos } from '../hooks/useRoamPosition'
 import { useLocalHp } from '../hooks/useLocalHp'
 import { getMaxHp } from '../lib/maxHp'
 import { warmSpriteAlpha, isOpaqueAt } from '../lib/spriteAlpha'
@@ -16,6 +16,11 @@ interface Props {
   hasGift?: boolean
   containerRef: RefObject<HTMLElement | null>
   onClick: () => void
+  // Appelé quand un appui tombe dans le rectangle de ce sprite mais sur un
+  // pixel transparent, sans aucun autre sprite derrière : le sprite occupe une
+  // grande boîte majoritairement vide, donc ce cas correspond en réalité à un
+  // appui sur le décor (cf. handlePointerDown).
+  onBackgroundPress?: (e: React.PointerEvent) => void
 }
 
 const CENTER = 'translateX(-50%)'
@@ -30,7 +35,7 @@ function pointInRect(clientX: number, clientY: number, rect: DOMRect): boolean {
   return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
 }
 
-export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping, hasGift = false, containerRef, onClick }: Props) {
+export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping, hasGift = false, containerRef, onClick, onBackgroundPress }: Props) {
   const { pos, duration, setPos, consumeInstant } = useRoamPosition(playerPokemon.id, pokemon?.distance_deplacement ?? 0, containerRef)
   const maxHp = getMaxHp(playerPokemon, pokemon)
   const [hp] = useLocalHp(playerPokemon.id, maxHp)
@@ -38,6 +43,11 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
 
   const bobDuration = 2.2 + index * 0.35
   const bobDelay = index * 0.5
+
+  // Position de layout courante, relue par l'appel groupé — qui s'exécute en
+  // dehors du rendu, sur une simple notification.
+  const posRef = useRef(pos)
+  useEffect(() => { posRef.current = pos }, [pos])
 
   const buttonRef = useRef<HTMLButtonElement>(null)
   const imgRef = useRef<HTMLImageElement>(null)
@@ -91,6 +101,13 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
     if (wasDragMove || !prevRect) {
       el.style.transition = 'none'
       el.style.transform = CENTER
+      // `newRect` a été mesuré AVANT ce reset, avec le `transform` précédent
+      // encore appliqué. Après un simple drag il valait l'identité (donc la
+      // mesure restait bonne), mais à la fin d'un appel groupé il porte tout
+      // le trajet parcouru : le garder tel quel ferait partir le prochain
+      // trajet d'une position fantôme, et le sprite semblerait téléporter. On
+      // re-mesure donc une fois le transform remis à zéro.
+      prevRectRef.current = el.getBoundingClientRect()
       return
     }
 
@@ -127,6 +144,53 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
     })
   }, [containerRef, setPos])
 
+  // Appel groupé (appui maintenu sur le décor) : le sprite rejoint le point
+  // demandé à sa vitesse de déambulation habituelle. Tout se joue sur le
+  // `transform`, sans toucher à l'état ni au layout — `pos` reste donc figé sur
+  // la dernière destination de déambulation pendant toute la durée de l'appel,
+  // et n'est recommitté qu'au relâchement, via le gel `subscribeGlobalDrag`
+  // ci-dessus qui écrit la position visuelle réelle dans l'état.
+  useEffect(() => {
+    const applyAttract = (target: RoamPos) => {
+      const el = buttonRef.current
+      const container = containerRef.current
+      // Un sprite saisi à la main suit le doigt, pas l'appel groupé.
+      if (!el || !container || draggingRef.current) return
+      const containerRect = container.getBoundingClientRect()
+      const from = posRef.current
+
+      // Décalage à appliquer par rapport à la position de layout (`pos`) pour
+      // amener le sprite sur la cible. `left` ancre son centre, `bottom` son
+      // pied — d'où l'inversion de signe sur l'axe vertical.
+      const toX = ((target.left - from.left) / 100) * containerRect.width
+      const toY = ((from.bottom - target.bottom) / 100) * containerRect.height
+
+      // Décalage réellement affiché à cet instant (transition éventuellement
+      // en cours) : c'est de là que part le trajet, donc c'est lui qui donne
+      // la distance restante — et donc la durée, à vitesse constante.
+      const elRect = el.getBoundingClientRect()
+      const currentX = elRect.left + elRect.width / 2 - (containerRect.left + (from.left / 100) * containerRect.width)
+      const currentY = elRect.bottom - (containerRect.bottom - (from.bottom / 100) * containerRect.height)
+      const remaining = Math.hypot(toX - currentX, toY - currentY)
+
+      // Interrompre une transition en cours est ici sans danger : le
+      // navigateur repart de la valeur interpolée courante, donc le sprite
+      // poursuit depuis l'endroit exact où il est affiché, sans saut. C'est
+      // toute la différence avec l'animation FLIP plus haut, qui suppose au
+      // contraire un trajet terminé.
+      el.style.transition = `transform ${remaining / attractSpeedPxPerS(duration, container)}s linear`
+      el.style.transform = `${CENTER} translate(${toX}px, ${toY}px)`
+    }
+
+    // Un sprite qui apparaît alors qu'un appel est déjà en cours (ex. Pokémon
+    // ajouté à l'équipe pendant l'appui) doit rejoindre le mouvement sans
+    // attendre le prochain déplacement du doigt.
+    const pending = getAttractTarget()
+    if (pending) applyAttract(pending)
+
+    return subscribeAttract(applyAttract)
+  }, [containerRef, duration])
+
   // Le PNG a un fond transparent, mais le bouton occupe tout son rectangle :
   // sans ce test, cliquer/glisser sur une zone transparente « attraperait »
   // ce sprite même si un autre Pokémon est visible juste derrière. On exclut
@@ -153,8 +217,17 @@ export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping,
       // plus à faire ici. S'il est lui-même transparent à cet endroit, son
       // propre handler refera la même transmission plus bas, en chaîne.
       el.style.pointerEvents = 'none'
-      const below = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-roam-id]')
+      const under = document.elementFromPoint(e.clientX, e.clientY)
+      const below = under?.closest<HTMLElement>('[data-roam-id]')
       el.style.pointerEvents = ''
+      if (!below && under === container) {
+        // On tombe pile sur le décor : l'appui visait le paysage, que la
+        // grande boîte (très majoritairement transparente) de ce sprite ne
+        // fait que recouvrir. On exige `under === container` — et pas
+        // simplement « aucun sprite derrière » — pour ne rien déclencher
+        // quand c'est un widget (chat, mini-jeux…) qui se trouve dessous.
+        onBackgroundPress?.(e)
+      }
       if (below && below !== el) {
         below.dispatchEvent(new PointerEvent('pointerdown', {
           bubbles: true,

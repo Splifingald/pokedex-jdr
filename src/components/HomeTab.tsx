@@ -8,7 +8,7 @@ import { useDisplayAssets } from '../hooks/useDisplayAssets'
 import { useGiftLootboxes } from '../hooks/useGiftLootboxes'
 import { useToast } from '../context/ToastContext'
 import { RoamingPokemonSprite } from './RoamingPokemonSprite'
-import { setGlobalAttract } from '../hooks/useRoamPosition'
+import { setAttractTarget, setGlobalDragActive, clampToBounds, type RoamPos } from '../hooks/useRoamPosition'
 import { PokemonDetailSheet } from './PokemonDetailSheet'
 import { GiftPopup, type GiftReward } from './GiftPopup'
 import { CasinoPopup } from './CasinoPopup'
@@ -258,46 +258,102 @@ export function HomeTab({ player, players, isAdmin, pokemonByName, discoveredPok
     showToast(`${pp ? ownedPokemonName(pp) : 'Pokémon'} supprimé.`)
   }
 
-  // Appel groupé : un appui maintenu (souris/doigt) directement sur le fond de
-  // la scène (jamais sur un sprite ni un autre élément, cf. le test de cible
-  // ci-dessous) fait converger toute l'équipe vers ce point, tant qu'il dure.
-  const attractPointerIdRef = useRef<number | null>(null)
+  // --- Appel de l'équipe (appui maintenu sur le décor) ----------------------
+  // Tant que l'appui dure, toute l'équipe converge vers le point touché ; au
+  // relâchement chacun s'arrête net une seconde, puis reprend sa déambulation.
+  const attractPointerRef = useRef<number | null>(null)
+  const attractFrameRef = useRef<number | null>(null)
+  const attractPendingRef = useRef<RoamPos | null>(null)
+  const attractPauseTimerRef = useRef<number | undefined>(undefined)
 
-  const attractPointFromEvent = (e: React.PointerEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect()
-    return {
-      left: ((e.clientX - rect.left) / rect.width) * 100,
-      bottom: ((rect.bottom - e.clientY) / rect.height) * 100,
+  const scenePoint = (clientX: number, clientY: number): RoamPos | null => {
+    const scene = sceneRef.current
+    if (!scene) return null
+    const rect = scene.getBoundingClientRect()
+    // Borné à la zone sûre : le point suit le doigt, mais un Pokémon ne doit
+    // jamais finir à cheval sur un bord de la scène.
+    return clampToBounds({
+      left: ((clientX - rect.left) / rect.width) * 100,
+      bottom: ((rect.bottom - clientY) / rect.height) * 100,
+    }, scene)
+  }
+
+  // Les `pointermove` peuvent arriver plus vite que l'affichage (pointeurs
+  // haute fréquence, événements coalescés) : une seule diffusion par frame
+  // suffit, chaque sprite faisant une mesure de position à chaque diffusion.
+  const pushAttractTarget = (point: RoamPos) => {
+    attractPendingRef.current = point
+    if (attractFrameRef.current !== null) return
+    attractFrameRef.current = window.requestAnimationFrame(() => {
+      attractFrameRef.current = null
+      if (attractPointerRef.current !== null && attractPendingRef.current) {
+        setAttractTarget(attractPendingRef.current)
+      }
+    })
+  }
+
+  const beginAttract = (e: React.PointerEvent) => {
+    const scene = sceneRef.current
+    const point = scenePoint(e.clientX, e.clientY)
+    if (!scene || !point) return
+    // Un appui qui retombe pendant la pause d'après-appel doit l'annuler — et
+    // surtout lever le gel, sinon plus personne ne redéambulerait ensuite.
+    if (attractPauseTimerRef.current !== undefined) {
+      window.clearTimeout(attractPauseTimerRef.current)
+      attractPauseTimerRef.current = undefined
+      setGlobalDragActive(false)
     }
+    attractPointerRef.current = e.pointerId
+    setAttractTarget(point)
+    scene.setPointerCapture(e.pointerId)
   }
 
-  const handleScenePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.target !== e.currentTarget) return
-    attractPointerIdRef.current = e.pointerId
-    setGlobalAttract(true, attractPointFromEvent(e))
-    e.currentTarget.setPointerCapture(e.pointerId)
+  const endAttract = () => {
+    attractPointerRef.current = null
+    attractPendingRef.current = null
+    if (attractFrameRef.current !== null) {
+      cancelAnimationFrame(attractFrameRef.current)
+      attractFrameRef.current = null
+    }
+    setAttractTarget(null)
+    // Fige chaque sprite exactement là où il est arrivé (le gel réutilisé ici
+    // recopie la position visuelle réelle dans l'état), puis on relâche au
+    // bout d'une seconde pour laisser la déambulation reprendre.
+    setGlobalDragActive(true)
+    attractPauseTimerRef.current = window.setTimeout(() => {
+      attractPauseTimerRef.current = undefined
+      setGlobalDragActive(false)
+    }, 1000)
   }
 
-  const handleScenePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (attractPointerIdRef.current !== e.pointerId) return
-    setGlobalAttract(true, attractPointFromEvent(e))
-  }
-
-  const handleSceneAttractEnd = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (attractPointerIdRef.current !== e.pointerId) return
-    attractPointerIdRef.current = null
-    setGlobalAttract(false)
-  }
+  useEffect(() => {
+    return () => {
+      if (attractFrameRef.current !== null) cancelAnimationFrame(attractFrameRef.current)
+      if (attractPauseTimerRef.current !== undefined) window.clearTimeout(attractPauseTimerRef.current)
+      // Démontage en plein appel (changement d'onglet) : ne pas laisser la
+      // déambulation gelée pour de bon.
+      setAttractTarget(null)
+      setGlobalDragActive(false)
+    }
+  }, [])
 
   return (
     <div
       ref={sceneRef}
-      className="flex-1 relative overflow-hidden touch-none"
+      className="flex-1 relative overflow-hidden"
       style={homeBgStyle(parameters.accueil_image_url?.trim() || backgrounds[0]?.image_url || DEFAULT_ACCUEIL_IMAGE_URL)}
-      onPointerDown={handleScenePointerDown}
-      onPointerMove={handleScenePointerMove}
-      onPointerUp={handleSceneAttractEnd}
-      onPointerCancel={handleSceneAttractEnd}
+      // Seul un appui sur le décor lui-même appelle l'équipe : sur un sprite ou
+      // un widget, l'événement porte une autre cible et remonte simplement ici.
+      // (Le cas du pixel transparent d'un sprite est traité par celui-ci, qui
+      // renvoie vers `beginAttract` — cf. `onBackgroundPress`.)
+      onPointerDown={(e) => { if (e.target === e.currentTarget) beginAttract(e) }}
+      onPointerMove={(e) => {
+        if (attractPointerRef.current !== e.pointerId) return
+        const point = scenePoint(e.clientX, e.clientY)
+        if (point) pushAttractTarget(point)
+      }}
+      onPointerUp={(e) => { if (attractPointerRef.current === e.pointerId) endAttract() }}
+      onPointerCancel={(e) => { if (attractPointerRef.current === e.pointerId) endAttract() }}
     >
       {/* Équipe en déambulation */}
       {team.map((pp, idx) => (
@@ -310,6 +366,7 @@ export function HomeTab({ player, players, isAdmin, pokemonByName, discoveredPok
           hasGift={hasGift(pp)}
           containerRef={sceneRef}
           onClick={() => (hasGift(pp) ? openGift(pp) : setSelectedId(pp.id))}
+          onBackgroundPress={beginAttract}
         />
       ))}
 

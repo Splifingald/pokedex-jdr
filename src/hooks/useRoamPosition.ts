@@ -58,7 +58,7 @@ function randomPos(container: HTMLElement | null): RoamPos {
 
 // Ramène une position dans les bornes sûres actuelles — le point le plus
 // proche à l'intérieur du rectangle, donc un « téléportage » minimal.
-function clampToBounds(pos: RoamPos, container: HTMLElement | null): RoamPos {
+export function clampToBounds(pos: RoamPos, container: HTMLElement | null): RoamPos {
   const { minLeft, maxLeft, minBottom, maxBottom } = boundsPct(container)
   return {
     left: clamp(pos.left, minLeft, maxLeft),
@@ -131,25 +131,45 @@ if (typeof window !== 'undefined') {
   window.addEventListener('resize', handleWindowResize)
 }
 
-// --- Coordination globale (appel groupé vers un point) ----------------------
-// Pendant un appui (souris/doigt) sur le fond de la scène, tous les sprites
-// convergent vers le point pressé, à leur propre allure habituelle (donc pas
-// de saut instantané comme le gel de drag ci-dessus : on laisse la position
-// changer normalement pour que la transition CSS existante s'anime). Relâché,
-// ils marquent une pause d'1s avant de reprendre leur déambulation normale.
-let attractActive = false
+// --- Coordination globale (appel de l'équipe vers un point) ----------------
+// Un appui maintenu sur le fond de la scène « appelle » toute l'équipe vers ce
+// point : chaque sprite s'y dirige à son allure habituelle, et la déambulation
+// autonome est suspendue tant que l'appui dure.
+//
+// Contrairement au reste du hook, la cible n'est volontairement PAS un état
+// React : elle est diffusée telle quelle aux sprites, qui animent leur
+// `transform` de façon impérative (cf. RoamingPokemonSprite). Repasser par
+// `setPos` à chaque déplacement du doigt re-rendrait tous les sprites et
+// relancerait l'animation FLIP à chaque frame — or celle-ci mesure un écart
+// de layout en supposant que le trajet précédent est terminé : enchaînée trop
+// vite, elle accumule des écarts faux et les sprites partent dans tous les
+// sens. Ici la position d'état ne bouge donc pas de tout l'appel ; elle n'est
+// recommittée qu'au relâchement (cf. `setGlobalDragActive` dans HomeTab).
 let attractTarget: RoamPos | null = null
-const attractListeners = new Set<(active: boolean, target: RoamPos | null) => void>()
+const attractListeners = new Set<(target: RoamPos) => void>()
 
-export function setGlobalAttract(active: boolean, target?: RoamPos) {
-  attractActive = active
-  attractTarget = active ? (target ?? attractTarget) : null
-  attractListeners.forEach((cb) => cb(active, attractTarget))
+export function getAttractTarget(): RoamPos | null {
+  return attractTarget
 }
 
-function subscribeGlobalAttract(cb: (active: boolean, target: RoamPos | null) => void): () => void {
+export function setAttractTarget(target: RoamPos | null) {
+  attractTarget = target
+  if (target) attractListeners.forEach((cb) => cb(target))
+}
+
+export function subscribeAttract(cb: (target: RoamPos) => void): () => void {
   attractListeners.add(cb)
   return () => { attractListeners.delete(cb) }
+}
+
+// Vitesse d'un sprite « appelé », en px/s. On conserve exactement l'allure de
+// sa déambulation (cf. moveDurationS) en posant qu'un trajet normal — donc
+// `durationS` secondes — correspond à la traversée d'une largeur de scène.
+// La déambulation raisonne en durée fixe (distance variable) ; l'appel doit au
+// contraire raisonner en vitesse constante, puisque la cible peut se déplacer
+// avec le doigt : seule une vitesse garde un sens dans ce cas.
+export function attractSpeedPxPerS(durationS: number, container: HTMLElement | null): number {
+  return sceneSizePx(container).width / durationS
 }
 
 /**
@@ -178,16 +198,6 @@ export function useRoamPosition(id: number, distance: number, containerRef: RefO
 
   const posRef = useRef(pos)
   useEffect(() => { posRef.current = pos }, [pos])
-
-  // Rejoint tout de suite un appel groupé démarré avant le montage de ce
-  // sprite (ex. Pokémon qui rejoint l'équipe pendant que le point est tenu).
-  useEffect(() => {
-    if (!attractActive || !attractTarget) return
-    const clamped = clampToBounds(attractTarget, containerRef.current)
-    lastPos.set(id, clamped)
-    setPos(clamped)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   // Positions/mouvements déclenchés en dehors du flux normal de déambulation
   // (figé pendant un drag, téléporté après un redimensionnement) doivent
@@ -218,7 +228,10 @@ export function useRoamPosition(id: number, distance: number, containerRef: RefO
     const schedule = (delayMs: number) => {
       timer = window.setTimeout(() => {
         if (cancelled) return
-        if (dragActive || attractActive) {
+        // Pendant un appel groupé, c'est le sprite lui-même qui pilote son
+        // `transform` : surtout ne pas lui tirer une destination aléatoire
+        // sous les pieds au milieu du trajet.
+        if (dragActive || attractTarget !== null) {
           waitedForOwnDrag = false
           schedule(200)
           return
@@ -232,26 +245,8 @@ export function useRoamPosition(id: number, distance: number, containerRef: RefO
       }, delayMs)
     }
     // distance 0 : ne se déplace jamais seul, mais reste soumis au
-    // téléportage de bornes ci-dessous et à l'appel groupé ci-dessus.
+    // téléportage de bornes ci-dessous.
     if (distance > 0) schedule(2000 + Math.random() * 3000)
-
-    // Appel groupé : tant qu'il dure, chaque nouveau point pressé/déplacé fait
-    // dériver ce sprite vers lui (transition CSS normale, même allure que la
-    // déambulation habituelle). À la relâche, on impose une pause d'1s avant
-    // de laisser la boucle ci-dessus reprendre son cycle normal.
-    const unsubscribeAttract = subscribeGlobalAttract((active, target) => {
-      if (cancelled) return
-      if (active && target) {
-        const clamped = clampToBounds(target, containerRef.current)
-        lastPos.set(id, clamped)
-        setPos(clamped)
-      } else if (distance > 0) {
-        // distance 0 : appelé comme les autres, mais ne reprend pas de
-        // déambulation propre à la relâche (il ne bouge jamais seul).
-        if (timer !== undefined) clearTimeout(timer)
-        schedule(1000)
-      }
-    })
 
     // Une fois la fenêtre stabilisée après un redimensionnement, on ramène
     // immédiatement la position dans les nouvelles bornes sûres plutôt que
@@ -274,7 +269,6 @@ export function useRoamPosition(id: number, distance: number, containerRef: RefO
     return () => {
       cancelled = true
       if (timer !== undefined) clearTimeout(timer)
-      unsubscribeAttract()
       unsubscribeResize()
     }
   }, [distance, duration, id, containerRef])
