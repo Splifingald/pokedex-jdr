@@ -89,21 +89,18 @@ export function ManualBattleScreen({
   )
   const autoPlayAbility = eligibleAbilities.length === 1 ? eligibleAbilities[0] : null
 
-  // Capacités à rythme sur 2 tours (voir autobattle_ability_rules.turn_effect
-  // 'prepare_release'/'skip', pleinement actifs en Manuel) : le 2e tour d'un
-  // cycle (libération, ou passage forcé) est ENTIÈREMENT déterminé par le
-  // serveur dès le 1er tour — laisser le joueur "choisir" quoi que ce soit à
-  // ce moment-là n'aurait aucun effet (le serveur force de toute façon la
-  // même capacité, voir v_player_preparing/v_player_skip_pending côté RPC) et
-  // induirait en erreur. forcedAbility retient cette capacité pour le tour
-  // SUIVANT uniquement — remis à null une fois ce tour forcé joué, qu'il
-  // s'agisse ou non lui-même du début d'un nouveau cycle (un pur
-  // 'prepare_release'/'skip' ne s'enchaîne jamais tout seul sur 2 cycles
-  // d'affilée sans un nouveau choix explicite entretemps).
+  // Capacités dont le tour suivant est ENTIÈREMENT déterminé par le serveur
+  // (2e tour d'un cycle 'prepare_release'/'skip', ou réutilisation forcée
+  // d'une chaîne "Continue sur sa lancée") : laisser le joueur "choisir" à ce
+  // moment-là n'aurait aucun effet, le serveur rejoue de toute façon la même
+  // capacité. C'est LE SERVEUR qui le dit, via player_forced_ability_nom
+  // renvoyé à chaque tour (voir autobattle_resolve_manual_round /
+  // pvp_resolve_round) — plus de déduction côté client à partir du
+  // turn_effect, qui ne pouvait pas connaître l'état de la chaîne en cours.
   const [forcedAbility, setForcedAbility] = useState<Attack | null>(null)
   const autoAbility = autoPlayAbility ?? forcedAbility
 
-  const handleSelect = async (ability: Attack, forced: boolean) => {
+  const handleSelect = async (ability: Attack) => {
     if (busy) return
     setBusy(true)
     const result = await onSubmitRound(ability)
@@ -123,12 +120,8 @@ export function ManualBattleScreen({
     setRoundCount((c) => c + 1)
 
     if (!autoPlayAbility) {
-      if (forced) {
-        setForcedAbility(null)
-      } else {
-        const turnEffect = abilityRulesByName.get(ability.nom)?.turn_effect
-        setForcedAbility(turnEffect === 'prepare_release' || turnEffect === 'skip' ? ability : null)
-      }
+      const forcedNom = result.player_forced_ability_nom
+      setForcedAbility(forcedNom ? attacksByName.get(forcedNom) ?? null : null)
     }
   }
 
@@ -140,7 +133,7 @@ export function ManualBattleScreen({
     // setTimeout (délai nul) plutôt qu'un appel direct : handleSelect
     // déclenche setBusy(true) en tout premier, et l'appeler de façon
     // synchrone depuis le corps de l'effet enchaînerait les rendus.
-    const timeout = window.setTimeout(() => void handleSelect(autoAbility, true), 0)
+    const timeout = window.setTimeout(() => void handleSelect(autoAbility), 0)
     return () => window.clearTimeout(timeout)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ne doit se redéclencher que sur ces deux signaux ; handleSelect/onSubmitRound sont volontairement exclus (fermeture recréée à chaque rendu, toujours à jour)
   }, [autoAbility, busy])
@@ -192,7 +185,12 @@ export function ManualBattleScreen({
             <p className="text-ink text-sm font-bold text-center">Partie Automatique, une seule capacité possible</p>
           ) : !busy && !forcedAbility && (
             <p className="text-ink text-sm font-bold text-center">
-              Sélectionne la capacité à utiliser {firstAttacker === 'player' ? '(1er)' : '(2ème)'}
+              {/* L'ordre des tours peut CHANGER en cours de combat (voir
+                  turn_effect 'first_and_replay'/'charge_double_next' : le camp
+                  qui gagne une action supplémentaire reprend la main en
+                  premier) — on préfère donc l'ordre du prochain round renvoyé
+                  par le serveur à la valeur figée du tirage initial. */}
+              Sélectionne la capacité à utiliser {(pendingResult?.first_attacker ?? firstAttacker) === 'player' ? '(1er)' : '(2ème)'}
             </p>
           )}
           <ManualBattleAbilityGrid
@@ -204,7 +202,7 @@ export function ManualBattleScreen({
             bannedAttacks={bannedAttacks}
             precisionEnabled={precisionEnabled}
             disabled={busy || !!autoPlayAbility || !!forcedAbility}
-            onSelect={(ability) => void handleSelect(ability, false)}
+            onSelect={(ability) => void handleSelect(ability)}
           />
           {isStalemate && (
             <button

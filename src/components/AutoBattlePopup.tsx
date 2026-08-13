@@ -24,7 +24,7 @@ import { ManualBattleScreen } from './autoBattle/ManualBattleScreen'
 import { AutoBattleRewardPopup } from './autoBattle/AutoBattleRewardPopup'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
-import { AUTOBATTLE_ICON, AUTOBATTLE_TICKET_ICON } from '../lib/icons'
+import { AUTOBATTLE_ICON, AUTOBATTLE_TICKET_ICON, AUTOBATTLE_MODE_ICON } from '../lib/icons'
 import { PixelIcon } from './icons/PixelIcon'
 import { CloseIcon } from './icons/CloseIcon'
 import { PokedollarIcon } from './PokedollarIcon'
@@ -37,16 +37,16 @@ type View = 'list' | 'pick-pokemon' | 'pick-ability' | 'coin-toss' | 'battle' | 
 // serveur reste invisible ("rien ne se passe" côté joueur).
 const STATUS_MESSAGE: Record<string, string> = {
   no_ticket: 'Aucun ticket disponible.',
-  wrong_level: 'Ce niveau a déjà été mis à jour, réessayez.',
+  wrong_level: 'Ce niveau a déjà été mis à jour, réessaie.',
   ineligible_pokemon: 'Ce pokémon ne peut pas combattre (en pension ?).',
   ineligible_ability: "Cette capacité n'est plus disponible.",
   variant_disabled: 'Ce parcours est désactivé.',
   variant_completed: 'Ce parcours est déjà terminé.',
-  invalid_level: 'Niveau mal configuré, contactez un admin.',
+  invalid_level: 'Niveau mal configuré, contacte un admin.',
   duplicate_request: 'Combat déjà résolu.',
   not_found: 'Niveau introuvable.',
-  wrong_mode: 'Ce parcours a changé de mode de jeu, réessayez.',
-  not_started: 'Combat non initialisé, réessayez.',
+  wrong_mode: 'Ce parcours a changé de mode de jeu, réessaie.',
+  not_started: 'Combat non initialisé, réessaie.',
 }
 
 interface Props {
@@ -146,7 +146,10 @@ export function AutoBattlePopup({
     pendingScrollVariantIdRef.current = null
     const top = card.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
     const centered = top - Math.max(0, (container.clientHeight - card.offsetHeight) / 2)
-    container.scrollTo({ top: Math.max(0, centered), behavior: 'smooth' })
+    // Positionnement immédiat (scrollTop) et non `scrollTo({behavior:'smooth'})` :
+    // sur un conteneur qui vient tout juste d'être monté (`key={view}`), le
+    // scroll animé était systématiquement annulé et la liste restait en haut.
+    container.scrollTop = Math.max(0, centered)
   }, [view, variantsLoading, variants, progressByVariant])
 
   const [now, setNow] = useState(() => Date.now())
@@ -585,7 +588,28 @@ export function AutoBattlePopup({
                           if (el) variantCardRefs.current.set(variant.id, el)
                           else variantCardRefs.current.delete(variant.id)
                         }}
-                        className={`p-3 rounded ${PIXEL_BORDER_SM} bg-cream-secondary flex flex-col gap-1`}
+                        role={completed ? undefined : 'button'}
+                        tabIndex={completed ? undefined : 0}
+                        onClick={completed ? undefined : () => handlePlayVariant(variant)}
+                        onKeyDown={completed ? undefined : (e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            handlePlayVariant(variant)
+                          }
+                        }}
+                        // Toute la carte est cliquable et se comporte comme un
+                        // bouton (ombre dure qui s'enfonce au tap) : elle ne
+                        // fait qu'ouvrir la sélection du pokémon, le ticket
+                        // n'est débité qu'au bouton "Lancer" de l'écran
+                        // suivant. Les parcours terminés ne sont pas jouables,
+                        // donc pas cliquables — et prennent la teinte "terminé"
+                        // du journal de campagne (voir PANEL_DONE) : fond vert
+                        // doux et bordure verte épaisse.
+                        className={`rounded overflow-hidden shadow-[var(--shadow-pixel-sm)] transition-all ${
+                          completed
+                            ? 'border-[3px] border-[#4caf6b] bg-[#e2f5e6]'
+                            : `${PIXEL_BORDER_SM} bg-cream-secondary cursor-pointer hover:brightness-105 active:shadow-none active:translate-x-[2px] active:translate-y-[2px]`
+                        }`}
                       >
                         <AutoBattleVariantBanner
                           variant={variant}
@@ -596,30 +620,10 @@ export function AutoBattlePopup({
                           pokemonByName={pokemonByName}
                           itemsByName={itemsByName}
                           pokedollarImageUrl={pokedollarImageUrl}
+                          modeIconUrl={variant.game_mode === 'manual'
+                            ? (config.mode_icon_manual_url || AUTOBATTLE_MODE_ICON.manual)
+                            : (config.mode_icon_auto_url || AUTOBATTLE_MODE_ICON.auto)}
                         />
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 shrink-0 flex items-center justify-center">
-                            {variant.icon_url ? (
-                              <img src={variant.icon_url} alt="" className="w-full h-full object-contain" />
-                            ) : (
-                              <span className="text-xl">⚔️</span>
-                            )}
-                          </div>
-                          <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                            <span className="block text-ink text-sm font-bold truncate">{variant.nom}</span>
-                            {completed && <span className="text-sm shrink-0">✅</span>}
-                          </div>
-                          {!completed && (
-                            <button
-                              onClick={() => handlePlayVariant(variant)}
-                              disabled={ticketCount < 1 || levels.length === 0}
-                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${BUTTON_STYLE.yellow}`}
-                            >
-                              <img src={AUTOBATTLE_TICKET_ICON} alt="" className="w-4 h-4 object-contain pixelated" />
-                              Jouer
-                            </button>
-                          )}
-                        </div>
                       </div>
                     )
                   })
@@ -636,6 +640,12 @@ export function AutoBattlePopup({
               bannedAttacks={bannedNames}
               opponentSpecies={activeLevel ? pokemonByName.get(activeLevel.opponent_pokemon_nom) : undefined}
               opponentDiscovered={activeLevel ? (stateByLevel.get(activeLevel.id)?.discovered ?? false) : false}
+              // Mode Manuel : le combat démarre (et le ticket est débité) dès
+              // le choix du pokémon, d'où la confirmation par "Lancer". Mode
+              // Auto : le choix du pokémon ne fait qu'ouvrir la sélection de
+              // capacité, gratuite — c'est là qu'on confirmera.
+              requireLaunch={activeVariant?.game_mode === 'manual'}
+              noTicket={ticketCount < 1}
               onSelect={(pp) => {
                 if (activeVariant?.game_mode === 'manual') {
                   void handleStartManualBattle(pp)
@@ -687,10 +697,12 @@ export function AutoBattlePopup({
               playerPokemon={selectedPokemon}
               playerSpecies={activeSpecies}
               opponentSpecies={activeLevelOpponentSpecies}
+              opponentDiscovered={activeLevel ? (stateByLevel.get(activeLevel.id)?.discovered ?? false) : false}
               attacksByName={attacksByName}
               abilityRulesByName={abilityRulesByName}
               bannedAttacks={bannedNames}
               precisionEnabled={config.precision_enabled}
+              noTicket={ticketCount < 1}
               onSelect={(ability) => void handleSelectAbility(selectedPokemon, ability)}
               onBack={() => setView('pick-pokemon')}
             />
@@ -732,7 +744,7 @@ export function AutoBattlePopup({
             <div className="flex flex-col items-center text-center gap-3 py-8">
               <span className="text-4xl">💥</span>
               <p className="text-ink text-base font-bold">Combat perdu…</p>
-              <p className="text-ink-muted-2 text-sm">Réessayez plus tard avec un nouveau ticket.</p>
+              <p className="text-ink-muted-2 text-sm">Réessaie plus tard avec un nouveau ticket.</p>
               <button onClick={resetToList} className={`mt-2 px-5 py-2 rounded font-bold text-sm ${BUTTON_STYLE.yellow}`}>
                 Continuer
               </button>
@@ -742,7 +754,7 @@ export function AutoBattlePopup({
           {view === 'reward' && showEvolvePrompt && selectedPokemon && (
             <div className="relative flex flex-col items-center text-center py-6 animate-[celebrate-pop_0.3s_ease-out]">
               <p className="text-ink text-base mb-4">
-                ✨ {ownedPokemonName(selectedPokemon)} peut évoluer ! Voir votre Pokémon ?
+                ✨ {ownedPokemonName(selectedPokemon)} peut évoluer ! Voir ton Pokémon ?
               </p>
               <div className="flex gap-3">
                 <button

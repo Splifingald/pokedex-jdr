@@ -41,6 +41,31 @@ export function AdminAutoBattleEconomyPanel() {
           />
         </div>
 
+        <div>
+          <label className="text-ink-muted-2 text-sm block mb-1">Icône du mode Auto (URL)</label>
+          <input
+            type="text"
+            value={config.mode_icon_auto_url}
+            onChange={(e) => updateConfig({ mode_icon_auto_url: e.target.value })}
+            placeholder="/website_icons/icon_battle_auto.png"
+            className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+          />
+        </div>
+        <div>
+          <label className="text-ink-muted-2 text-sm block mb-1">Icône du mode Manuel (URL)</label>
+          <input
+            type="text"
+            value={config.mode_icon_manual_url}
+            onChange={(e) => updateConfig({ mode_icon_manual_url: e.target.value })}
+            placeholder="/website_icons/icon_battle_manual.png"
+            className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+          />
+          <p className="text-ink-muted-2 text-xs mt-1">
+            Affichées en haut à droite de la bannière de chaque parcours, selon son mode de jeu.
+            Laissées vides, les icônes par défaut ci-dessus sont utilisées.
+          </p>
+        </div>
+
         <div className="border-t-2 border-[#cfc7a8] pt-3">
           <p className="text-ink-muted-2 text-sm font-bold mb-2">Ticket Combat (partagé entre toutes les variantes)</p>
         </div>

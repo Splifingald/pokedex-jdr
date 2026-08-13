@@ -155,7 +155,7 @@ export function SacTab({ player, items, itemsByName, playerItems }: Props) {
 
       {filteredItems.length === 0 ? (
         <p className="text-[#7a7c9a] text-sm text-center mt-8">
-          {ownedItems.length === 0 ? 'Votre sac est vide.' : 'Aucun objet dans cette catégorie.'}
+          {ownedItems.length === 0 ? 'Ton sac est vide.' : 'Aucun objet dans cette catégorie.'}
         </p>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">

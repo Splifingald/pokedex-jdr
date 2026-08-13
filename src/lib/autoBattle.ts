@@ -158,6 +158,18 @@ export function describeAbilityRule(rule: AutoBattleAbilityRule | undefined, abi
     lines.push(`Attaque en rafale jusqu'au premier échec (max ${rule.repeat_max_iterations} fois)`)
   } else if (rule.turn_effect === 'prepare_release') {
     lines.push('Nécessite un tour de préparation avant de frapper')
+  } else if (rule.turn_effect === 'charge_double_next') {
+    lines.push('Ne fait rien ce tour-ci, mais joue 2 fois au prochain tour')
+  } else if (rule.turn_effect === 'first_and_replay') {
+    lines.push('Ne consomme pas le tour : rejoue aussitôt et passe premier')
+  }
+  if (rule.keep_going_turns) {
+    lines.push(`Se rejoue automatiquement pendant ${rule.keep_going_turns} tour${rule.keep_going_turns > 1 ? 's' : ''} de plus (s'arrête au premier raté)`)
+    if (rule.keep_going_bonus_type === 'flat' && rule.keep_going_bonus_flat) {
+      lines.push(`+${rule.keep_going_bonus_flat} dégâts cumulés à chaque réutilisation`)
+    } else if (rule.keep_going_bonus_type === 'percent_damage' && rule.keep_going_bonus_percent) {
+      lines.push(`+${rule.keep_going_bonus_percent}% de ses dégâts de base, cumulés à chaque réutilisation`)
+    }
   }
   if (rule.heal_type === 'static' && rule.heal_amount) {
     lines.push(`Soigne ${rule.heal_amount} PV`)
@@ -166,12 +178,18 @@ export function describeAbilityRule(rule: AutoBattleAbilityRule | undefined, abi
   } else if (rule.heal_type === 'use_stats') {
     lines.push('Soigne selon ses propres dégâts')
   }
-  if (rule.heal_dot_duration_turns && (rule.heal_dot_type === 'percent_max_hp') && rule.heal_dot_percent) {
-    lines.push(`Soigne ${rule.heal_dot_percent}% de ses PV max/tour pendant ${rule.heal_dot_duration_turns} tours`)
-  } else if (rule.heal_dot_duration_turns && rule.heal_dot_type === 'percent_damage' && rule.heal_dot_percent) {
-    lines.push(`Soigne ${rule.heal_dot_percent}% des dégâts infligés/tour pendant ${rule.heal_dot_duration_turns} tours`)
-  } else if (rule.heal_dot_amount && rule.heal_dot_duration_turns) {
-    lines.push(`Soigne ${rule.heal_dot_amount} PV/tour pendant ${rule.heal_dot_duration_turns} tours`)
+  // Le soin passif dure soit un nombre de tours, soit "jusqu'au réveil"
+  // (heal_dot_until_awake, heal_dot_duration_turns alors nul) — seul le
+  // suffixe de durée change, le montant se décrit pareil dans les deux cas.
+  const healDotDuration = rule.heal_dot_until_awake
+    ? "tant qu'il dort"
+    : rule.heal_dot_duration_turns ? `pendant ${rule.heal_dot_duration_turns} tours` : null
+  if (healDotDuration && rule.heal_dot_type === 'percent_max_hp' && rule.heal_dot_percent) {
+    lines.push(`Soigne ${rule.heal_dot_percent}% de ses PV max/tour ${healDotDuration}`)
+  } else if (healDotDuration && rule.heal_dot_type === 'percent_damage' && rule.heal_dot_percent) {
+    lines.push(`Soigne ${rule.heal_dot_percent}% des dégâts infligés/tour ${healDotDuration}`)
+  } else if (healDotDuration && rule.heal_dot_amount) {
+    lines.push(`Soigne ${rule.heal_dot_amount} PV/tour ${healDotDuration}`)
   }
   if (rule.cancel_heal_duration_turns) {
     lines.push(`Annule les soins adverses pendant ${rule.cancel_heal_duration_turns} tours`)
@@ -185,7 +203,8 @@ export function describeAbilityRule(rule: AutoBattleAbilityRule | undefined, abi
       : `${rule.stat_mod_percent}%`
     const duration = rule.stat_mod_duration_type === 'battle_end' ? "jusqu'à la fin du combat" : `pendant ${rule.stat_mod_duration_turns} tours`
     const usesSuffix = rule.stat_mod_max_uses ? ` (max ${rule.stat_mod_max_uses}×)` : ''
-    lines.push(`${verb} les ${statLabel} ${targetLabel} de ${amount} ${duration}${usesSuffix}`)
+    const typeSuffix = rule.stat_mod_type_filter ? ` — capacités ${rule.stat_mod_type_filter} uniquement` : ''
+    lines.push(`${verb} les ${statLabel} ${targetLabel} de ${amount} ${duration}${usesSuffix}${typeSuffix}`)
   }
   if (rule.percent_hp_damage_percent) {
     lines.push(`Inflige ${rule.percent_hp_damage_percent}% des PV restants de la cible (remplace les dégâts habituels)`)
@@ -207,6 +226,12 @@ export function describeAbilityRule(rule: AutoBattleAbilityRule | undefined, abi
       : `+${rule.bonus_damage_min}-${rule.bonus_damage_max} dégâts`
     lines.push(`Bonus : ${bonusLabel} ${conditionLabel}`)
   }
+  if (rule.prevention_duration_turns) {
+    lines.push(`Prévention : bloque les dégâts supplémentaires "super efficace" pendant ${rule.prevention_duration_turns} tours`)
+  }
+  if (rule.ignore_status_block) {
+    lines.push(`Utilisable même sous ${STATUS_EFFECT_LABEL[rule.ignore_status_block].toLowerCase()}`)
+  }
   if (rule.invulnerable_next_turn) {
     lines.push('Rend invulnérable au prochain tour adverse')
   }
@@ -214,4 +239,16 @@ export function describeAbilityRule(rule: AutoBattleAbilityRule | undefined, abi
     lines.push('Le statut affecte son utilisateur, pas l\'adversaire')
   }
   return lines
+}
+
+// Vocabulaire du champ `first_attacker` renvoyé par les RPC de démarrage de
+// combat : côté client c'est TOUJOURS 'player'/'opponent' (celui de
+// AutoBattleCoinToss et du badge "(1er)"/"(2ème)" de ManualBattleScreen).
+// Les tables PvP stockent, elles, 'attacker'/'defender' — pvp_start_battle et
+// pvp_trial_start renvoyaient cette valeur interne telle quelle, ce qui faisait
+// échouer tous les tests `=== 'player'` (pile ou face et badge toujours
+// affichés comme si l'adversaire commençait). Corrigé côté SQL, mais normalisé
+// ici aussi pour rester juste face à une base pas encore migrée.
+export function normalizeFirstAttacker(value: string): 'player' | 'opponent' {
+  return value === 'player' || value === 'attacker' ? 'player' : 'opponent'
 }

@@ -4,6 +4,7 @@ import type { CsvRow, AttackCsvRow, CarteCsvRow, ItemCsvRow, EncounterCsvRow, Di
 import { CSV_REQUIRED_HEADERS, ATTACK_CSV_REQUIRED_HEADERS, CARTE_CSV_REQUIRED_HEADERS, ITEM_CSV_REQUIRED_HEADERS, ENCOUNTER_CSV_REQUIRED_HEADERS, DISPLAY_ASSET_CSV_REQUIRED_HEADERS, POKEMON_EVOLUTION_CSV_REQUIRED_HEADERS, POKEMON_EGG_GROUP_CSV_REQUIRED_HEADERS } from '../types'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { parseStatusEffectCsvLabel } from '../lib/autoBattle'
+import { parseBattleAnimationCsvLabel } from '../lib/battleAnimations'
 
 // L'import CSV passe par une Netlify Function côté serveur
 // → la clé service_role Supabase n'est jamais exposée dans le bundle JS
@@ -95,6 +96,11 @@ function mapAttackCsvRow(row: AttackCsvRow) {
     status_effect: statusEffect,
     status_chance: statusEffect && row['Status probability']?.trim() ? parseInt(row['Status probability']) : null,
     deals_damage: parseDealsDamageCsv(row['Inflige dégâts']),
+    // Animations de combat (purement visuel, voir battleAnimations.ts) —
+    // colonnes optionnelles : vide ou libellé inconnu = NULL, la capacité
+    // retombe alors sur son animation par défaut.
+    animation: parseBattleAnimationCsvLabel(row['Animation']),
+    animation_2: parseBattleAnimationCsvLabel(row['Animation 2']),
   }
 }
 

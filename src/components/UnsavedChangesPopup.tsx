@@ -15,7 +15,7 @@ export function UnsavedChangesPopup({ onSaveAndQuit, onDiscardAndQuit, onCancel 
       <div className={`${PANEL_LG} max-w-xs w-full p-6`}>
         <div className="text-center mb-5">
           <h3 className="text-ink text-lg">Modifications non enregistrées</h3>
-          <p className="text-ink-muted text-sm mt-2">Que voulez-vous faire avant de quitter ?</p>
+          <p className="text-ink-muted text-sm mt-2">Que veux-tu faire avant de quitter ?</p>
         </div>
         <div className="flex flex-col gap-2">
           <button

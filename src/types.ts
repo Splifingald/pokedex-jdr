@@ -1,3 +1,5 @@
+import type { BattleAnimationId } from './lib/battleAnimations'
+
 export interface Pokemon {
   id: number
   numero: string
@@ -116,6 +118,16 @@ export interface Attack {
   // n'infligent AUCUN dégât (même passif espèce+XP) quand utilisées en
   // Combat Auto/Manuel — importé depuis le CSV (colonne "Inflige dégâts").
   deals_damage: boolean
+  // Animation jouée par le pokémon quand il utilise cette capacité en Combat
+  // Auto/Manuel (colonne "Animation" du CSV) — purement visuel, aucun effet
+  // sur la résolution du combat, voir src/lib/battleAnimations.ts. NULL
+  // (colonne vide ou libellé non reconnu) = 'jump_attack', le bond historique.
+  animation: BattleAnimationId | null
+  // Animation du SECOND tour des capacités en deux temps
+  // (autobattle_ability_rules.turn_effect = 'prepare_release', colonne
+  // "Animation 2" du CSV) : le tour de préparation joue `animation`, celui de
+  // la libération joue celle-ci. NULL = `animation` est rejouée telle quelle.
+  animation_2: BattleAnimationId | null
 }
 
 export interface AttackCsvRow {
@@ -131,6 +143,8 @@ export interface AttackCsvRow {
   'Mini-game status': string
   'Status probability': string
   'Inflige dégâts': string
+  'Animation': string
+  'Animation 2': string
 }
 
 export const ATTACK_CSV_REQUIRED_HEADERS: (keyof AttackCsvRow)[] = ['Attaque', 'Type']
@@ -197,6 +211,14 @@ export interface ChatMessage {
   message_type: ChatMessageType
   trade_id: number | null
   created_at: string
+}
+
+// Accusé de lecture "Vu par" : dernier message vu par un joueur (une ligne par
+// joueur). Les PNJ n'en ont jamais — seules les vraies sessions lisent le chat.
+export interface ChatReadReceipt {
+  player_id: number
+  last_read_message_id: number
+  updated_at: string
 }
 
 // ── Échanges entre joueurs (proposés/acceptés depuis le Chat) ─
@@ -838,6 +860,11 @@ export interface AutoBattleConfig {
   // Système de précision (attacks.precision, 1-10, NULL = 10) désactivable
   // globalement — désactivé, toute capacité touche systématiquement.
   precision_enabled: boolean
+  // Icônes du mode de jeu affichées sur la bannière de chaque parcours
+  // (AutoBattleVariantBanner) selon son game_mode — partagées par toutes les
+  // variantes, réglées dans l'admin "Combat Auto — Général".
+  mode_icon_auto_url: string
+  mode_icon_manual_url: string
 }
 
 export interface AutoBattlePlayerState {
@@ -936,7 +963,29 @@ export interface AutoBattleBannedAttack {
 // status_reversed, un réglage propre au mode de jeu, vit ici).
 // prepare_release : la capacité se prépare au 1er tour (aucune action,
 // texte "Préparation") puis s'utilise normalement au 2e.
-export type AutoBattleTurnEffect = 'skip' | 'play_twice' | 'play_three' | 'play_random' | 'repeat_until_fail' | 'prepare_release'
+// charge_double_next : la capacité ne fait rien au tour où elle est choisie
+// (tour de "charge") ; au tour SUIVANT, son utilisateur agit deux fois de
+// suite sans que l'adversaire n'intervienne entre les deux — en Combat
+// Manuel/PvP il choisit une capacité différente pour chacune des deux
+// actions, en Combat Auto (capacité fixe) c'est deux fois la même.
+// first_and_replay : la capacité s'utilise normalement mais ne "consomme"
+// pas le tour — son utilisateur rejoue immédiatement (nouveau choix) et
+// prend la main en premier pour la suite du combat. Ce dernier volet n'a de
+// sens qu'en Combat Manuel/PvP, où l'ordre des tours est persisté (en Combat
+// Auto l'ordre est une stricte alternance, l'effet se réduit à "joue deux
+// fois"). Voir supabase/schema.sql.
+export type AutoBattleTurnEffect = 'skip' | 'play_twice' | 'play_three' | 'play_random' | 'repeat_until_fail' | 'prepare_release' | 'charge_double_next' | 'first_and_replay'
+// Bonus cumulatif de la chaîne "Continue sur sa lancée" (voir
+// AutoBattleAbilityRule.keep_going_turns) : montant fixe, ou pourcentage des
+// dégâts de base de son utilisateur. Appliqué une fois par réutilisation
+// (rien à la 1ère, ×1 à la 2e, ×2 à la 3e...).
+export type AutoBattleKeepGoingBonusType = 'flat' | 'percent_damage'
+// Statut bloquant qu'une capacité peut ignorer (voir
+// AutoBattleAbilityRule.ignore_status_block) : un seul à la fois, et
+// uniquement parmi les trois qui font passer le tour — la brûlure et le
+// poison n'ont jamais bloqué quoi que ce soit, la peur et la confusion se
+// contentent de réduire la précision.
+export type AutoBattleIgnoreStatusBlock = Extract<AutoBattleStatusEffect, 'paralysis' | 'sleep' | 'frozen'>
 export type AutoBattleHealType = 'static' | 'percent_damage' | 'use_stats'
 // Type de montant du soin passif (heal_dot, voir heal_dot_amount/heal_dot_percent
 // ci-dessous) : 'flat' (ou NULL, valeur historique) = montant fixe par tour ;
@@ -983,14 +1032,6 @@ export type AutoBattleStatModTarget = 'self' | 'opponent'
 export type AutoBattleStatModStat = 'damage' | 'precision'
 export type AutoBattleStatModValueType = 'flat' | 'range' | 'percent'
 export type AutoBattleStatModDurationType = 'turns' | 'battle_end'
-// Style d'animation de l'attaque côté client (AutoBattleScreen) — purement
-// visuel, aucun effet sur la résolution du combat. 'normal' = bond habituel
-// vers l'adversaire. 'soft' = le pokémon reste sur place (léger
-// grossissement/rétrécissement) — pensé pour les capacités auto-ciblées
-// (soin, buff sur soi…) où un bond vers l'adversaire n'a pas de sens, mais
-// réglable pour n'importe quelle capacité.
-export type AutoBattleAnimationStyle = 'normal' | 'soft'
-
 export interface AutoBattleAbilityRule {
   attack_nom: string
   turn_effect: AutoBattleTurnEffect | null
@@ -1051,7 +1092,35 @@ export interface AutoBattleAbilityRule {
   // conditionnels/contre-coup/soin s'appliquent ensuite normalement sur ce
   // total. NULL = désactivé.
   percent_hp_damage_percent: number | null
-  animation_style: AutoBattleAnimationStyle
+  // Filtre de TYPE du modificateur de stat ci-dessus (uniquement pour
+  // stat_mod_stat = 'damage') : NULL = s'applique à toutes les capacités,
+  // sinon uniquement à celles de ce type élémentaire (attacks.type). Permet
+  // un buff du genre "+10 dégâts sur les capacités Feu".
+  stat_mod_type_filter: string | null
+  // Bouclier "Prévention" : sur un coup réussi, protège son utilisateur des
+  // dégâts ADDITIONNELS dus à l'efficacité de type (super efficace) pendant
+  // ce nombre de tours de combat — les coups adverses touchent toujours,
+  // mais sans leur bonus de type. NULL = désactivé.
+  prevention_duration_turns: number | null
+  // "Continue sur sa lancée" : la capacité est automatiquement rejouée
+  // pendant keep_going_turns tours supplémentaires de son utilisateur (choix
+  // verrouillé côté client, voir AutoBattleManualRoundResult.
+  // player_forced_ability_nom), avec un bonus de dégâts cumulatif à chaque
+  // réutilisation (la 1ère utilisation n'en a aucun). La chaîne s'interrompt
+  // au premier raté : la capacité cesse d'être imposée.
+  keep_going_turns: number | null
+  keep_going_bonus_type: AutoBattleKeepGoingBonusType | null
+  keep_going_bonus_flat: number | null
+  keep_going_bonus_percent: number | null
+  // Soin passif "jusqu'au réveil" : au lieu de heal_dot_duration_turns
+  // (NULL dans ce cas), l'effet dure tant que son utilisateur est ENDORMI et
+  // s'arrête au tour de son réveil.
+  heal_dot_until_awake: boolean
+  // Capacité utilisable malgré UN statut bloquant précis (genre "Ronflement",
+  // utilisable en dormant mais pas en étant paralysé) : null = désactivé, sinon
+  // le statut concerné — les deux autres continuent de faire passer le tour.
+  // Le tick de statut a lieu normalement dans tous les cas.
+  ignore_status_block: AutoBattleIgnoreStatusBlock | null
   created_at: string
 }
 
@@ -1126,6 +1195,16 @@ export interface AutoBattleTurn {
   // restants" (voir AutoBattleAbilityRule.percent_hp_damage_percent) plutôt
   // que du calcul habituel dégâts de base + dé.
   percent_hp_damage?: boolean
+  // charging = tour de "charge" de turn_effect 'charge_double_next' (aucun
+  // effet, comme `preparing`, mais annonce un DOUBLE tour à venir).
+  // prevention_granted = ce coup réussi a accordé le bouclier Prévention à
+  // son auteur. prevention_blocked = ce coup a perdu son bonus super efficace
+  // à cause du bouclier Prévention de la cible. keep_going_bonus = part des
+  // dégâts venant du bonus cumulatif de la chaîne "Continue sur sa lancée".
+  charging?: boolean
+  prevention_granted?: boolean
+  prevention_blocked?: boolean
+  keep_going_bonus?: number
   // Décoration CLIENT UNIQUEMENT (jamais renvoyée par le serveur) — voir
   // ManualBattleScreen : en Combat Manuel la capacité change à chaque tour,
   // contrairement au Combat Auto où elle est fixe (playerAbilityNom/
@@ -1232,8 +1311,10 @@ export interface AutoBattleManualRoundResult {
   opponent_pokemon_nom?: string
   /** Capacité effectivement jouée par l'adversaire CE tour (séquence à jusqu'à 10 positions, voir autobattle_levels.opponent_ability_nom_2..10, ou piochée dans le movepool du joueur si Métamorph) — pas forcément la même d'un tour à l'autre. */
   opponent_ability_nom?: string
-  /** Capacité jouée par le joueur ce tour (= p_ability_nom envoyé) — renvoyée pour simplifier l'affichage/historique côté client. */
+  /** Capacité jouée par le joueur ce tour (= p_ability_nom envoyé, sauf capacité forcée — voir player_forced_ability_nom) — renvoyée pour simplifier l'affichage/historique côté client. */
   player_ability_nom?: string
+  /** Capacité IMPOSÉE au joueur pour le prochain tour (préparation en cours, tour passé imposé par l'effet 'skip', ou chaîne "Continue sur sa lancée" encore active) — le client verrouille alors sa grille de sélection dessus au lieu de la deviner. null/absent = choix libre. */
+  player_forced_ability_nom?: string | null
   /** Cas Métamorph ADVERSAIRE : sprite du joueur copié pour ce combat — jamais présent sinon. */
   opponent_image_override?: string | null
   /** Cas Métamorph JOUEUR : sprite de l'adversaire copié pour ce combat — jamais présent sinon. */
@@ -1348,6 +1429,8 @@ export interface PvpResolveRoundResult {
   opponent_pokemon_nom?: string
   opponent_ability_nom?: string
   player_ability_nom?: string
+  /** Voir AutoBattleManualRoundResult.player_forced_ability_nom — même champ, même usage côté client. */
+  player_forced_ability_nom?: string | null
 }
 
 // ── Mode "Tester" (combat d'essai gratuit contre un pantin configuré en

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Player, PlayerPokemon, Pokemon, Attack, AutoBattleAbilityRule, AutoBattleTurn, AutoBattleManualRoundResult, PvpTrialStartResult } from '../types'
 import { supabase } from '../lib/supabase'
-import { generateIdempotencyKey } from '../lib/autoBattle'
+import { generateIdempotencyKey, normalizeFirstAttacker } from '../lib/autoBattle'
 import { getHpBreakdown } from '../lib/xpBonuses'
 import { useToast } from '../context/ToastContext'
 import { AutoBattleScreen } from './autoBattle/AutoBattleScreen'
@@ -29,7 +29,7 @@ const STATUS_MESSAGE: Record<string, string> = {
   ineligible_pokemon: 'Ce pokémon ne peut pas combattre (en pension ?).',
   ineligible_ability: "Cette capacité n'est plus disponible.",
   trial_not_configured: "Le mode d'essai n'est pas configuré par l'admin.",
-  not_started: 'Combat non initialisé, réessayez.',
+  not_started: 'Combat non initialisé, réessaie.',
 }
 
 // Combat d'ESSAI (voir supabase/schema.sql pvp_trial_start/pvp_trial_resolve_
@@ -82,7 +82,7 @@ export function PvpTrialBattleScreen({
       return
     }
 
-    setFirstAttacker(result.first_attacker)
+    setFirstAttacker(normalizeFirstAttacker(result.first_attacker))
     setStarting(false)
     setView('battle')
   }

@@ -104,7 +104,12 @@ export function useChatMessages() {
     if (error) {
       console.error('Erreur lors de la suppression du chat :', error)
       await fetchAll()
+      return
     }
+    // Les accusés de lecture pointent sur des messages qui n'existent plus :
+    // on les purge pour ne pas laisser de "Vu par" orphelin au prochain message.
+    const { error: receiptsError } = await supabase.from('chat_read_receipts').delete().neq('player_id', 0)
+    if (receiptsError) console.error('Erreur lors de la suppression des accusés de lecture :', receiptsError)
   }, [fetchAll])
 
   return { messages, loading, error, refetch: fetchAll, sendMessage, sendTradeMessage, deleteMessage, clearAll }

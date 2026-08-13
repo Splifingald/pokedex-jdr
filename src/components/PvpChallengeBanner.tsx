@@ -65,7 +65,10 @@ export function PvpChallengeBanner({ challenge, defenderPlayer, pokemonByName, a
         </span>
       </div>
 
-      <div className="flex items-center gap-3">
+      {/* flex-wrap (sans breakpoint : la popup est souvent plus étroite que le
+          viewport) — le bloc d'action, surtout les deux boutons admin, ne
+          descend sous le sprite + nom que s'il ne tient pas sur la ligne. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="w-16 h-16 shrink-0 rounded-md border-2 border-ink bg-cream flex items-center justify-center overflow-hidden">
           {species?.image_miniature ? (
             <img src={species.image_miniature} alt="" className="pixelated w-full h-full object-contain" />
@@ -73,12 +76,12 @@ export function PvpChallengeBanner({ challenge, defenderPlayer, pokemonByName, a
             <span className="text-ink-muted-2 text-2xl">?</span>
           )}
         </div>
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-[6rem]">
           <p className="text-ink text-sm font-bold truncate">{challenge.nickname?.trim() || challenge.pokemon_nom}</p>
           <p className="text-ink-muted-2 text-xs">{challenge.max_hp} PV</p>
         </div>
         {isAdmin ? (
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="shrink-0 ml-auto flex flex-wrap items-center justify-end gap-1.5">
             {onPromoteChampion && (
               <button onClick={onPromoteChampion} className={`px-3 py-1.5 rounded text-xs font-bold ${BUTTON_STYLE.yellow}`}>
                 👑 Nommer Champion

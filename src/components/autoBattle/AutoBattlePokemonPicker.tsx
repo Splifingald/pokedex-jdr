@@ -11,6 +11,7 @@ import { STAT_ICON } from '../../lib/icons'
 import { PixelIcon } from '../icons/PixelIcon'
 import { TypeBadge } from '../TypeBadge'
 import { Chip } from '../Chip'
+import { AutoBattleLaunchBar } from './AutoBattleLaunchBar'
 
 interface Props {
   roster: PlayerPokemon[]
@@ -21,6 +22,10 @@ interface Props {
   opponentSpecies?: Pokemon
   /** Ce niveau a-t-il déjà été joué au moins une fois (autobattle_player_level_state.discovered) — le badge "Super Efficace" ne doit apparaître qu'une fois l'adversaire réellement découvert, jamais en avant-première sur un niveau jamais tenté. */
   opponentDiscovered: boolean
+  /** Choix en deux temps (Combat Manuel) : le tap ne fait que sélectionner le pokémon, onSelect n'est appelée qu'au bouton "Lancer" — c'est là que le ticket est débité (voir handleStartManualBattle). Sans ce drapeau (Combat Auto, PvP), le tap appelle onSelect directement : l'écran suivant ne coûte rien. */
+  requireLaunch?: boolean
+  /** Avec requireLaunch : plus aucun ticket, "Lancer" reste visible mais désactivé. */
+  noTicket?: boolean
   onSelect: (pp: PlayerPokemon) => void
   onBack: () => void
 }
@@ -39,9 +44,10 @@ const SORT_LABELS: Record<SortKey, string> = {
 // pokémon ayant au moins une capacité apprise non-bannie (voir requirement
 // #6/#9). Partagée telle quelle entre Combat Auto (auto ET manuel) et PvP
 // (AutoBattlePopup / PvpPopup) — aucune différence d'affichage entre modes.
-export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, bannedAttacks, opponentSpecies, opponentDiscovered, onSelect, onBack }: Props) {
+export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, bannedAttacks, opponentSpecies, opponentDiscovered, requireLaunch, noTicket, onSelect, onBack }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('default')
   const [query, setQuery] = useState('')
+  const [selected, setSelected] = useState<PlayerPokemon | null>(null)
 
   const eligible = useMemo(
     () => getEligiblePlayerPokemon(roster, attacksByName, bannedAttacks),
@@ -104,7 +110,7 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
         <button onClick={onBack} className={`text-xs px-2 py-1 rounded font-bold ${BUTTON_STYLE.gray}`}>← Retour</button>
-        <h4 className="text-ink text-base font-bold">Choisissez votre pokémon</h4>
+        <h4 className="text-ink text-base font-bold">Choisis ton pokémon</h4>
       </div>
 
       <input
@@ -133,8 +139,12 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
             return (
               <button
                 key={pp.id}
-                onClick={() => onSelect(pp)}
-                className={`${PANEL} flex items-stretch gap-2.5 p-2 text-left ${BUTTON_STYLE.gray}`}
+                onClick={() => (requireLaunch ? setSelected(pp) : onSelect(pp))}
+                className={`${PANEL} flex items-stretch gap-2.5 p-2 text-left ${
+                  selected?.id === pp.id
+                    ? 'border-2 border-ink bg-[#f0e08f] shadow-none translate-x-[2px] translate-y-[2px] transition-all'
+                    : BUTTON_STYLE.gray
+                }`}
               >
                 <div className="w-16 h-16 shrink-0 rounded-md border-2 border-ink bg-cream-secondary flex items-center justify-center overflow-hidden">
                   {species?.image_miniature ? (
@@ -173,6 +183,10 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
             )
           })}
         </div>
+      )}
+
+      {requireLaunch && selected && (
+        <AutoBattleLaunchBar label={ownedPokemonName(selected)} disabled={noTicket} onLaunch={() => onSelect(selected)} />
       )}
     </div>
   )

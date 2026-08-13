@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { Extension } from '@tiptap/core'
@@ -11,7 +11,9 @@ import { useReferenceIndex, type ReferenceEntry } from '../../hooks/useReference
 import { ReferenceHighlight, forceReferenceRecompute } from '../../lib/referenceExtension'
 import { chatCooldownSeconds } from '../../lib/chatSpam'
 import { findMentionedPlayers, computeMentionSuggestion } from '../../lib/chatMentions'
+import { useChatReadReceipts } from '../../hooks/useChatReadReceipts'
 import { ChatMessageBubble } from './ChatMessageBubble'
+import { ChatReadReceipts } from './ChatReadReceipts'
 import { ChatReferenceDispatcher } from './ChatReferenceDispatcher'
 import { TradePopup } from './TradePopup'
 import { TradeSwapAnimation } from './TradeSwapAnimation'
@@ -79,6 +81,33 @@ export function ChatPopup({ player, players, chat, inventory, roster, pokemonByN
 
   const playersById = useMemo(() => new Map(players.map((p) => [p.id, p])), [players])
   const locationsByName = useMemo(() => new Map(locations.map((l) => [l.titre, l])), [locations])
+
+  const readReceipts = useChatReadReceipts()
+
+  // Le chat étant ouvert, tout ce qui est affiché est considéré comme lu : on
+  // pointe l'accusé de lecture du joueur sur le dernier message du flux.
+  const lastMessageId = chat.messages.length > 0 ? chat.messages[chat.messages.length - 1].id : null
+  const { markRead } = readReceipts
+  useEffect(() => {
+    if (lastMessageId === null || player.is_npc) return
+    void markRead(player.id, lastMessageId)
+  }, [lastMessageId, player.id, player.is_npc, markRead])
+
+  // Regroupe les lecteurs par message : les avatars s'affichent sous le dernier
+  // message que chacun a vu. On exclut les PNJ (jamais de session de lecture) et
+  // le joueur courant (inutile de lui montrer qu'il a lu son propre flux).
+  const readersByMessageId = useMemo(() => {
+    const map = new Map<number, Player[]>()
+    for (const receipt of readReceipts.receipts) {
+      if (receipt.player_id === player.id) continue
+      const reader = playersById.get(receipt.player_id)
+      if (!reader || reader.is_npc) continue
+      const list = map.get(receipt.last_read_message_id)
+      if (list) list.push(reader)
+      else map.set(receipt.last_read_message_id, [reader])
+    }
+    return map
+  }, [readReceipts.receipts, playersById, player.id])
 
   const discoveredPokemonList = useMemo(
     () => [...pokemonByName.values()].filter((p) => discoveredPokemon.has(p.nom)),
@@ -212,20 +241,22 @@ export function ChatPopup({ player, players, chat, inventory, roster, pokemonByN
             <p className="text-ink-muted-2 text-sm text-center mt-4">Aucun message pour le moment.</p>
           )}
           {chat.messages.map((message) => (
-            <ChatMessageBubble
-              key={message.id}
-              message={message}
-              sender={playersById.get(message.player_id)}
-              mine={message.player_id === player.id && !message.is_npc}
-              referenceIndex={referenceIndex}
-              onReferenceClick={setActiveReference}
-              trades={trades.trades}
-              players={players}
-              itemsByName={itemsByName}
-              pokemonByName={pokemonByName}
-              onOpenTrade={(trade) => setTradePopup({ trade })}
-              onReplayTrade={(trade) => setReplayTrade(trade)}
-            />
+            <Fragment key={message.id}>
+              <ChatMessageBubble
+                message={message}
+                sender={playersById.get(message.player_id)}
+                mine={message.player_id === player.id && !message.is_npc}
+                referenceIndex={referenceIndex}
+                onReferenceClick={setActiveReference}
+                trades={trades.trades}
+                players={players}
+                itemsByName={itemsByName}
+                pokemonByName={pokemonByName}
+                onOpenTrade={(trade) => setTradePopup({ trade })}
+                onReplayTrade={(trade) => setReplayTrade(trade)}
+              />
+              <ChatReadReceipts readers={readersByMessageId.get(message.id) ?? []} />
+            </Fragment>
           ))}
         </div>
 

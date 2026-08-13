@@ -79,14 +79,14 @@ export function PensionPlacementList({
   }, [rows, sortMode])
 
   if (pcRoster.length === 0) {
-    return <p className="text-ink-muted-2 text-sm text-center py-6">Aucun Pokémon disponible dans votre PC pour la pension.</p>
+    return <p className="text-ink-muted-2 text-sm text-center py-6">Aucun Pokémon disponible dans ton PC pour la pension.</p>
   }
 
   return (
     <div className="flex flex-col gap-3">
       {daycareFull && (
         <p className="text-hp-orange text-sm font-bold text-center bg-hp-orange/10 border-2 border-hp-orange rounded-lg py-2 px-3">
-          Pension complète — réessayez plus tard.
+          Pension complète — réessaie plus tard.
         </p>
       )}
 

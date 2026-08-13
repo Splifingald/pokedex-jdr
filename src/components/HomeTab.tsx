@@ -374,7 +374,7 @@ export function HomeTab({ player, players, isAdmin, pokemonByName, discoveredPok
       {!player ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
           <p className={`text-[#14320f] text-sm bg-cream/90 px-4 py-2.5 rounded-lg ${PIXEL_BORDER_SM}`}>
-            Connectez-vous pour voir votre équipe.
+            Connecte-toi pour voir ton équipe.
           </p>
           <button
             onClick={onRequestLogin}

@@ -112,7 +112,7 @@ export function MiningGridExhaustedPopup({ snapshot, itemsByName, playersById, h
             aucun espace où grandir dans un conteneur dont la hauteur dépend
             de son propre contenu — la grille se retrouverait à 0px. */}
         <p className="text-ink text-base text-center shrink-0">
-          Le mur est trop endommagé, vous ne pouvez plus creuser ici, cherchons un autre mur.
+          Le mur est trop endommagé, tu ne peux plus creuser ici, cherchons un autre mur.
         </p>
         <div ref={squareRef} className="flex-1 min-h-0 min-w-0 flex items-center justify-center">
           <div style={{ width: squareSide, height: squareSide }}>

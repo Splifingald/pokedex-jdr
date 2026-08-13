@@ -83,6 +83,14 @@ export const SAFARI_ICON = `${BASE}/icon_safari_game.png`
 export const AUTOBATTLE_ICON = `${BASE}/icon_battle_game.png`
 export const AUTOBATTLE_TICKET_ICON = `${BASE}/icon_battle_ticket.png`
 
+// Mode de jeu d'un parcours (autobattle_variants.game_mode), affiché en haut à
+// droite de sa bannière : valeurs par défaut, surchargeables en admin via
+// autobattle_config.mode_icon_auto_url / mode_icon_manual_url.
+export const AUTOBATTLE_MODE_ICON = {
+  auto: `${BASE}/icon_battle_auto.png`,
+  manual: `${BASE}/icon_battle_manual.png`,
+}
+
 // Asset à uploader par l'utilisateur — voir mémoire du projet (même
 // convention que l'icône Pension manquante lors de son ajout initial).
 export const PVP_ICON = `${BASE}/icon_pvp_game.png`

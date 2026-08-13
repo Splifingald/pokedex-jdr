@@ -50,7 +50,7 @@ export function PvpAbilityLoadoutPicker({
       return
     }
     if (selected.length >= loadoutMax) {
-      showToast(`Vous ne pouvez choisir que ${loadoutMax} capacités maximum`)
+      showToast(`Tu ne peux choisir que ${loadoutMax} capacités maximum`)
       return
     }
     onSelectedChange([...selected, nom])
@@ -74,7 +74,7 @@ export function PvpAbilityLoadoutPicker({
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
         <button onClick={onBack} className={`text-xs px-2 py-1 rounded font-bold ${BUTTON_STYLE.gray}`}>← Retour</button>
-        <h4 className="text-ink text-base font-bold flex-1">Choisissez votre boucle de capacités</h4>
+        <h4 className="text-ink text-base font-bold flex-1">Choisis ta boucle de capacités</h4>
       </div>
       <span className={`self-start text-xs font-bold px-2 py-1 rounded-full shrink-0 ${selected.length >= loadoutMax ? 'bg-[#f0e08f] text-ink' : 'bg-cream-secondary text-ink-muted-2'}`}>
         {selected.length} / {loadoutMax}

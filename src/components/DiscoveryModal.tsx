@@ -14,7 +14,7 @@ export function DiscoveryModal({ numero, onConfirm, onCancel }: Props) {
           <div className="text-5xl mb-3">❓</div>
           <p className="text-ink-muted-2 text-sm mb-1">Pokémon #{numero}</p>
           <h3 className="text-ink text-lg">
-            Avez-vous découvert ce Pokémon ?
+            As-tu découvert ce Pokémon ?
           </h3>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

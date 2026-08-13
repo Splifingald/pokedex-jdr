@@ -212,7 +212,7 @@ function OwnedVitals({
   const handleRandomEvolveClick = () => {
     if (evolving != null || !onEvolve || !evolutionsByPokemonNom) return
     if (playerPokemon.in_daycare) {
-      showToast("Votre pokémon ne peut pas évoluer tant qu'il est à la pension")
+      showToast("Ton pokémon ne peut pas évoluer tant qu'il est à la pension")
       return
     }
     const picked = pickRandomEvolution(playerPokemon.pokemon_nom, evolutionsByPokemonNom)
@@ -244,13 +244,13 @@ function OwnedVitals({
     if (evolving != null || !onEvolve) return
 
     if (playerPokemon.in_daycare) {
-      showToast("Votre pokémon ne peut pas évoluer tant qu'il est à la pension")
+      showToast("Ton pokémon ne peut pas évoluer tant qu'il est à la pension")
       return
     }
 
     if (!opt.clickable) {
       const itemName = opt.conditionItem?.nom ?? opt.evolution.condition_item_nom
-      showToast(`Il vous faut ${itemName} pour faire évoluer ce Pokémon`)
+      showToast(`Il te faut ${itemName} pour faire évoluer ce Pokémon`)
       return
     }
 
@@ -805,7 +805,7 @@ export function PokemonDetailSheet({
           {context === 'pokedex' && (isDiscovered || isAdmin) && (
             <div className="flex flex-col gap-2">
               {isDiscovered && ownedCount > 0 && (
-                <p className="text-center text-xs text-[#5c8f6a]">✓ Déjà dans votre roster ({ownedCount})</p>
+                <p className="text-center text-xs text-[#5c8f6a]">✓ Déjà dans ton roster ({ownedCount})</p>
               )}
               {isDiscovered && onAddToRoster && (
                 <button
@@ -875,7 +875,7 @@ export function PokemonDetailSheet({
       {showDeleteConfirm && playerPokemon && (
         <ConfirmPopup
           title="Supprimer ce pokémon ?"
-          message={`${nom} sera définitivement retiré de votre roster.`}
+          message={`${nom} sera définitivement retiré de ton roster.`}
           confirmLabel="Supprimer"
           danger
           onConfirm={() => { onDelete?.(playerPokemon.id); setShowDeleteConfirm(false); onClose() }}

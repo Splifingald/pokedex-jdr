@@ -13,6 +13,8 @@ const DEFAULTS: AutoBattleConfig = {
   nom: 'Combat Auto',
   icon_url: '',
   precision_enabled: true,
+  mode_icon_auto_url: '',
+  mode_icon_manual_url: '',
 }
 
 export function useAutoBattleConfig() {

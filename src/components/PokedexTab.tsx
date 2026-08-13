@@ -224,7 +224,7 @@ export function PokedexTab({
                         <span className="text-ink-muted-2 text-2xl">?</span>
                       )}
                       {owned && (
-                        <span className="absolute top-1 right-1 text-hp-red" title="Dans votre roster">
+                        <span className="absolute top-1 right-1 text-hp-red" title="Dans ton roster">
                           <PixelIcon src={NAV_ICON.equipe!} size={16} colored />
                         </span>
                       )}
@@ -277,7 +277,7 @@ export function PokedexTab({
                     )}
                   </span>
                   {owned && (
-                    <span className="shrink-0 text-hp-red" title="Dans votre roster">
+                    <span className="shrink-0 text-hp-red" title="Dans ton roster">
                       <PixelIcon src={NAV_ICON.equipe!} size={18} colored />
                     </span>
                   )}

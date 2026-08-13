@@ -135,6 +135,69 @@ html, body, #root {
   25% { transform: translateX(-6px); }
   75% { transform: translateX(6px); }
 }
+/* Combat Auto/Manuel — animations d'attaque par capacité (colonnes
+   "Animation"/"Animation 2" du CSV des attaques, voir
+   src/lib/battleAnimations.ts). Seules celles qui ne peuvent pas s'exprimer
+   avec les 5 phases de transition de l'attaquant (cercles, fondu), l'écrasement
+   de la cible, et les effets projetés (rayon/projectiles) sont ici — le reste
+   est décrit en TS phase par phase. Les variables --tx/--ty/--arc sont posées
+   par AutoBattleAttackVfx sur chaque élément. */
+@keyframes battle-round-motion {
+  0%    { transform: translate(0, 0); }
+  12.5% { transform: translate(9px, -9px); }
+  25%   { transform: translate(0, -18px); }
+  37.5% { transform: translate(-9px, -9px); }
+  50%   { transform: translate(0, 0); }
+  62.5% { transform: translate(9px, -9px); }
+  75%   { transform: translate(0, -18px); }
+  87.5% { transform: translate(-9px, -9px); }
+  100%  { transform: translate(0, 0); }
+}
+@keyframes battle-fade {
+  0%   { opacity: 1; transform: scale(1); }
+  30%  { opacity: 0.12; transform: scale(0.93); }
+  65%  { opacity: 0.12; transform: scale(0.93); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes battle-stomp-squash {
+  0%   { transform: scale(1, 1); }
+  14%  { transform: scale(1.35, 0.5); }
+  55%  { transform: scale(1.1, 0.86); }
+  78%  { transform: scale(0.96, 1.06); }
+  100% { transform: scale(1, 1); }
+}
+/* Le rayon grandit en LARGEUR (et non en scaleX) : son contour épais serait
+   sinon écrasé horizontalement pendant la croissance. --len est posé par
+   AutoBattleAttackVfx (distance mesurée jusqu'à la cible + dépassement). */
+@keyframes battle-beam {
+  0%   { width: 0; opacity: 0.7; }
+  30%  { width: var(--len); opacity: 1; }
+  72%  { width: var(--len); opacity: 1; }
+  100% { width: var(--len); opacity: 0; }
+}
+@keyframes battle-projectile {
+  0%   { transform: translateX(0) scale(0.4); opacity: 0.5; }
+  18%  { transform: translateX(calc(var(--tx) * 0.18)) scale(1); opacity: 1; }
+  100% { transform: translateX(var(--tx)) scale(1); opacity: 1; }
+}
+@keyframes battle-projectile-multi {
+  0%   { transform: translate(0, 0) scale(0.3); opacity: 0.4; }
+  18%  { transform: translate(calc(var(--tx) * 0.18), calc(var(--ty) * 0.18)) scale(1); opacity: 1; }
+  100% { transform: translate(var(--tx), var(--ty)) scale(1); opacity: 1; }
+}
+@keyframes battle-bomb-x {
+  from { transform: translateX(0); }
+  to   { transform: translateX(var(--tx)); }
+}
+/* Cloche (U inversé) : les paliers à 25/75 % valent 0,75 × le sommet, ce qui
+   redonne exactement une parabole malgré l'interpolation linéaire. */
+@keyframes battle-bomb-y {
+  0%   { transform: translateY(0); }
+  25%  { transform: translateY(calc(var(--arc) * 0.75)); }
+  50%  { transform: translateY(var(--arc)); }
+  75%  { transform: translateY(calc(var(--arc) * 0.75)); }
+  100% { transform: translateY(0); }
+}
 @keyframes damage-number-pop {
   0% { transform: translateY(0) scale(0.7); opacity: 0; }
   15% { transform: translateY(-12px) scale(1.1); opacity: 1; }

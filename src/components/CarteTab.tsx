@@ -227,7 +227,7 @@ export function CarteTab({ parameters, isAdmin, pokemonByName, attacksByName }: 
     <div className="flex-1 flex flex-col overflow-hidden relative bg-app-bg">
       {!parameters.carte_image_url ? (
         <div className="flex-1 flex items-center justify-center text-[#7a7c9a] text-sm p-6 text-center">
-          Aucune carte configurée. Ajoutez un lien d'image dans Admin → Paramètres.
+          Aucune carte configurée. Ajoute un lien d'image dans Admin → Paramètres.
         </div>
       ) : (
         <div

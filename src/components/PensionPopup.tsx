@@ -41,8 +41,8 @@ interface RetrievedInfo {
 }
 
 const PLACE_ERROR_MESSAGES: Partial<Record<PensionActionStatus, string>> = {
-  daycare_full: 'Pension complète — réessayez plus tard.',
-  player_slot_taken: 'Vous avez déjà un pokémon en pension.',
+  daycare_full: 'Pension complète — réessaie plus tard.',
+  player_slot_taken: 'Tu as déjà un pokémon en pension.',
   permanently_capped: 'Ce pokémon a déjà atteint son plafond, il ne peut plus retourner en pension.',
   must_be_in_pc: 'Ce pokémon doit être au PC pour aller en pension.',
   already_placed: 'Ce pokémon est déjà en pension.',

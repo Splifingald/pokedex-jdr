@@ -398,7 +398,7 @@ export function ScannerModal({ pokemon, discovered, onDiscover, onClose }: Props
             </p>
             <p className="text-gray-500 text-sm leading-relaxed max-w-xs">
               {phase === 'nomatch'
-                ? 'Assurez-vous que le nom est bien net et visible sur la photo.'
+                ? 'Assure-toi que le nom est bien net et visible sur la photo.'
                 : "Une erreur est survenue lors de l'analyse OCR."}
             </p>
           </div>

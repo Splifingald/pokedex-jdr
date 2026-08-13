@@ -8,7 +8,13 @@ import { AutoBattleFloatingText } from './AutoBattleFloatingText'
 import { AutoBattleHealEffect } from './AutoBattleHealEffect'
 import { AutoBattleDiceRoll } from './AutoBattleDiceRoll'
 import { AutoBattleHistoryLog, type AutoBattleHistoryEntryData } from './AutoBattleHistoryLog'
+import { AutoBattleAttackVfx } from './AutoBattleAttackVfx'
 import { getStatusEffectDisplay, STATUS_EFFECT_LABEL } from '../../lib/autoBattle'
+import {
+  battleAnimationStyle, battleAnimationSquashesTarget, getBattleAnimationVfx,
+  BATTLE_DEFAULT_REACH_PX, type BattleAnimationId, type BattleVfxKind,
+} from '../../lib/battleAnimations'
+import { TYPE_COLORS } from '../../lib/typeColors'
 import { PixelIcon } from '../icons/PixelIcon'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 import type { AutoBattleTurn } from '../../types'
@@ -57,7 +63,7 @@ interface Props {
   onContinue: () => void
   isAdmin?: boolean
   attacksByName?: Map<string, Attack>
-  /** Style d'animation par capacité (voir autobattle_ability_rules.animation_style, réglable en admin) — 'soft' fait rester le pokémon sur place au lieu de bondir sur l'adversaire, voir attackTransform. */
+  /** Règles admin par capacité (autobattle_ability_rules) — sert au détail des calculs de dégâts/soin en debug admin (heal_type, percent_hp_damage_percent…). L'animation, elle, ne vient QUE du CSV des attaques (voir animationFor). */
   abilityRulesByName?: Map<string, AutoBattleAbilityRule>
   /** Dégâts par coup AVANT dé (espèce + bonus XP + multiplicateur type + dégâts de base de la capacité), voir autobattle_resolve_battle v_player_damage — sert à isoler la valeur du dé en debug admin (turn.damage - ce total). */
   playerDamagePerHit?: number
@@ -144,52 +150,50 @@ function computeDurations(multiplier: number): PhaseDurations {
 }
 
 type AttackPhase = 'anticipation' | 'lunge' | 'strike-rise' | 'strike-land' | 'return'
-interface AttackState { side: 'player' | 'opponent'; phase: AttackPhase; durations: PhaseDurations; soft: boolean }
+interface AttackState { side: 'player' | 'opponent'; phase: AttackPhase; durations: PhaseDurations; animation: BattleAnimationId }
 type Side = 'player' | 'opponent'
 
-// Style de transform du pokémon attaquant selon la phase en cours, combinant
-// les axes X (avance vers l'adversaire) et Y (arc de saut) : petit recul
-// (anticipation), petit bond en avant (lunge), grand saut qui monte haut en
-// couvrant l'essentiel de la distance (strike-rise), puis retombe tout près
-// de/sur l'adversaire (strike-land — c'est à la fin de cette phase que les
-// dégâts sont appliqués, "quand le pokémon atteint la cible"), puis retour à
-// la position de départ (return). Sur un tour raté, seules 'anticipation'
-// puis 'return' sont jouées (petit mouvement sur place, jamais de saut).
-// `sign` vaut +1 pour le joueur (avance vers la droite, l'adversaire) et -1
-// pour l'adversaire (avance vers la gauche). `durations` vient du tour en
-// cours (voir speedMultiplierForRepeat) : accéléré si ce tour fait partie
-// d'un bloc multi-attaques. `soft` (voir autobattle_ability_rules.
-// animation_style) : le pokémon reste sur place — juste un léger
-// grossissement/rétrécissement sur place (aucun `translate`) — au lieu du
-// bond vers l'adversaire, pour les capacités où ça a plus de sens
-// visuellement (soin/buff sur soi…).
-function attackTransform(phase: AttackPhase, sign: 1 | -1, durations: PhaseDurations, soft: boolean): React.CSSProperties {
-  if (soft) {
-    switch (phase) {
-      case 'anticipation':
-        return { transform: 'scale(0.97)', transition: `transform ${durations.anticipation}ms ease-out` }
-      case 'lunge':
-        return { transform: 'scale(1.05)', transition: `transform ${durations.lunge}ms ease-in` }
-      case 'strike-rise':
-        return { transform: 'scale(1.12)', transition: `transform ${durations.strikeRise}ms ease-out` }
-      case 'strike-land':
-        return { transform: 'scale(1.16)', transition: `transform ${durations.strikeLand}ms ease-in` }
-      case 'return':
-        return { transform: 'scale(1)', transition: `transform ${durations.return}ms ease-out` }
-    }
-  }
-  switch (phase) {
-    case 'anticipation':
-      return { transform: `translate(${sign * -8}px, 4px) scale(0.95)`, transition: `transform ${durations.anticipation}ms ease-out` }
-    case 'lunge':
-      return { transform: `translate(${sign * 20}px, -10px) scale(1.04)`, transition: `transform ${durations.lunge}ms ease-in` }
-    case 'strike-rise':
-      return { transform: `translate(${sign * 120}px, -55px) scale(1.1)`, transition: `transform ${durations.strikeRise}ms ease-out` }
-    case 'strike-land':
-      return { transform: `translate(${sign * 175}px, -6px) scale(1.2)`, transition: `transform ${durations.strikeLand}ms ease-in` }
-    case 'return':
-      return { transform: 'translate(0, 0) scale(1)', transition: `transform ${durations.return}ms ease-out` }
-  }
+// Effet projeté en vol (rayon/projectile) du coup en cours — voir
+// AutoBattleAttackVfx. Monté au départ de 'strike-rise' et démonté peu après
+// l'impact, indépendamment de attackState (dont les phases servent au
+// déplacement du sprite, pas au vol de l'effet).
+interface AttackVfxState { side: Side; kind: BattleVfxKind; color: string; travelMs: number; damage: number }
+
+// Durée de l'écrasement de la cible sur un coup 'Stomp' — remplace la
+// secousse habituelle (SHAKE_MS), doit rester alignée sur l'animation CSS
+// 'battle-stomp-squash' (voir src/index.css).
+const SQUASH_MS = 420 * GLOBAL_SLOWDOWN
+
+// Le déplacement du sprite attaquant est décrit par l'animation choisie pour
+// la capacité (colonne "Animation" du CSV, voir src/lib/battleAnimations.ts) :
+// chacune donne son propre transform pour la phase en cours. Le découpage en
+// phases, lui, ne change jamais — petit recul (anticipation), élan (lunge),
+// puis les deux phases du coup lui-même (strike-rise/strike-land, les dégâts
+// tombant TOUJOURS à la fin de 'strike-land'), puis retour (return) — si bien
+// qu'aucune animation ne peut modifier le rythme du combat. Sur un tour raté,
+// seules 'anticipation' puis 'return' sont jouées. `sign` vaut +1 pour le
+// joueur (l'adversaire est à sa droite) et -1 pour l'adversaire. `durations`
+// vient du tour en cours (voir speedMultiplierForRepeat) : accéléré si ce tour
+// fait partie d'un bloc multi-attaques.
+function attackTransform(phase: AttackPhase, sign: 1 | -1, durations: PhaseDurations, animation: BattleAnimationId, reachPx: number): React.CSSProperties {
+  return battleAnimationStyle(animation, phase, sign, durations, reachPx)
+}
+
+// Style du conteneur d'un sprite : réaction à un coup reçu (secousse ou
+// écrasement) si le pokémon vient d'être touché, sinon animation d'attaque
+// s'il est en train d'attaquer. Les deux passent par la propriété CSS
+// `animation` (ou par un `transform` transitionné), d'où cette fusion
+// explicite plutôt qu'un spread : la réaction au coup reçu prime toujours.
+function spriteContainerStyle(
+  attackStyle: React.CSSProperties | undefined,
+  shaken: boolean,
+  squashed: boolean
+): React.CSSProperties {
+  const reaction = squashed
+    ? `battle-stomp-squash ${SQUASH_MS}ms ease-out`
+    : shaken ? `hit-shake ${SHAKE_MS}ms ease-in-out` : undefined
+  if (!reaction) return attackStyle ?? {}
+  return { ...attackStyle, animation: reaction }
 }
 
 // Filtre coloré "même sprite, teinté, avec transparence" pour matérialiser un
@@ -238,7 +242,10 @@ export function AutoBattleScreen({
   const [opponentHp, setOpponentHp] = useState(opponentMaxHp)
   const [shownTurnIndex, setShownTurnIndex] = useState(-1)
   const [attackState, setAttackState] = useState<AttackState | null>(null)
+  const [attackVfx, setAttackVfx] = useState<AttackVfxState | null>(null)
+  const [vfxKey, setVfxKey] = useState(0)
   const [shakeSide, setShakeSide] = useState<Side | null>(null)
+  const [squashSide, setSquashSide] = useState<Side | null>(null)
   const [flashSide, setFlashSide] = useState<Side | null>(null)
   const [hitKey, setHitKey] = useState(0)
   const [lastDamage, setLastDamage] = useState<{ side: Side; damage: number; superEffective: boolean; color?: string } | null>(null)
@@ -268,6 +275,15 @@ export function AutoBattleScreen({
   const [historyEntries, setHistoryEntries] = useState<AutoBattleHistoryEntryData[]>([])
   const [historyOpen, setHistoryOpen] = useState(true)
   const historyIdRef = useRef(0)
+  // Distance réelle (px) entre le centre des deux sprites : elle dépend de la
+  // largeur du popup (~175px sur mobile, davantage dès `sm:`), et c'est elle
+  // qui décide où atterrit un bond / jusqu'où va un rayon ou un projectile.
+  // Mesurée sur les COLONNES et non sur les sprites : les colonnes ne sont
+  // jamais déplacées par une animation, leur centre reste donc valable même
+  // au milieu d'une attaque.
+  const playerColRef = useRef<HTMLDivElement | null>(null)
+  const opponentColRef = useRef<HTMLDivElement | null>(null)
+  const [reachPx, setReachPx] = useState(BATTLE_DEFAULT_REACH_PX)
   // Suivi persistant entre deux exécutions de l'effet de programmation
   // ci-dessous — nécessaire uniquement pour le Combat Manuel (`turns`
   // grandit au fil des tours, voir ManualBattleScreen) : sans ces refs,
@@ -290,6 +306,14 @@ export function AutoBattleScreen({
   // play_three/...) plutôt que de disparaître dès son 1er coup.
   const playerShieldSeenOpponentTurnRef = useRef(false)
   const opponentShieldSeenPlayerTurnRef = useRef(false)
+  // Capacité en deux tours (turn_effect = 'prepare_release') : passe à true au
+  // tour de préparation (turn.preparing) et retombe à false au tour de
+  // libération, qui joue alors "Animation 2" au lieu de "Animation" (voir
+  // src/lib/battleAnimations.ts). Même raison d'être en ref que les boucliers
+  // ci-dessus : en Combat Manuel les deux tours arrivent dans deux exécutions
+  // successives de l'effet de programmation.
+  const playerReleasingRef = useRef(false)
+  const opponentReleasingRef = useRef(false)
 
   // Précision effective affichée en debug admin — reproduit EXACTEMENT
   // GREATEST(0, ability.precision - v_status_precision_penalty +
@@ -322,6 +346,23 @@ export function AutoBattleScreen({
     formula += ` = ${info.effective}/10`
     return formula
   }
+
+  useEffect(() => {
+    const measure = () => {
+      const left = playerColRef.current?.getBoundingClientRect()
+      const right = opponentColRef.current?.getBoundingClientRect()
+      if (!left || !right) return
+      const distance = Math.abs((right.left + right.width / 2) - (left.left + left.width / 2))
+      if (distance > 0) setReachPx(distance)
+    }
+    measure()
+    // ResizeObserver plutôt que l'évènement `resize` : le popup peut changer
+    // de largeur sans que la fenêtre bouge (ouverture du clavier, apparition
+    // de la grille de capacités en Combat Manuel…).
+    const observer = new ResizeObserver(measure)
+    if (playerColRef.current) observer.observe(playerColRef.current)
+    return () => observer.disconnect()
+  }, [])
 
   // Compte à rebours 3…2…1…GO ! avant le premier coup, même idiome que
   // MagikarpGame — les deux pokémon sont déjà affichés pendant ce temps.
@@ -370,6 +411,8 @@ export function AutoBattleScreen({
     let opponentShieldActive = opponentShieldActiveRef.current
     let playerShieldSeenOpponentTurn = playerShieldSeenOpponentTurnRef.current
     let opponentShieldSeenPlayerTurn = opponentShieldSeenPlayerTurnRef.current
+    let playerReleasing = playerReleasingRef.current
+    let opponentReleasing = opponentReleasingRef.current
     setBattleDone(false)
 
     // Nom/icône/capacité affichés dans l'historique pour un côté donné — voir
@@ -404,6 +447,50 @@ export function AutoBattleScreen({
         debugHealFormula: extra?.healFormula,
       }
       setHistoryEntries((prev) => [entry, ...prev])
+    }
+
+    // Animation à jouer pour un coup donné : celle choisie sur la capacité
+    // dans le CSV des attaques (colonne "Animation", ou "Animation 2" sur le
+    // tour de libération d'une capacité en deux temps). Le CSV est l'unique
+    // source de vérité — colonne vide ou libellé non reconnu = 'Jump Attack',
+    // le bond historique.
+    const animationFor = (abilityNom: string, second: boolean): BattleAnimationId => {
+      const ability = attacksByName?.get(abilityNom)
+      const chosen = second ? ability?.animation_2 ?? ability?.animation : ability?.animation
+      return chosen ?? 'jump_attack'
+    }
+
+    // Programme le déplacement du sprite attaquant (phases 'anticipation' →
+    // 'strike-land') et, le cas échéant, l'effet projeté vers la cible. La
+    // phase 'return' n'est PAS programmée ici pour un vrai coup : elle part du
+    // callback d'impact plus bas, en même temps que les dégâts.
+    const scheduleAttackAnimation = (opts: {
+      side: Side; animation: BattleAnimationId; abilityNom: string
+      durations: PhaseDurations; turnStart: number; full: boolean; damage: number
+    }) => {
+      const { side, animation, abilityNom, durations, turnStart, full, damage } = opts
+      timers.push(window.setTimeout(() => setAttackState({ side, phase: 'anticipation', durations, animation }), turnStart))
+      if (!full) return
+      const lungeAt = turnStart + durations.anticipation
+      const riseAt = lungeAt + durations.lunge
+      const landAt = riseAt + durations.strikeRise
+      timers.push(window.setTimeout(() => setAttackState({ side, phase: 'lunge', durations, animation }), lungeAt))
+      timers.push(window.setTimeout(() => setAttackState({ side, phase: 'strike-rise', durations, animation }), riseAt))
+      timers.push(window.setTimeout(() => setAttackState({ side, phase: 'strike-land', durations, animation }), landAt))
+
+      // Le projectile/rayon part avec la phase 'strike-rise' et met
+      // exactement le reste du tour à parcourir la distance : il touche la
+      // cible pile quand les dégâts sont appliqués, y compris sur les tours
+      // accélérés (voir speedMultiplierForRepeat).
+      const kind = getBattleAnimationVfx(animation)
+      if (!kind) return
+      const travelMs = durations.strikeRise + durations.strikeLand
+      const color = TYPE_COLORS[attacksByName?.get(abilityNom)?.type ?? ''] ?? '#f0c419'
+      timers.push(window.setTimeout(() => {
+        setAttackVfx({ side, kind, color, travelMs, damage })
+        setVfxKey((k) => k + 1)
+      }, riseAt))
+      timers.push(window.setTimeout(() => setAttackVfx(null), riseAt + travelMs + FLASH_MS))
     }
 
     for (let i = scheduledCountRef.current; i < turns.length; i++) {
@@ -586,12 +673,37 @@ export function AutoBattleScreen({
       }
 
       if (turn.skipped) {
+        // 1er tour d'une capacité en deux temps : il joue bel et bien son
+        // animation ("Animation", typiquement "Idle" quand la capacité se
+        // contente de se charger) — c'est le tour de libération qui suit qui
+        // jouera "Animation 2". Un tour simplement passé (effet 'skip',
+        // statut) reste sans aucune animation, comme avant.
+        if (turn.preparing || turn.charging) {
+          const prepareAbilityNom = turn.ability_nom ?? (attackerSide === 'player' ? playerAbilityNom : opponentAbilityNom)
+          const prepareAnimation = animationFor(prepareAbilityNom, false)
+          // Un tour de préparation n'inflige jamais rien : son rayon reste
+          // donc au plus fin (voir beamScaleForDamage), le coup qui compte
+          // étant celui de la libération au tour suivant.
+          scheduleAttackAnimation({ side: attackerSide, animation: prepareAnimation, abilityNom: prepareAbilityNom, durations, turnStart, full: true, damage: 0 })
+          timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'return', durations, animation: prepareAnimation }), turnStart + impactOffset))
+          timers.push(window.setTimeout(() => setAttackState(null), turnStart + impactOffset + durations.return))
+          // "Animation 2" n'existe que pour les capacités en deux temps
+          // (prepare_release) — un tour de charge ('charge_double_next')
+          // n'enchaîne pas sur une libération, il rejoue l'animation normale.
+          if (turn.preparing) {
+            if (attackerSide === 'player') playerReleasing = true
+            else opponentReleasing = true
+          }
+        }
         timers.push(window.setTimeout(() => {
           setShownTurnIndex(i)
           setSkipSide(attackerSide)
-          setSkipLabel(turn.preparing ? 'Préparation' : 'Tour passé !')
+          setSkipLabel(turn.charging ? 'Charge !' : turn.preparing ? 'Préparation' : 'Tour passé !')
           setSkipKey((k) => k + 1)
-          pushHistory(attackerSide, turn.preparing ? `se prépare à attaquer avec ${sideInfo(attackerSide, turn).ability}` : 'passe son tour')
+          pushHistory(attackerSide,
+            turn.charging ? 'se concentre : il jouera deux fois au prochain tour'
+            : turn.preparing ? `se prépare à attaquer avec ${sideInfo(attackerSide, turn).ability}`
+            : 'passe son tour')
           // Invulnérabilité accordée dès la préparation (prepare_release +
           // invulnerable_next_turn combinés, voir autobattle_resolve_battle) —
           // protège le tour adverse qui suit immédiatement, pas celui après
@@ -606,27 +718,31 @@ export function AutoBattleScreen({
         continue
       }
 
-      // Animation "douce" (voir autobattle_ability_rules.animation_style,
-      // réglable en admin) : le pokémon reste sur place au lieu de bondir sur
-      // l'adversaire — pensé pour les capacités auto-ciblées (soin, buff sur
-      // soi…) où un lunge vers l'adversaire n'a pas de sens, mais applicable
-      // à n'importe quelle capacité. N'affecte que le déplacement de
-      // l'ATTAQUANT (voir attackTransform) — dégâts/tremblement/flash sur la
-      // cible inchangés.
+      // Animation de ce coup (colonne "Animation" du CSV des attaques, ou
+      // "Animation 2" si ce tour libère une capacité en deux temps préparée au
+      // tour précédent) — purement visuel, voir animationFor plus haut.
+      // N'affecte que le déplacement de l'ATTAQUANT et l'effet projeté :
+      // dégâts/tremblement/flash sur la cible inchangés (à l'exception de
+      // 'Stomp', qui écrase la cible au lieu de la secouer).
       const attackAbilityNom = turn.ability_nom ?? (attackerSide === 'player' ? playerAbilityNom : opponentAbilityNom)
-      const isSoftAttack = abilityRulesByName?.get(attackAbilityNom)?.animation_style === 'soft'
-
-      timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'anticipation', durations, soft: isSoftAttack }), turnStart))
-      if (!turn.missed) {
-        timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'lunge', durations, soft: isSoftAttack }), turnStart + durations.anticipation))
-        timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'strike-rise', durations, soft: isSoftAttack }), turnStart + durations.anticipation + durations.lunge))
-        timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'strike-land', durations, soft: isSoftAttack }), turnStart + durations.anticipation + durations.lunge + durations.strikeRise))
+      const isRelease = attackerSide === 'player' ? playerReleasing : opponentReleasing
+      if (isRelease) {
+        if (attackerSide === 'player') playerReleasing = false
+        else opponentReleasing = false
       }
+      const attackAnimation = animationFor(attackAbilityNom, isRelease)
+
+      // Un tour raté ne joue que le petit mouvement d'anticipation puis le
+      // retour : ni élan, ni coup, ni projectile (full: false).
+      scheduleAttackAnimation({
+        side: attackerSide, animation: attackAnimation, abilityNom: attackAbilityNom,
+        durations, turnStart, full: !turn.missed, damage: turn.damage,
+      })
 
       const isSuperEffective = attackerSide === 'player' ? playerTypeBonus : opponentTypeBonus
       timers.push(window.setTimeout(() => {
         setShownTurnIndex(i)
-        setAttackState({ side: attackerSide, phase: 'return', durations, soft: isSoftAttack })
+        setAttackState({ side: attackerSide, phase: 'return', durations, animation: attackAnimation })
 
         if (turn.missed) {
           setMissSide(turn.invulnerable_miss ? hitSide : attackerSide)
@@ -664,14 +780,23 @@ export function AutoBattleScreen({
 
         if (hitSide === 'player') setPlayerHp(turn.defender_hp_after)
         else setOpponentHp(turn.defender_hp_after)
-        setShakeSide(hitSide)
+        // 'Stomp' écrase la cible (compression sur l'axe Y) au lieu de la
+        // secouer — les deux passent par la même propriété CSS `animation`
+        // sur le conteneur du sprite, donc jamais les deux à la fois (voir
+        // spriteContainerStyle).
+        if (battleAnimationSquashesTarget(attackAnimation)) {
+          setSquashSide(hitSide)
+          window.setTimeout(() => setSquashSide(null), SQUASH_MS)
+        } else {
+          setShakeSide(hitSide)
+          window.setTimeout(() => setShakeSide(null), SHAKE_MS)
+        }
         // Pas de flash rouge pour un coup à 0 dégât (capacité non-offensive,
         // voir attacks.deals_damage) — rien n'a été touché, l'effet visuel
         // d'impact n'a pas de sens.
         if (turn.damage > 0) setFlashSide(hitSide)
         setLastDamage({ side: hitSide, damage: turn.damage, superEffective: isSuperEffective })
         setHitKey((k) => k + 1)
-        window.setTimeout(() => setShakeSide(null), SHAKE_MS)
         if (turn.damage > 0) window.setTimeout(() => setFlashSide(null), FLASH_MS)
 
         const abilityNom = turn.ability_nom ?? (attackerSide === 'player' ? playerAbilityNom : opponentAbilityNom)
@@ -770,6 +895,13 @@ export function AutoBattleScreen({
           }, durations.healDelay)
         }
 
+        // Bouclier Prévention de la cible : ce coup a bien touché, mais sans
+        // son bonus de dégâts "super efficace" (voir autobattle_ability_
+        // rules.prevention_duration_turns).
+        if (turn.prevention_blocked) {
+          pushHistory(hitSide, 'sa Prévention annule les dégâts supplémentaires du coup super efficace')
+        }
+
         // Coup réussi ayant infligé un statut — à l'adversaire (hitSide)
         // normalement, à l'attaquant lui-même si status_applied_reversed
         // (voir autobattle_ability_rules.status_reversed).
@@ -815,6 +947,8 @@ export function AutoBattleScreen({
     opponentShieldActiveRef.current = opponentShieldActive
     playerShieldSeenOpponentTurnRef.current = playerShieldSeenOpponentTurn
     opponentShieldSeenPlayerTurnRef.current = opponentShieldSeenPlayerTurn
+    playerReleasingRef.current = playerReleasing
+    opponentReleasingRef.current = opponentReleasing
 
     timers.push(window.setTimeout(() => {
       setBattleDone(true)
@@ -839,13 +973,17 @@ export function AutoBattleScreen({
   // — même principe symétrique que playerSpriteSrc.
   const opponentSpriteSrc = opponentImageOverride ?? opponentSpecies?.image_miniature
 
-  const playerAttackStyle = attackState?.side === 'player' ? attackTransform(attackState.phase, 1, attackState.durations, attackState.soft) : undefined
-  const opponentAttackStyle = attackState?.side === 'opponent' ? attackTransform(attackState.phase, -1, attackState.durations, attackState.soft) : undefined
+  const playerAttackStyle = attackState?.side === 'player' ? attackTransform(attackState.phase, 1, attackState.durations, attackState.animation, reachPx) : undefined
+  const opponentAttackStyle = attackState?.side === 'opponent' ? attackTransform(attackState.phase, -1, attackState.durations, attackState.animation, reachPx) : undefined
 
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-4">
-        <div className="flex flex-col items-center gap-2">
+        {/* Le camp qui attaque passe au-dessus de l'autre colonne : sans ça,
+            un sprite qui bondit sur l'adversaire (ou un rayon/projectile qui
+            le traverse) passerait derrière lui, le joueur étant le premier des
+            deux dans le DOM. */}
+        <div ref={playerColRef} className={`flex flex-col items-center gap-2 relative ${attackState?.side === 'player' ? 'z-10' : ''}`}>
           <p className="text-ink text-base font-bold flex items-center justify-center gap-1.5 max-w-full">
             <span className="truncate">{ownedPokemonName(playerPokemon)}</span>
             {playerStatus && (() => {
@@ -864,7 +1002,7 @@ export function AutoBattleScreen({
           </p>
           <div
             className="relative w-24 h-24 flex items-center justify-center"
-            style={{ ...playerAttackStyle, animation: shakeSide === 'player' ? `hit-shake ${SHAKE_MS}ms ease-in-out` : undefined }}
+            style={spriteContainerStyle(playerAttackStyle, shakeSide === 'player', squashSide === 'player')}
           >
             {playerSpriteSrc ? (
               <img
@@ -904,13 +1042,20 @@ export function AutoBattleScreen({
             {diceRoll?.side === 'player' && (
               <AutoBattleDiceRoll value={diceRoll.value} animKey={diceKey} />
             )}
+            {/* Rayon/projectile lancé par ce camp — monté dans le conteneur du
+                sprite attaquant, dont le centre sert d'origine (voir
+                AutoBattleAttackVfx). La clé le remonte à chaque coup pour
+                relancer l'animation CSS depuis le début. */}
+            {attackVfx?.side === 'player' && (
+              <AutoBattleAttackVfx key={vfxKey} kind={attackVfx.kind} color={attackVfx.color} sign={1} reachPx={reachPx} travelMs={attackVfx.travelMs} damage={attackVfx.damage} />
+            )}
           </div>
           <div className="w-full max-w-[160px]">
             <HpGauge current={Math.max(0, playerHp)} max={playerMaxHp} />
           </div>
         </div>
 
-        <div className="flex flex-col items-center gap-2">
+        <div ref={opponentColRef} className={`flex flex-col items-center gap-2 relative ${attackState?.side === 'opponent' ? 'z-10' : ''}`}>
           <p className="text-ink text-base font-bold flex items-center justify-center gap-1.5 max-w-full">
             <span className="truncate">{opponentNom}</span>
             {opponentStatus && (() => {
@@ -929,7 +1074,7 @@ export function AutoBattleScreen({
           </p>
           <div
             className="relative w-24 h-24 flex items-center justify-center"
-            style={{ ...opponentAttackStyle, animation: shakeSide === 'opponent' ? `hit-shake ${SHAKE_MS}ms ease-in-out` : undefined }}
+            style={spriteContainerStyle(opponentAttackStyle, shakeSide === 'opponent', squashSide === 'opponent')}
           >
             {opponentSpriteSrc ? (
               <img
@@ -964,6 +1109,9 @@ export function AutoBattleScreen({
             )}
             {diceRoll?.side === 'opponent' && (
               <AutoBattleDiceRoll value={diceRoll.value} animKey={diceKey} />
+            )}
+            {attackVfx?.side === 'opponent' && (
+              <AutoBattleAttackVfx key={vfxKey} kind={attackVfx.kind} color={attackVfx.color} sign={-1} reachPx={reachPx} travelMs={attackVfx.travelMs} damage={attackVfx.damage} />
             )}
           </div>
           <div className="w-full max-w-[160px]">

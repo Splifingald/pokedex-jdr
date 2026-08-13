@@ -70,7 +70,7 @@ exports.handler = async (event) => {
 
   const payload = JSON.stringify({
     title: 'Pokémon JDR : Chat',
-    body: `Vous avez reçu un message de ${sender.name}`,
+    body: `Tu as reçu un message de ${sender.name}`,
     icon: absoluteUrl(siteUrl, sender.image_url),
     url: siteUrl || '/',
   })

@@ -169,7 +169,7 @@ export function SafariPopup({ player, playerItems, itemsByName, pokedollarImageU
             {session && !sessionExpired && sessionCountdownMs !== null && (
               <p className="text-ink-muted-2">Session : {formatCountdown(sessionCountdownMs)}</p>
             )}
-            {sessionExpired && <p className="text-ink-muted-2">Session terminée, revenez bientôt</p>}
+            {sessionExpired && <p className="text-ink-muted-2">Session terminée, reviens bientôt</p>}
             {config.berry_reward_interval_amount > 0 && (
               <p className="text-ink-muted-2 flex items-center justify-end gap-1">
                 {berryItem?.image_url && <img src={berryItem.image_url} alt="" className="w-4 h-4 object-contain pixelated" />}

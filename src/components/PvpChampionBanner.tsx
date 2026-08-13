@@ -52,18 +52,26 @@ export function PvpChampionBanner({
             </div>
           ) : (
             <>
-              <div className="flex items-center gap-3">
+              {/* Pas de breakpoint ici : la popup peut être bien plus étroite
+                  que le viewport, donc c'est flex-wrap qui décide. Le
+                  min-w-[7rem] sur le nom est ce qui déclenche le passage à la
+                  ligne du "Depuis X" (voir formatChampionSince, jamais court)
+                  quand la place manque — sans lui, le nom se tronquerait
+                  jusqu'à 0 et le badge resterait collé sur la même ligne. */}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <span className="text-[26px] shrink-0 drop-shadow-[0_0_5px_rgba(184,134,11,0.65)]">🏆</span>
                 <PvpAvatar player={championPlayer} size={36} />
-                <span className="flex-1 min-w-0 text-ink text-[18px] font-extrabold tracking-wide truncate">
+                <span className="flex-1 min-w-[7rem] text-ink text-[18px] font-extrabold tracking-wide truncate">
                   {championPlayer?.name ?? 'Joueur inconnu'}
                 </span>
-                <span className="shrink-0 text-[14px] font-bold text-[#7a5c0a] bg-[#f5df9c] border border-[#b8860b]/40 rounded-full px-2.5 py-0.5">
+                <span className="shrink-0 ml-auto text-[14px] font-bold text-[#7a5c0a] bg-[#f5df9c] border border-[#b8860b]/40 rounded-full px-2.5 py-0.5">
                   {formatChampionSince(champion.created_at, now)}
                 </span>
               </div>
 
-              <div className="flex items-center gap-4">
+              {/* Idem : l'action (Défier / "C'est toi" / admin) ne descend
+                  sous le sprite + nom du pokémon que si elle ne tient pas. */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
                 <div
                   className="w-[83px] h-[83px] shrink-0 rounded-md border-2 border-ink bg-cream flex items-center justify-center overflow-hidden"
                   style={{ boxShadow: '0 0 0 3px #f5df9c, 0 0 16px rgba(184,134,11,0.55)' }}
@@ -74,34 +82,36 @@ export function PvpChampionBanner({
                     <span className="text-ink-muted-2 text-3xl">?</span>
                   )}
                 </div>
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-[7rem]">
                   <p className="text-ink text-[18px] font-extrabold truncate">{champion.nickname?.trim() || champion.pokemon_nom}</p>
                   <p className="text-ink-muted-2 text-[16px] font-bold">{champion.max_hp} PV</p>
                 </div>
-                {isAdmin ? (
-                  <button onClick={onDethrone} className={`px-3 py-2 rounded text-sm font-bold shrink-0 flex items-center gap-1.5 ${BUTTON_STYLE.red}`}>
-                    <TrashIcon className="w-3.5 h-3.5" />
-                    Dépossession
-                  </button>
-                ) : isOwnChampion ? (
-                  <span className="px-4 py-2 rounded text-sm font-bold shrink-0 bg-[#f5df9c] border-2 border-ink text-ink">
-                    👑 C'est vous !
-                  </span>
-                ) : (
-                  <button
-                    onClick={onPlay}
-                    disabled={!viewerHasOwnChallenge}
-                    className="px-5 py-2.5 rounded-lg text-base font-extrabold shrink-0 border-2 border-ink text-[#4a3708] shadow-[var(--shadow-pixel-sm)] hover:brightness-105 active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:brightness-100"
-                    style={{ background: 'linear-gradient(160deg, #fff3c4, #f0d478 45%, #d4a72c 100%)' }}
-                  >
-                    ⚔️ Défier
-                  </button>
-                )}
+                <div className="shrink-0 ml-auto flex">
+                  {isAdmin ? (
+                    <button onClick={onDethrone} className={`px-3 py-2 rounded text-sm font-bold flex items-center justify-center gap-1.5 ${BUTTON_STYLE.red}`}>
+                      <TrashIcon className="w-3.5 h-3.5" />
+                      Dépossession
+                    </button>
+                  ) : isOwnChampion ? (
+                    <span className="text-center px-4 py-2 rounded text-sm font-bold bg-[#f5df9c] border-2 border-ink text-ink">
+                      👑 C'est toi !
+                    </span>
+                  ) : (
+                    <button
+                      onClick={onPlay}
+                      disabled={!viewerHasOwnChallenge}
+                      className="px-5 py-2.5 rounded-lg text-base font-extrabold border-2 border-ink text-[#4a3708] shadow-[var(--shadow-pixel-sm)] hover:brightness-105 active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:brightness-100"
+                      style={{ background: 'linear-gradient(160deg, #fff3c4, #f0d478 45%, #d4a72c 100%)' }}
+                    >
+                      ⚔️ Défier
+                    </button>
+                  )}
+                </div>
               </div>
 
               {!isAdmin && !isOwnChampion && !viewerHasOwnChallenge && (
                 <p className="text-hp-red text-[16px] font-bold text-center">
-                  ⚠ Postez d'abord votre pokémon en défi (voir "Challengers" ci-dessous) pour pouvoir affronter le Champion.
+                  ⚠ Poste d'abord ton pokémon en défi (voir "Challengers" ci-dessous) pour pouvoir affronter le Champion.
                 </p>
               )}
 

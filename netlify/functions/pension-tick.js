@@ -182,7 +182,7 @@ exports.handler = async () => {
         notifications.push({
           playerId: row.player_id,
           title: 'Pokémon JDR : Pension',
-          body: `${row.pokemon_nom} a terminé son séjour à la Pension Pokémon, venez le récupérer`,
+          body: `${row.pokemon_nom} a terminé son séjour à la Pension Pokémon, viens le récupérer`,
           icon: absoluteUrl(siteUrl, imageByNom.get(row.pokemon_nom)),
         })
       }

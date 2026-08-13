@@ -92,8 +92,12 @@ export function useAutoBattleVariants() {
   // `variants` directement : c'est ce qui rendait le réordonnancement muet
   // tant que la page n'était pas rechargée (schema.sql sort_order recalculé
   // au fetch seulement). Même principe que levelsByVariant pour les niveaux.
+  // Départage par id à sort_order égal : la base contient des doublons
+  // historiques (voir swapVariantOrder) et sans ce critère l'ordre affiché
+  // dépendait de l'ordre de fetch, donc pouvait changer d'un chargement à
+  // l'autre.
   const sortedVariants = useMemo(
-    () => [...variants].sort((a, b) => a.sort_order - b.sort_order),
+    () => [...variants].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id),
     [variants]
   )
 
@@ -118,10 +122,18 @@ export function useAutoBattleVariants() {
     return map
   }, [rewards])
 
+  // Prochain sort_order libre : max + 1, JAMAIS variants.length — après une
+  // suppression, length retombe sur un sort_order déjà pris et crée un doublon
+  // qui casse le réordonnancement (voir swapVariantOrder).
+  const nextSortOrder = useMemo(
+    () => variants.reduce((max, v) => Math.max(max, v.sort_order), -1) + 1,
+    [variants]
+  )
+
   const addVariant = useCallback(async (nom: string) => {
     const { data, error } = await supabase
       .from('autobattle_variants')
-      .insert({ nom, sort_order: variants.length })
+      .insert({ nom, sort_order: nextSortOrder })
       .select()
       .single()
     if (error) {
@@ -131,7 +143,7 @@ export function useAutoBattleVariants() {
     const row = data as AutoBattleVariant
     setVariants((prev) => [...prev, row])
     return row
-  }, [variants.length])
+  }, [nextSortOrder])
 
   const updateVariant = useCallback(async (id: number, patch: Partial<Omit<AutoBattleVariant, 'id' | 'created_at'>>) => {
     setVariants((prev) => prev.map((v) => (v.id === id ? { ...v, ...patch } : v)))
@@ -142,23 +154,41 @@ export function useAutoBattleVariants() {
     }
   }, [fetchAll])
 
-  // Échange l'ordre de deux variantes adjacentes — même principe que
-  // swapLevelOrder, sur sort_order plutôt que level_index.
+  // Échange deux variantes adjacentes puis RENUMÉROTE toute la liste sur
+  // 0..n-1, au lieu d'échanger simplement les deux valeurs de sort_order comme
+  // le faisait la version précédente : la base contient des sort_order en
+  // double (héritage de addVariant/duplicateVariant qui utilisaient
+  // variants.length comme prochain ordre — après une suppression, length
+  // retombe sur une valeur déjà prise). Échanger deux valeurs identiques est un
+  // no-op, ce qui rendait les flèches ▲▼ totalement muettes sur ces paires.
+  // La renumérotation répare les doublons existants au premier réordonnancement.
   const swapVariantOrder = useCallback(async (variantA: AutoBattleVariant, variantB: AutoBattleVariant) => {
+    if (!variantA || !variantB) return
+    // On raisonne en POSITIONS dans la liste triée affichée, pas en valeurs de
+    // sort_order — seules les positions sont non ambiguës quand il y a doublon.
+    const reordered = [...sortedVariants]
+    const i = reordered.findIndex((v) => v.id === variantA.id)
+    const j = reordered.findIndex((v) => v.id === variantB.id)
+    if (i < 0 || j < 0) return
+    ;[reordered[i], reordered[j]] = [reordered[j], reordered[i]]
+
+    const nextOrder = new Map(reordered.map((v, index) => [v.id, index]))
+    const changed = reordered.filter((v) => v.sort_order !== nextOrder.get(v.id))
+    if (changed.length === 0) return
+
     setVariants((prev) => prev.map((v) => {
-      if (v.id === variantA.id) return { ...v, sort_order: variantB.sort_order }
-      if (v.id === variantB.id) return { ...v, sort_order: variantA.sort_order }
-      return v
+      const order = nextOrder.get(v.id)
+      return order === undefined || order === v.sort_order ? v : { ...v, sort_order: order }
     }))
-    const [resA, resB] = await Promise.all([
-      supabase.from('autobattle_variants').update({ sort_order: variantB.sort_order }).eq('id', variantA.id),
-      supabase.from('autobattle_variants').update({ sort_order: variantA.sort_order }).eq('id', variantB.id),
-    ])
-    if (resA.error || resB.error) {
-      console.error('Erreur lors du réordonnancement des variantes Combat Auto :', resA.error ?? resB.error)
+    const results = await Promise.all(changed.map((v) =>
+      supabase.from('autobattle_variants').update({ sort_order: nextOrder.get(v.id)! }).eq('id', v.id)
+    ))
+    const failed = results.find((r) => r.error)
+    if (failed) {
+      console.error('Erreur lors du réordonnancement des variantes Combat Auto :', failed.error)
       await fetchAll()
     }
-  }, [fetchAll])
+  }, [sortedVariants, fetchAll])
 
   const deleteVariant = useCallback(async (id: number) => {
     setVariants((prev) => prev.filter((v) => v.id !== id))
@@ -287,7 +317,7 @@ export function useAutoBattleVariants() {
           enabled: false,
           icon_url: source.icon_url,
           banner_url: source.banner_url,
-          sort_order: variants.length,
+          sort_order: nextSortOrder,
         })
         .select()
         .single()
@@ -333,7 +363,7 @@ export function useAutoBattleVariants() {
       await fetchAll()
       return null
     }
-  }, [variants, levelsByVariant, rewardsByLevel, fetchAll])
+  }, [variants, nextSortOrder, levelsByVariant, rewardsByLevel, fetchAll])
 
   return {
     variants: sortedVariants, levels, rewards, levelsByVariant, rewardsByLevel, loading, error,

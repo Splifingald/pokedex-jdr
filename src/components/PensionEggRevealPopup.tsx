@@ -14,7 +14,7 @@ export function PensionEggRevealPopup({ pokemonName, imageUrl, onContinue }: Pro
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4">
       <div className="relative bg-cream border-[3px] border-ink rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel-lg)] max-w-xs w-full p-6 text-center">
-        <p className="text-ink text-base font-bold mb-2">🥚 Vous avez reçu un œuf de la Pension Pokémon !</p>
+        <p className="text-ink text-base font-bold mb-2">🥚 Tu as reçu un œuf de la Pension Pokémon !</p>
         <div className="w-20 h-20 mx-auto flex items-center justify-center mb-2">
           {imageUrl ? (
             <img src={imageUrl} alt="" className="pixelated w-full h-full object-contain" />

@@ -6,7 +6,7 @@ import { usePvpChallenges } from '../hooks/usePvpChallenges'
 import { usePvpChallengeAttempts } from '../hooks/usePvpChallengeAttempts'
 import { useAutoBattleBannedAttacks } from '../hooks/useAutoBattleBannedAttacks'
 import { useAutoBattleAbilityRules } from '../hooks/useAutoBattleAbilityRules'
-import { generateIdempotencyKey } from '../lib/autoBattle'
+import { generateIdempotencyKey, normalizeFirstAttacker } from '../lib/autoBattle'
 import { getHpBreakdown } from '../lib/xpBonuses'
 import { useToast } from '../context/ToastContext'
 import { AutoBattlePokemonPicker } from './autoBattle/AutoBattlePokemonPicker'
@@ -41,10 +41,10 @@ const STATUS_MESSAGE: Record<string, string> = {
   ineligible_ability: "Cette capacité n'est plus disponible.",
   not_found: 'Défi introuvable.',
   challenge_inactive: 'Ce défi a été retiré entre-temps.',
-  own_challenge: 'Vous ne pouvez pas attaquer votre propre défi.',
-  not_started: 'Combat non initialisé, réessayez.',
-  champion_requires_own_challenge: "Vous devez d'abord poser votre pokémon en défi pour affronter le Champion.",
-  already_champion: "Vous êtes déjà Champion : impossible de poser un autre pokémon en défi tant que vous détenez le titre.",
+  own_challenge: 'Tu ne peux pas attaquer ton propre défi.',
+  not_started: 'Combat non initialisé, réessaie.',
+  champion_requires_own_challenge: "Tu dois d'abord poser ton pokémon en défi pour affronter le Champion.",
+  already_champion: "Tu es déjà Champion : impossible de poser un autre pokémon en défi tant que tu détiens le titre.",
 }
 
 interface Props {
@@ -198,7 +198,7 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
     }
 
     submittingRef.current = false
-    setFirstAttacker(result.first_attacker)
+    setFirstAttacker(normalizeFirstAttacker(result.first_attacker))
     setView('attack-coin-toss')
   }
 
@@ -318,7 +318,7 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
                   <div className="flex flex-col gap-4">
                     {isOwnChampion ? (
                       <p className="text-ink-muted-2 text-sm text-center py-2 font-bold">
-                        👑 Vous êtes le Champion actuel — défendez votre titre !
+                        👑 Tu es le Champion actuel — défends ton titre !
                       </p>
                     ) : ownChallenge ? (
                       <PvpChallengeBanner
@@ -479,7 +479,7 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
               isAdmin={isAdmin}
               onSubmitRound={(ability) => handleSubmitRound(attackSelectedPokemon, ability)}
               onFinished={handleBattleFinished}
-              onDeclareTie={() => { showToast('Match nul — vous pouvez retenter votre chance quand vous voulez.'); resetToList() }}
+              onDeclareTie={() => { showToast('Match nul — tu peux retenter ta chance quand tu veux.'); resetToList() }}
             />
           )}
 
@@ -497,7 +497,7 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
             <div className="flex flex-col items-center text-center gap-3 py-8">
               <span className="text-4xl">💥</span>
               <p className="text-ink text-base font-bold">Défi perdu…</p>
-              <p className="text-ink-muted-2 text-sm">Vous pouvez retenter votre chance quand vous voulez.</p>
+              <p className="text-ink-muted-2 text-sm">Tu peux retenter ta chance quand tu veux.</p>
               <button onClick={resetToList} className={`mt-2 px-5 py-2 rounded font-bold text-sm ${BUTTON_STYLE.yellow}`}>
                 Continuer
               </button>

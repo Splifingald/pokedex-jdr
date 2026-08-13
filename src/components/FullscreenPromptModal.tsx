@@ -15,7 +15,7 @@ export function FullscreenPromptModal({ onEnable, onClose }: Props) {
           <div className="text-4xl mb-2">⛶</div>
           <h3 className="text-ink text-lg">Activer le plein écran</h3>
           <p className="text-ink-muted text-xs mt-2 inline-flex flex-wrap items-center justify-center gap-1">
-            Vous pourrez l'activer à tout moment via le bouton <PixelIcon src={SETTINGS_ICON} size={12} colored /> en haut de l'écran.
+            Tu pourras l'activer à tout moment via le bouton <PixelIcon src={SETTINGS_ICON} size={12} colored /> en haut de l'écran.
           </p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

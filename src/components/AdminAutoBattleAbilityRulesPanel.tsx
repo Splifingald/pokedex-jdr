@@ -3,7 +3,7 @@ import type {
   Attack, AutoBattleAbilityRule, AutoBattleTurnEffect, AutoBattleHealType, AutoBattleHealDotType,
   AutoBattleRecoilType, AutoBattleBonusDamageType, AutoBattleBonusDamageCondition,
   AutoBattleStatModTarget, AutoBattleStatModStat, AutoBattleStatModValueType, AutoBattleStatModDurationType,
-  AutoBattleAnimationStyle, AutoBattleStatusEffect,
+  AutoBattleStatusEffect, AutoBattleKeepGoingBonusType, AutoBattleIgnoreStatusBlock,
 } from '../types'
 import { useAutoBattleAbilityRules } from '../hooks/useAutoBattleAbilityRules'
 import { useAttacks } from '../hooks/useAttacks'
@@ -22,6 +22,17 @@ const TURN_EFFECT_LABEL: Record<AutoBattleTurnEffect, string> = {
   play_random: 'Nombre aléatoire de fois',
   repeat_until_fail: "Répète jusqu'à l'échec",
   prepare_release: 'Prépare puis libère (2 tours)',
+  charge_double_next: 'Joue 2 fois au prochain tour',
+  first_and_replay: 'Passe premier et rejoue',
+}
+
+// Seuls ces trois statuts font passer le tour de leur porteur — les seuls
+// qu'une capacité puisse donc « ignorer » (voir ignore_status_block).
+const IGNORE_STATUS_BLOCK_VALUES: AutoBattleIgnoreStatusBlock[] = ['sleep', 'paralysis', 'frozen']
+
+const KEEP_GOING_BONUS_TYPE_LABEL: Record<AutoBattleKeepGoingBonusType, string> = {
+  flat: 'Montant fixe',
+  percent_damage: 'Pourcentage de ses dégâts de base',
 }
 
 const HEAL_TYPE_LABEL: Record<AutoBattleHealType, string> = {
@@ -52,11 +63,6 @@ const BONUS_DAMAGE_CONDITION_LABEL: Record<AutoBattleBonusDamageCondition, strin
   first_use: "C'est la toute première capacité utilisée par ce camp",
   dice_equals: 'Le dé de dégâts de cette capacité tombe sur une valeur précise',
   has_status: "L'adversaire est actuellement affecté par un statut",
-}
-
-const ANIMATION_STYLE_LABEL: Record<AutoBattleAnimationStyle, string> = {
-  normal: 'Normale (bond vers l\'adversaire)',
-  soft: 'Douce (reste sur place)',
 }
 
 const STAT_MOD_TARGET_LABEL: Record<AutoBattleStatModTarget, string> = {
@@ -118,10 +124,12 @@ function EffectCategory({ label, children }: { label: string; children: React.Re
 }
 
 function AbilityRuleRow({
-  rule, attack, onUpdate, onRemove, rowRef, highlighted,
+  rule, attack, attackTypes, onUpdate, onRemove, rowRef, highlighted,
 }: {
   rule: AutoBattleAbilityRule
   attack: Attack | undefined
+  /** Types élémentaires réellement présents dans le catalogue d'attaques — seule source fiable pour le filtre de type du modificateur de stat, qui est comparé côté SQL à attacks.type. */
+  attackTypes: string[]
   onUpdate: (attackNom: string, patch: Partial<Omit<AutoBattleAbilityRule, 'attack_nom' | 'created_at'>>) => void
   onRemove: (attackNom: string) => void
   rowRef?: (el: HTMLDivElement | null) => void
@@ -269,7 +277,41 @@ function AbilityRuleRow({
   }
 
   const handleHealDotRemove = () => {
-    onUpdate(rule.attack_nom, { heal_dot_type: null, heal_dot_amount: null, heal_dot_percent: null, heal_dot_duration_turns: null })
+    onUpdate(rule.attack_nom, { heal_dot_type: null, heal_dot_amount: null, heal_dot_percent: null, heal_dot_duration_turns: null, heal_dot_until_awake: false })
+  }
+
+  // Durée du soin passif : soit un nombre de tours, soit "jusqu'au réveil"
+  // (exclusifs — côté SQL, heal_dot_duration_turns doit être nul dans le
+  // second cas, voir la contrainte autobattle_ability_rules_heal_dot_fields).
+  const handleHealDotUntilAwakeToggle = (enabled: boolean) => {
+    onUpdate(rule.attack_nom, enabled
+      ? { heal_dot_until_awake: true, heal_dot_duration_turns: null }
+      : { heal_dot_until_awake: false, heal_dot_duration_turns: rule.heal_dot_duration_turns ?? 3 })
+  }
+
+  const handleKeepGoingBonusTypeChange = (value: string) => {
+    if (value === 'percent_damage') {
+      onUpdate(rule.attack_nom, { keep_going_bonus_type: 'percent_damage', keep_going_bonus_percent: rule.keep_going_bonus_percent ?? 20, keep_going_bonus_flat: null })
+    } else {
+      onUpdate(rule.attack_nom, { keep_going_bonus_type: 'flat', keep_going_bonus_flat: rule.keep_going_bonus_flat ?? 5, keep_going_bonus_percent: null })
+    }
+  }
+
+  const handleKeepGoingToggle = (enabled: boolean) => {
+    if (enabled) {
+      onUpdate(rule.attack_nom, {
+        keep_going_turns: rule.keep_going_turns ?? 2,
+        keep_going_bonus_type: rule.keep_going_bonus_type ?? 'flat',
+        keep_going_bonus_flat: (rule.keep_going_bonus_type ?? 'flat') === 'flat' ? (rule.keep_going_bonus_flat ?? 5) : null,
+        keep_going_bonus_percent: rule.keep_going_bonus_type === 'percent_damage' ? (rule.keep_going_bonus_percent ?? 20) : null,
+      })
+    } else {
+      onUpdate(rule.attack_nom, { keep_going_turns: null, keep_going_bonus_type: null, keep_going_bonus_flat: null, keep_going_bonus_percent: null })
+    }
+  }
+
+  const handlePreventionToggle = (enabled: boolean) => {
+    onUpdate(rule.attack_nom, { prevention_duration_turns: enabled ? (rule.prevention_duration_turns ?? 3) : null })
   }
 
   const handleCancelHealToggle = (enabled: boolean) => {
@@ -294,8 +336,11 @@ function AbilityRuleRow({
   if (rule.heal_type == null) addableEffects.push({ value: 'heal', label: 'Soin instantané', group: 'Soins' })
   if (!isHealDotActive) addableEffects.push({ value: 'healdot', label: 'Soin passif (heal over time)', group: 'Soins' })
   if (rule.cancel_heal_duration_turns == null) addableEffects.push({ value: 'cancelheal', label: 'Anti-Soin', group: 'Soins' })
+  if (rule.keep_going_turns == null) addableEffects.push({ value: 'keepgoing', label: 'Continue sur sa lancée (rejeu automatique)', group: 'Rythme des tours' })
+  if (rule.ignore_status_block == null) addableEffects.push({ value: 'ignorestatus', label: 'Utilisable malgré un statut bloquant', group: 'Rythme des tours' })
   if (rule.stat_mod_target == null) addableEffects.push({ value: 'statmod', label: 'Modificateur de stat', group: 'Statistiques' })
   if (!rule.invulnerable_next_turn) addableEffects.push({ value: 'invuln', label: 'Invulnérabilité au prochain tour adverse', group: 'Défense' })
+  if (rule.prevention_duration_turns == null) addableEffects.push({ value: 'prevention', label: 'Prévention (bloque les dégâts super efficaces)', group: 'Défense' })
 
   const groupedAddableEffects = new Map<string, typeof addableEffects>()
   for (const opt of addableEffects) {
@@ -315,6 +360,9 @@ function AbilityRuleRow({
       case 'cancelheal': handleCancelHealToggle(true); break
       case 'statmod': handleStatModTargetChange('opponent'); break
       case 'invuln': onUpdate(rule.attack_nom, { invulnerable_next_turn: true }); break
+      case 'keepgoing': handleKeepGoingToggle(true); break
+      case 'ignorestatus': onUpdate(rule.attack_nom, { ignore_status_block: 'sleep' }); break
+      case 'prevention': handlePreventionToggle(true); break
     }
   }
 
@@ -332,18 +380,9 @@ function AbilityRuleRow({
         </button>
       </div>
 
-      <div className="flex flex-col gap-1">
-        <label className="text-ink-muted-2 text-xs">Animation (purement visuel, sans effet sur le combat)</label>
-        <select
-          value={rule.animation_style}
-          onChange={(e) => onUpdate(rule.attack_nom, { animation_style: e.target.value as AutoBattleAnimationStyle })}
-          className={SELECT_CLASS}
-        >
-          {(Object.keys(ANIMATION_STYLE_LABEL) as AutoBattleAnimationStyle[]).map((s) => (
-            <option key={s} value={s}>{ANIMATION_STYLE_LABEL[s]}</option>
-          ))}
-        </select>
-      </div>
+      {/* Plus de réglage d'animation ici : elle vient désormais uniquement des
+          colonnes « Animation » / « Animation 2 » du CSV des attaques (voir
+          src/lib/battleAnimations.ts). */}
 
       {attack?.status_effect && (
         <label className="flex items-center gap-2">
@@ -399,6 +438,69 @@ function AbilityRuleRow({
                 <span className="text-ink-muted-2 text-xs">répétitions</span>
               </div>
             )}
+          </EffectSection>
+        )}
+        {rule.keep_going_turns != null && (
+          <EffectSection label="Continue sur sa lancée (rejeu automatique, bonus cumulatif)" onRemove={() => handleKeepGoingToggle(false)}>
+            <div className="flex items-center gap-2">
+              <span className="text-ink-muted-2 text-xs">Se rejoue pendant</span>
+              <NumberInput
+                min={1}
+                fallback={rule.keep_going_turns ?? 2}
+                value={rule.keep_going_turns ?? 2}
+                onCommit={(v) => onUpdate(rule.attack_nom, { keep_going_turns: Math.max(1, v) })}
+                className={NUM_CLASS_SM}
+              />
+              <span className="text-ink-muted-2 text-xs">tours de plus (capacité imposée)</span>
+            </div>
+            <select value={rule.keep_going_bonus_type ?? 'flat'} onChange={(e) => handleKeepGoingBonusTypeChange(e.target.value)} className={`${SELECT_CLASS} mt-1`}>
+              {(Object.keys(KEEP_GOING_BONUS_TYPE_LABEL) as AutoBattleKeepGoingBonusType[]).map((t) => (
+                <option key={t} value={t}>{KEEP_GOING_BONUS_TYPE_LABEL[t]}</option>
+              ))}
+            </select>
+            {(rule.keep_going_bonus_type ?? 'flat') === 'flat' ? (
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-ink-muted-2 text-xs">+</span>
+                <NumberInput
+                  min={0}
+                  fallback={rule.keep_going_bonus_flat ?? 5}
+                  value={rule.keep_going_bonus_flat ?? 5}
+                  onCommit={(v) => onUpdate(rule.attack_nom, { keep_going_bonus_flat: Math.max(0, v) })}
+                  className={NUM_CLASS_MD}
+                />
+                <span className="text-ink-muted-2 text-xs">dégâts par réutilisation (cumulatif)</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 mt-1">
+                <NumberInput
+                  min={1}
+                  fallback={rule.keep_going_bonus_percent ?? 20}
+                  value={rule.keep_going_bonus_percent ?? 20}
+                  onCommit={(v) => onUpdate(rule.attack_nom, { keep_going_bonus_percent: Math.max(1, v) })}
+                  className={NUM_CLASS_MD}
+                />
+                <span className="text-ink-muted-2 text-xs">% de ses dégâts de base par réutilisation (cumulatif)</span>
+              </div>
+            )}
+            <span className="text-ink-muted-2 text-[11px] mt-1">
+              La 1ère utilisation n'a aucun bonus, la 2e en a un, la 3e le double, etc. La chaîne s'interrompt au premier raté.
+            </span>
+          </EffectSection>
+        )}
+        {rule.ignore_status_block != null && (
+          <EffectSection label="Utilisable malgré un statut bloquant" onRemove={() => onUpdate(rule.attack_nom, { ignore_status_block: null })}>
+            <select
+              value={rule.ignore_status_block}
+              onChange={(e) => onUpdate(rule.attack_nom, { ignore_status_block: e.target.value as AutoBattleIgnoreStatusBlock })}
+              className={SELECT_CLASS}
+            >
+              {IGNORE_STATUS_BLOCK_VALUES.map((s) => (
+                <option key={s} value={s}>{STATUS_EFFECT_LABEL[s]}</option>
+              ))}
+            </select>
+            <span className="text-ink-muted-2 text-xs mt-1">
+              Ce statut-là ne fait plus passer le tour de son utilisateur quand cette capacité est jouée (les deux autres continuent de le bloquer, et le statut évolue normalement dans tous les cas).
+            </span>
           </EffectSection>
         )}
       </EffectCategory>
@@ -626,17 +728,28 @@ function AbilityRuleRow({
                 </span>
               </div>
             )}
-            <div className="flex items-center gap-2 mt-1">
-              <span className="text-ink-muted-2 text-xs">Pendant</span>
-              <NumberInput
-                min={1}
-                fallback={rule.heal_dot_duration_turns ?? 3}
-                value={rule.heal_dot_duration_turns ?? 3}
-                onCommit={(v) => onUpdate(rule.attack_nom, { heal_dot_duration_turns: Math.max(1, v) })}
-                className={NUM_CLASS_SM}
+            {!rule.heal_dot_until_awake && (
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-ink-muted-2 text-xs">Pendant</span>
+                <NumberInput
+                  min={1}
+                  fallback={rule.heal_dot_duration_turns ?? 3}
+                  value={rule.heal_dot_duration_turns ?? 3}
+                  onCommit={(v) => onUpdate(rule.attack_nom, { heal_dot_duration_turns: Math.max(1, v) })}
+                  className={NUM_CLASS_SM}
+                />
+                <span className="text-ink-muted-2 text-xs">tours de combat</span>
+              </div>
+            )}
+            <label className="flex items-center gap-2 mt-1">
+              <input
+                type="checkbox"
+                checked={rule.heal_dot_until_awake}
+                onChange={(e) => handleHealDotUntilAwakeToggle(e.target.checked)}
+                className="w-4 h-4"
               />
-              <span className="text-ink-muted-2 text-xs">tours de combat</span>
-            </div>
+              <span className="text-ink-muted-2 text-xs">Continue jusqu'au réveil (tant que son utilisateur dort)</span>
+            </label>
           </EffectSection>
         )}
         {rule.cancel_heal_duration_turns != null && (
@@ -757,6 +870,19 @@ function AbilityRuleRow({
                 </>
               )}
             </div>
+            {(rule.stat_mod_stat ?? 'damage') === 'damage' && (
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-ink-muted-2 text-xs">Limiter au type</span>
+                <select
+                  value={rule.stat_mod_type_filter ?? ''}
+                  onChange={(e) => onUpdate(rule.attack_nom, { stat_mod_type_filter: e.target.value === '' ? null : e.target.value })}
+                  className={SELECT_CLASS}
+                >
+                  <option value="">Toutes les capacités</option>
+                  {attackTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+            )}
             <div className="flex items-center gap-2 mt-1">
               <span className="text-ink-muted-2 text-xs">Limite d'usages réussis</span>
               <NumberInput
@@ -776,6 +902,24 @@ function AbilityRuleRow({
         {rule.invulnerable_next_turn && (
           <EffectSection label="Invulnérabilité au prochain tour adverse" onRemove={() => onUpdate(rule.attack_nom, { invulnerable_next_turn: false })}>
             <span className="text-ink-muted-2 text-xs">Rend son utilisateur invulnérable au prochain tour adverse (rate automatiquement).</span>
+          </EffectSection>
+        )}
+        {rule.prevention_duration_turns != null && (
+          <EffectSection label="Prévention (bloque les dégâts super efficaces)" onRemove={() => handlePreventionToggle(false)}>
+            <div className="flex items-center gap-2">
+              <span className="text-ink-muted-2 text-xs">Pendant</span>
+              <NumberInput
+                min={1}
+                fallback={rule.prevention_duration_turns ?? 3}
+                value={rule.prevention_duration_turns ?? 3}
+                onCommit={(v) => onUpdate(rule.attack_nom, { prevention_duration_turns: Math.max(1, v) })}
+                className={NUM_CLASS_SM}
+              />
+              <span className="text-ink-muted-2 text-xs">tours de combat</span>
+            </div>
+            <span className="text-ink-muted-2 text-[11px] mt-1">
+              Les attaques adverses touchent toujours, mais perdent leur bonus de dégâts « super efficace ».
+            </span>
           </EffectSection>
         )}
       </EffectCategory>
@@ -812,6 +956,15 @@ export function AdminAutoBattleAbilityRulesPanel() {
     for (const a of attacks) map.set(a.nom, a)
     return map
   }, [attacks])
+
+  // Types élémentaires réellement utilisés par le catalogue d'attaques — le
+  // filtre de type du modificateur de stat est comparé côté SQL à
+  // attacks.type, c'est donc la seule liste qui garantisse une correspondance
+  // (TYPE_COLORS contient en plus des alias orthographiques).
+  const attackTypes = useMemo(
+    () => [...new Set(attacks.map((a) => a.type).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr')),
+    [attacks]
+  )
 
   const configuredNames = useMemo(() => new Set(rules.map((r) => r.attack_nom)), [rules])
   const selectableAttacks = useMemo(() => attacks.filter((a) => !configuredNames.has(a.nom)), [attacks, configuredNames])
@@ -908,6 +1061,7 @@ export function AdminAutoBattleAbilityRulesPanel() {
               key={rule.attack_nom}
               rule={rule}
               attack={attacksByName.get(rule.attack_nom)}
+              attackTypes={attackTypes}
               onUpdate={updateRule}
               onRemove={removeRule}
               rowRef={setRowRef}

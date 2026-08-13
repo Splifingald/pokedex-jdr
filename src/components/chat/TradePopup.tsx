@@ -576,7 +576,7 @@ export function TradePopup({ player, players, inventory, roster, itemsByName, po
                   <>
                     {(existingTrade.kind === 'item' ? !readOnlyItemsOk : acceptCandidates.length === 0) ? (
                       <p className="text-hp-red text-sm font-bold text-center">
-                        {existingTrade.kind === 'item' ? "Vous n'avez pas les objets demandés" : "Vous n'avez pas le Pokémon demandé"}
+                        {existingTrade.kind === 'item' ? "Tu n'as pas les objets demandés" : "Tu n'as pas le Pokémon demandé"}
                       </p>
                     ) : (
                       <button

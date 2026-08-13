@@ -211,7 +211,7 @@ export function MagikarpGame({
           {phase === 'playing' && (
             <>
               <p className="absolute top-2 inset-x-0 text-center text-white text-xs drop-shadow-[0_1px_2px_rgba(0,0,0,0.45)]">
-                Tapez ici !
+                Tape ici !
               </p>
 
               <img
@@ -281,7 +281,7 @@ export function MagikarpGame({
       {phase === 'result' && showEvolvePrompt && (
         <div className="relative flex flex-col items-center text-center animate-[celebrate-pop_0.3s_ease-out]">
           <p className="text-ink text-base mb-4">
-            ✨ {ownedPokemonName(magikarp)} peut évoluer ! Voir votre Pokémon ?
+            ✨ {ownedPokemonName(magikarp)} peut évoluer ! Voir ton Pokémon ?
           </p>
           <div className="flex gap-3">
             <button
