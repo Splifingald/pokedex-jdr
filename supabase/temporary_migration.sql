@@ -34,6 +34,9 @@ ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_tur
     'skip', 'play_twice', 'play_three', 'play_random', 'repeat_until_fail', 'prepare_release',
     'charge_double_next', 'first_and_replay'
   ));
+ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_bonus_damage_condition_check;
+ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_bonus_damage_condition_check
+  CHECK (bonus_damage_condition IS NULL OR bonus_damage_condition IN ('took_damage_last_turn', 'first_use', 'dice_equals', 'has_status', 'self_has_status'));
 -- Filtre de TYPE sur le modificateur de stat (stat_mod_*, uniquement pour
 -- stat = 'damage') : NULL = le modificateur s'applique à toutes les capacités
 -- (comportement historique), sinon il ne s'applique QUE lorsque la capacité
@@ -67,18 +70,33 @@ ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_pre
 -- la 3e le double, etc. Le bonus unitaire est soit un montant fixe
 -- (keep_going_bonus_type = 'flat'), soit un pourcentage des dégâts de base de
 -- son utilisateur ('percent_damage'). La chaîne s'interrompt au premier RATÉ
--- (précision manquée, ou cible invulnérable) : la capacité cesse alors d'être
--- imposée et le tour suivant redevient un choix libre.
+-- (précision manquée, ou cible invulnérable) OU au premier tour entièrement
+-- PASSÉ à cause d'un statut bloquant (paralysie, gel, sommeil) : la capacité
+-- cesse alors d'être imposée et le tour suivant redevient un choix libre. Une
+-- capacité qui ignore le statut en question (ignore_status_block) agit
+-- normalement et poursuit donc sa chaîne.
+-- Deux durées possibles, exclusives l'une de l'autre :
+--   keep_going_turns = N        : N réutilisations forcées, puis la main est
+--                                 rendue (soit N+1 utilisations en tout).
+--   keep_going_until_fail = true: la capacité se rejoue INDÉFINIMENT, une fois
+--                                 par tour, jusqu'au premier raté — le bonus
+--                                 cumulatif n'a alors pas de plafond.
 ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS keep_going_turns integer;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS keep_going_until_fail boolean NOT NULL DEFAULT false;
 ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS keep_going_bonus_type text;
 ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS keep_going_bonus_flat integer;
 ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS keep_going_bonus_percent integer;
 ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_keep_going_fields;
 ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_keep_going_fields
   CHECK (
-    keep_going_turns IS NULL
+    (keep_going_turns IS NULL AND NOT keep_going_until_fail)
     OR (
-      keep_going_turns >= 1
+      -- Les deux durées sont exclusives : soit un nombre de tours, soit
+      -- "jusqu'à l'échec", jamais les deux.
+      (
+        (keep_going_turns IS NOT NULL AND keep_going_turns >= 1 AND NOT keep_going_until_fail)
+        OR (keep_going_until_fail AND keep_going_turns IS NULL)
+      )
       AND (keep_going_bonus_type IS NULL OR keep_going_bonus_type IN ('flat', 'percent_damage'))
       AND (keep_going_bonus_type <> 'flat' OR keep_going_bonus_flat IS NOT NULL)
       AND (keep_going_bonus_type <> 'percent_damage' OR (keep_going_bonus_percent IS NOT NULL AND keep_going_bonus_percent >= 1))
@@ -309,6 +327,7 @@ CREATE TYPE autobattle_combatant_ability AS (
   stat_mod_type_filter            text,
   prevention_duration             integer,
   keep_going_turns                integer,
+  keep_going_until_fail           boolean,
   keep_going_bonus_type           text,
   keep_going_bonus_flat           integer,
   keep_going_bonus_percent        integer,
@@ -388,15 +407,11 @@ DECLARE
   -- pour le camp qui agit.
   v_ignore_block boolean;
   -- Action supplémentaire due au camp (libération d'un 'charge_double_next'
-  -- ou 'first_and_replay') : purement local au round, toujours consommée avant
-  -- de rendre la main, d'où l'absence de colonne persistée. v_*_extra_used
-  -- plafonne à UNE action supplémentaire par camp et par round — sans quoi une
-  -- capacité 'first_and_replay' rejouée à l'identique (capacité fixe côté
-  -- adversaire) boucler ait indéfiniment.
+  -- ou 'first_and_replay') : purement local au round, puisqu'elle met fin au
+  -- round dès qu'elle est accordée — d'où l'absence de colonne persistée, et
+  -- l'impossibilité d'en accorder deux dans le même appel.
   v_player_owed boolean := false;
   v_opponent_owed boolean := false;
-  v_player_extra_used boolean := false;
-  v_opponent_extra_used boolean := false;
   -- Modificateur de dégâts effectivement appliqué ce coup-ci : 0 si un filtre
   -- de type est actif et que la capacité jouée n'est pas de ce type.
   v_damage_mod_applied integer;
@@ -450,7 +465,23 @@ BEGIN
     v_opponent.heal_dot_amount := NULL; v_opponent.heal_dot_until_awake := false;
   END IF;
 
+  -- "Passe premier et rejoue" : le camp qui joue cette capacité prend la main
+  -- IMMÉDIATEMENT, sans attendre le round suivant — tout l'intérêt de l'effet
+  -- est de couper l'herbe sous le pied de l'adversaire, pas de le laisser
+  -- frapper une dernière fois avant. Les deux camps ayant déjà
+  -- soumis leur capacité quand ce moteur est appelé, il suffit d'inverser
+  -- l'ordre d'ouverture du round. Si les DEUX la jouent, l'ordre normal
+  -- tranche (aucun ne peut passer devant l'autre).
   v_attacker := p_first_attacker;
+  IF p_first_attacker = 'opponent'
+     AND p_player_ability.turn_effect = 'first_and_replay'
+     AND p_opponent_ability.turn_effect IS DISTINCT FROM 'first_and_replay' THEN
+    v_attacker := 'player';
+  ELSIF p_first_attacker = 'player'
+     AND p_opponent_ability.turn_effect = 'first_and_replay'
+     AND p_player_ability.turn_effect IS DISTINCT FROM 'first_and_replay' THEN
+    v_attacker := 'opponent';
+  END IF;
   v_block_remaining := NULL;
 
   LOOP
@@ -542,6 +573,14 @@ BEGIN
               'attacker_hp_after', v_player.hp, 'defender_hp_after', GREATEST(0, v_opponent.hp), 'ko', false
             ));
           END IF;
+          -- Un tour entièrement passé à cause d'un statut bloquant (paralysie,
+          -- gel, sommeil) met fin à la chaîne "Continue sur sa lancée" : la
+          -- capacité cesse d'être imposée, le tour suivant redevient un choix
+          -- libre. Une capacité qui IGNORE ce statut (ignore_status_block) ne
+          -- passe pas par ici et poursuit donc sa chaîne normalement.
+          v_player.keep_going_ability_nom := NULL;
+          v_player.keep_going_remaining := 0;
+          v_player.keep_going_count := 0;
           v_attacker := 'opponent';
           v_flips := v_flips + 1;
           IF v_turn_no > 5000 THEN v_outcome := 'lose'; EXIT; END IF;
@@ -568,6 +607,14 @@ BEGIN
               'attacker_hp_after', v_opponent.hp, 'defender_hp_after', GREATEST(0, v_player.hp), 'ko', false
             ));
           END IF;
+          -- Un tour entièrement passé à cause d'un statut bloquant (paralysie,
+          -- gel, sommeil) met fin à la chaîne "Continue sur sa lancée" : la
+          -- capacité cesse d'être imposée, le tour suivant redevient un choix
+          -- libre. Une capacité qui IGNORE ce statut (ignore_status_block) ne
+          -- passe pas par ici et poursuit donc sa chaîne normalement.
+          v_opponent.keep_going_ability_nom := NULL;
+          v_opponent.keep_going_remaining := 0;
+          v_opponent.keep_going_count := 0;
           v_attacker := 'player';
           v_flips := v_flips + 1;
           IF v_turn_no > 5000 THEN v_outcome := 'lose'; EXIT; END IF;
@@ -599,6 +646,14 @@ BEGIN
               'attacker_hp_after', v_player.hp, 'defender_hp_after', GREATEST(0, v_opponent.hp), 'ko', false
             ));
           END IF;
+          -- Un tour entièrement passé à cause d'un statut bloquant (paralysie,
+          -- gel, sommeil) met fin à la chaîne "Continue sur sa lancée" : la
+          -- capacité cesse d'être imposée, le tour suivant redevient un choix
+          -- libre. Une capacité qui IGNORE ce statut (ignore_status_block) ne
+          -- passe pas par ici et poursuit donc sa chaîne normalement.
+          v_player.keep_going_ability_nom := NULL;
+          v_player.keep_going_remaining := 0;
+          v_player.keep_going_count := 0;
           v_attacker := 'opponent';
           v_flips := v_flips + 1;
           IF v_turn_no > 5000 THEN v_outcome := 'lose'; EXIT; END IF;
@@ -625,6 +680,14 @@ BEGIN
               'attacker_hp_after', v_opponent.hp, 'defender_hp_after', GREATEST(0, v_player.hp), 'ko', false
             ));
           END IF;
+          -- Un tour entièrement passé à cause d'un statut bloquant (paralysie,
+          -- gel, sommeil) met fin à la chaîne "Continue sur sa lancée" : la
+          -- capacité cesse d'être imposée, le tour suivant redevient un choix
+          -- libre. Une capacité qui IGNORE ce statut (ignore_status_block) ne
+          -- passe pas par ici et poursuit donc sa chaîne normalement.
+          v_opponent.keep_going_ability_nom := NULL;
+          v_opponent.keep_going_remaining := 0;
+          v_opponent.keep_going_count := 0;
           v_attacker := 'player';
           v_flips := v_flips + 1;
           IF v_turn_no > 5000 THEN v_outcome := 'lose'; EXIT; END IF;
@@ -744,29 +807,38 @@ BEGIN
       -- l'utilisation en cours, base du bonus cumulatif (1 = pas de bonus).
       -- La capacité verrouillée est relâchée dès qu'il ne reste plus de
       -- réutilisation, pour qu'un nouveau choix redémarre une chaîne neuve.
-      IF v_attacker = 'player' AND p_player_ability.keep_going_turns IS NOT NULL THEN
+      -- keep_going_ability_nom est LA source de vérité de "une chaîne est en
+      -- cours" (les appelants s'y fient pour imposer la capacité au tour
+      -- suivant) : il n'est vidé qu'à la fin de la chaîne — compteur épuisé
+      -- en mode "N tours", ou premier raté dans les deux modes. En mode
+      -- "jusqu'à l'échec", keep_going_remaining ne sert donc à rien et reste à 0.
+      IF v_attacker = 'player' AND (p_player_ability.keep_going_turns IS NOT NULL OR COALESCE(p_player_ability.keep_going_until_fail, false)) THEN
         IF v_player.keep_going_ability_nom IS DISTINCT FROM p_player_ability.ability_nom THEN
           v_player.keep_going_ability_nom := p_player_ability.ability_nom;
           v_player.keep_going_count := 1;
-          v_player.keep_going_remaining := p_player_ability.keep_going_turns;
+          v_player.keep_going_remaining := COALESCE(p_player_ability.keep_going_turns, 0);
         ELSE
           v_player.keep_going_count := COALESCE(v_player.keep_going_count, 0) + 1;
-          v_player.keep_going_remaining := GREATEST(0, COALESCE(v_player.keep_going_remaining, 0) - 1);
+          IF NOT COALESCE(p_player_ability.keep_going_until_fail, false) THEN
+            v_player.keep_going_remaining := GREATEST(0, COALESCE(v_player.keep_going_remaining, 0) - 1);
+          END IF;
         END IF;
-        IF COALESCE(v_player.keep_going_remaining, 0) <= 0 THEN
+        IF NOT COALESCE(p_player_ability.keep_going_until_fail, false) AND COALESCE(v_player.keep_going_remaining, 0) <= 0 THEN
           v_player.keep_going_ability_nom := NULL;
           v_player.keep_going_remaining := 0;
         END IF;
-      ELSIF v_attacker = 'opponent' AND p_opponent_ability.keep_going_turns IS NOT NULL THEN
+      ELSIF v_attacker = 'opponent' AND (p_opponent_ability.keep_going_turns IS NOT NULL OR COALESCE(p_opponent_ability.keep_going_until_fail, false)) THEN
         IF v_opponent.keep_going_ability_nom IS DISTINCT FROM p_opponent_ability.ability_nom THEN
           v_opponent.keep_going_ability_nom := p_opponent_ability.ability_nom;
           v_opponent.keep_going_count := 1;
-          v_opponent.keep_going_remaining := p_opponent_ability.keep_going_turns;
+          v_opponent.keep_going_remaining := COALESCE(p_opponent_ability.keep_going_turns, 0);
         ELSE
           v_opponent.keep_going_count := COALESCE(v_opponent.keep_going_count, 0) + 1;
-          v_opponent.keep_going_remaining := GREATEST(0, COALESCE(v_opponent.keep_going_remaining, 0) - 1);
+          IF NOT COALESCE(p_opponent_ability.keep_going_until_fail, false) THEN
+            v_opponent.keep_going_remaining := GREATEST(0, COALESCE(v_opponent.keep_going_remaining, 0) - 1);
+          END IF;
         END IF;
-        IF COALESCE(v_opponent.keep_going_remaining, 0) <= 0 THEN
+        IF NOT COALESCE(p_opponent_ability.keep_going_until_fail, false) AND COALESCE(v_opponent.keep_going_remaining, 0) <= 0 THEN
           v_opponent.keep_going_ability_nom := NULL;
           v_opponent.keep_going_remaining := 0;
         END IF;
@@ -945,7 +1017,7 @@ BEGIN
         END IF;
         -- Un raté met fin à la chaîne "Continue sur sa lancée" : la capacité
         -- cesse d'être imposée, le tour suivant redevient un choix libre.
-        IF p_player_ability.keep_going_turns IS NOT NULL THEN
+        IF p_player_ability.keep_going_turns IS NOT NULL OR COALESCE(p_player_ability.keep_going_until_fail, false) THEN
           v_player.keep_going_ability_nom := NULL;
           v_player.keep_going_remaining := 0;
         END IF;
@@ -964,7 +1036,7 @@ BEGIN
           END IF;
           -- Un raté met fin à la chaîne "Continue sur sa lancée" : la capacité
           -- cesse d'être imposée, le tour suivant redevient un choix libre.
-          IF p_player_ability.keep_going_turns IS NOT NULL THEN
+          IF p_player_ability.keep_going_turns IS NOT NULL OR COALESCE(p_player_ability.keep_going_until_fail, false) THEN
             v_player.keep_going_ability_nom := NULL;
             v_player.keep_going_remaining := 0;
           END IF;
@@ -997,7 +1069,8 @@ BEGIN
             v_bonus_condition_met := p_player_ability.bonus_condition = 'took_damage_last_turn' AND v_player.took_damage
               OR p_player_ability.bonus_condition = 'first_use' AND NOT v_player.used_ability
               OR p_player_ability.bonus_condition = 'dice_equals' AND v_hit_dice = p_player_ability.bonus_dice_value
-              OR p_player_ability.bonus_condition = 'has_status' AND v_opponent.status IS NOT NULL AND (p_player_ability.bonus_status_filter IS NULL OR v_opponent.status = p_player_ability.bonus_status_filter);
+              OR p_player_ability.bonus_condition = 'has_status' AND v_opponent.status IS NOT NULL AND (p_player_ability.bonus_status_filter IS NULL OR v_opponent.status = p_player_ability.bonus_status_filter)
+              OR p_player_ability.bonus_condition = 'self_has_status' AND v_player.status IS NOT NULL AND (p_player_ability.bonus_status_filter IS NULL OR v_player.status = p_player_ability.bonus_status_filter);
             IF p_player_ability.bonus_type IS NOT NULL AND v_bonus_condition_met THEN
               IF p_player_ability.bonus_type = 'multiply' THEN
                 v_hit_damage := floor(v_hit_damage * COALESCE(p_player_ability.bonus_multiplier, 1))::integer;
@@ -1012,7 +1085,7 @@ BEGIN
             -- Bonus cumulatif de la chaîne "Continue sur sa lancée" : rien à
             -- la 1ère utilisation, puis +1 fois le bonus unitaire par
             -- réutilisation (voir keep_going_count, incrémenté plus haut).
-            IF p_player_ability.keep_going_turns IS NOT NULL AND COALESCE(v_player.keep_going_count, 0) > 1 THEN
+            IF (p_player_ability.keep_going_turns IS NOT NULL OR COALESCE(p_player_ability.keep_going_until_fail, false)) AND COALESCE(v_player.keep_going_count, 0) > 1 THEN
               v_keep_going_bonus := (COALESCE(v_player.keep_going_count, 1) - 1) * (CASE
                 WHEN p_player_ability.keep_going_bonus_type = 'percent_damage'
                   THEN floor(p_player_ability.base_damage * COALESCE(p_player_ability.keep_going_bonus_percent, 0) / 100.0)::integer
@@ -1195,7 +1268,7 @@ BEGIN
         END IF;
         -- Un raté met fin à la chaîne "Continue sur sa lancée" : la capacité
         -- cesse d'être imposée, le tour suivant redevient un choix libre.
-        IF p_opponent_ability.keep_going_turns IS NOT NULL THEN
+        IF p_opponent_ability.keep_going_turns IS NOT NULL OR COALESCE(p_opponent_ability.keep_going_until_fail, false) THEN
           v_opponent.keep_going_ability_nom := NULL;
           v_opponent.keep_going_remaining := 0;
         END IF;
@@ -1214,7 +1287,7 @@ BEGIN
           END IF;
           -- Un raté met fin à la chaîne "Continue sur sa lancée" : la capacité
           -- cesse d'être imposée, le tour suivant redevient un choix libre.
-          IF p_opponent_ability.keep_going_turns IS NOT NULL THEN
+          IF p_opponent_ability.keep_going_turns IS NOT NULL OR COALESCE(p_opponent_ability.keep_going_until_fail, false) THEN
             v_opponent.keep_going_ability_nom := NULL;
             v_opponent.keep_going_remaining := 0;
           END IF;
@@ -1242,7 +1315,8 @@ BEGIN
             v_bonus_condition_met := p_opponent_ability.bonus_condition = 'took_damage_last_turn' AND v_opponent.took_damage
               OR p_opponent_ability.bonus_condition = 'first_use' AND NOT v_opponent.used_ability
               OR p_opponent_ability.bonus_condition = 'dice_equals' AND v_hit_dice = p_opponent_ability.bonus_dice_value
-              OR p_opponent_ability.bonus_condition = 'has_status' AND v_player.status IS NOT NULL AND (p_opponent_ability.bonus_status_filter IS NULL OR v_player.status = p_opponent_ability.bonus_status_filter);
+              OR p_opponent_ability.bonus_condition = 'has_status' AND v_player.status IS NOT NULL AND (p_opponent_ability.bonus_status_filter IS NULL OR v_player.status = p_opponent_ability.bonus_status_filter)
+              OR p_opponent_ability.bonus_condition = 'self_has_status' AND v_opponent.status IS NOT NULL AND (p_opponent_ability.bonus_status_filter IS NULL OR v_opponent.status = p_opponent_ability.bonus_status_filter);
             IF p_opponent_ability.bonus_type IS NOT NULL AND v_bonus_condition_met THEN
               IF p_opponent_ability.bonus_type = 'multiply' THEN
                 v_hit_damage := floor(v_hit_damage * COALESCE(p_opponent_ability.bonus_multiplier, 1))::integer;
@@ -1254,7 +1328,7 @@ BEGIN
               v_hit_damage := GREATEST(0, v_hit_damage);
             END IF;
 
-            IF p_opponent_ability.keep_going_turns IS NOT NULL AND COALESCE(v_opponent.keep_going_count, 0) > 1 THEN
+            IF (p_opponent_ability.keep_going_turns IS NOT NULL OR COALESCE(p_opponent_ability.keep_going_until_fail, false)) AND COALESCE(v_opponent.keep_going_count, 0) > 1 THEN
               v_keep_going_bonus := (COALESCE(v_opponent.keep_going_count, 1) - 1) * (CASE
                 WHEN p_opponent_ability.keep_going_bonus_type = 'percent_damage'
                   THEN floor(p_opponent_ability.base_damage * COALESCE(p_opponent_ability.keep_going_bonus_percent, 0) / 100.0)::integer
@@ -1404,30 +1478,25 @@ BEGIN
     v_block_remaining := v_block_remaining - 1;
     IF v_block_remaining = 0 THEN
       -- Action supplémentaire due à ce camp ('charge_double_next' libéré ou
-      -- 'first_and_replay') : il rejoue au lieu de rendre la main.
-      --   • camp 'player' : on ARRÊTE le round ici et il reprendra la main en
-      --     tout premier au round suivant — c'est ce qui lui permet de
-      --     CHOISIR une seconde capacité (le round suivant est un nouvel appel
-      --     RPC), sans que l'adversaire ne joue entre les deux. Sa capacité de
-      --     ce round a déjà été consommée, rien n'est perdu.
-      --   • camp 'opponent' qui a déjà vu le joueur agir : idem, on s'arrête.
-      --   • camp 'opponent' qui a ouvert le round : s'arrêter gâcherait la
-      --     capacité que le joueur vient de soumettre pour ce round — il
-      --     rejoue donc immédiatement, avec la même capacité (l'adversaire
-      --     n'en choisit qu'une par round de toute façon).
-      IF v_attacker = 'player' AND v_player_owed AND NOT v_player_extra_used THEN
+      -- 'first_and_replay') : le round S'ARRÊTE ICI et ce camp reprendra la
+      -- main en tout premier au round suivant. C'est ce qui donne deux
+      -- actions consécutives avec DEUX CAPACITÉS DIFFÉRENTES : le round
+      -- suivant est un nouvel appel RPC, où le joueur choisit à nouveau et où
+      -- l'adversaire avance d'un cran dans sa séquence configurée (rejouer
+      -- ici, dans le même round, condamnerait les deux camps à répéter la
+      -- capacité en cours).
+      -- Cas particulier : si le camp qui doit rejouer a ouvert le round,
+      -- l'AUTRE n'a pas encore agi et sa capacité n'a donc pas servi — les
+      -- appelants la réimposent au round suivant (player_forced_ability_nom)
+      -- plutôt que de la perdre, voir autobattle_resolve_manual_round.
+      IF v_attacker = 'player' AND v_player_owed THEN
         v_player_owed := false;
-        v_player_extra_used := true;
         v_next_first := 'player';
         EXIT;
-      ELSIF v_attacker = 'opponent' AND v_opponent_owed AND NOT v_opponent_extra_used THEN
+      ELSIF v_attacker = 'opponent' AND v_opponent_owed THEN
         v_opponent_owed := false;
-        v_opponent_extra_used := true;
         v_next_first := 'opponent';
-        IF v_flips >= 1 THEN
-          EXIT;
-        END IF;
-        v_block_remaining := 1;
+        EXIT;
       ELSE
         v_attacker := CASE WHEN v_attacker = 'player' THEN 'opponent' ELSE 'player' END;
         v_block_remaining := NULL;
@@ -1639,10 +1708,12 @@ DECLARE
   v_player_prevention_expires      integer;
   v_opponent_prevention_expires    integer;
   v_player_keep_going_turns        integer;
+  v_player_keep_going_until_fail  boolean;
   v_player_keep_going_bonus_type   text;
   v_player_keep_going_bonus_flat   integer;
   v_player_keep_going_bonus_percent integer;
   v_opponent_keep_going_turns      integer;
+  v_opponent_keep_going_until_fail  boolean;
   v_opponent_keep_going_bonus_type text;
   v_opponent_keep_going_bonus_flat integer;
   v_opponent_keep_going_bonus_percent integer;
@@ -1867,7 +1938,7 @@ BEGIN
          stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
          heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
          stat_mod_type_filter, prevention_duration_turns,
-         keep_going_turns, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
+         keep_going_turns, keep_going_until_fail, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
          heal_dot_until_awake, ignore_status_block
     INTO v_player_heal_type, v_player_heal_amount, v_player_heal_percent, v_player_turn_effect, v_player_repeat_max, v_player_status_reversed,
          v_player_recoil_type, v_player_recoil_min, v_player_recoil_max, v_player_recoil_percent, v_player_invuln_grant,
@@ -1877,12 +1948,13 @@ BEGIN
          v_player_stat_mod_duration_type, v_player_stat_mod_duration_turns, v_player_stat_mod_max_uses,
          v_player_heal_dot_config_amount, v_player_heal_dot_config_turns, v_player_heal_dot_config_type, v_player_heal_dot_config_percent, v_player_cancel_heal_duration, v_player_percent_hp_damage_percent,
          v_player_stat_mod_type_filter, v_player_prevention_duration,
-         v_player_keep_going_turns, v_player_keep_going_bonus_type, v_player_keep_going_bonus_flat, v_player_keep_going_bonus_percent,
+         v_player_keep_going_turns, v_player_keep_going_until_fail, v_player_keep_going_bonus_type, v_player_keep_going_bonus_flat, v_player_keep_going_bonus_percent,
          v_player_heal_dot_config_until_awake, v_player_ignore_status_block
     FROM autobattle_ability_rules WHERE attack_nom = v_effective_ability_nom;
   v_player_status_reversed := COALESCE(v_player_status_reversed, false);
   v_player_invuln_grant := COALESCE(v_player_invuln_grant, false);
   v_player_heal_dot_config_until_awake := COALESCE(v_player_heal_dot_config_until_awake, false);
+  v_player_keep_going_until_fail := COALESCE(v_player_keep_going_until_fail, false);
 
   SELECT heal_type, heal_amount, heal_percent, turn_effect, repeat_max_iterations, status_reversed,
          recoil_type, recoil_min, recoil_max, recoil_percent, invulnerable_next_turn,
@@ -1892,7 +1964,7 @@ BEGIN
          stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
          heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
          stat_mod_type_filter, prevention_duration_turns,
-         keep_going_turns, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
+         keep_going_turns, keep_going_until_fail, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
          heal_dot_until_awake, ignore_status_block
     INTO v_opponent_heal_type, v_opponent_heal_amount, v_opponent_heal_percent, v_opponent_turn_effect, v_opponent_repeat_max, v_opponent_status_reversed,
          v_opponent_recoil_type, v_opponent_recoil_min, v_opponent_recoil_max, v_opponent_recoil_percent, v_opponent_invuln_grant,
@@ -1902,12 +1974,13 @@ BEGIN
          v_opponent_stat_mod_duration_type, v_opponent_stat_mod_duration_turns, v_opponent_stat_mod_max_uses,
          v_opponent_heal_dot_config_amount, v_opponent_heal_dot_config_turns, v_opponent_heal_dot_config_type, v_opponent_heal_dot_config_percent, v_opponent_cancel_heal_duration, v_opponent_percent_hp_damage_percent,
          v_opponent_stat_mod_type_filter, v_opponent_prevention_duration,
-         v_opponent_keep_going_turns, v_opponent_keep_going_bonus_type, v_opponent_keep_going_bonus_flat, v_opponent_keep_going_bonus_percent,
+         v_opponent_keep_going_turns, v_opponent_keep_going_until_fail, v_opponent_keep_going_bonus_type, v_opponent_keep_going_bonus_flat, v_opponent_keep_going_bonus_percent,
          v_opponent_heal_dot_config_until_awake, v_opponent_ignore_status_block
     FROM autobattle_ability_rules WHERE attack_nom = v_effective_opponent_ability_nom;
   v_opponent_status_reversed := COALESCE(v_opponent_status_reversed, false);
   v_opponent_invuln_grant := COALESCE(v_opponent_invuln_grant, false);
   v_opponent_heal_dot_config_until_awake := COALESCE(v_opponent_heal_dot_config_until_awake, false);
+  v_opponent_keep_going_until_fail := COALESCE(v_opponent_keep_going_until_fail, false);
 
   -- Précision "aucune" (NULL ou 0, case vide/"0" dans le CSV) = capacité qui
   -- ne peut JAMAIS rater, immunisée contre peur/confusion ET contre le
@@ -1925,6 +1998,17 @@ BEGIN
   v_player_hp := GREATEST(1, v_player_max_hp);
   v_opponent_hp := v_level.opponent_hp;
   v_coin_player_first := random() < 0.5;
+  -- "Passe premier et rejoue" : en mode Auto la capacité est la même à chaque
+  -- tour et l'ordre est une stricte alternance — le seul moment où "passer
+  -- premier" veut encore dire quelque chose est le tirage d'ouverture, que
+  -- l'effet remporte donc d'office (si les deux camps l'ont, le tirage
+  -- tranche normalement). v_coin_player_first est mis à jour avec, pour que
+  -- l'animation de pile ou face montrée au joueur reste cohérente.
+  IF v_player_turn_effect = 'first_and_replay' AND v_opponent_turn_effect IS DISTINCT FROM 'first_and_replay' THEN
+    v_coin_player_first := true;
+  ELSIF v_opponent_turn_effect = 'first_and_replay' AND v_player_turn_effect IS DISTINCT FROM 'first_and_replay' THEN
+    v_coin_player_first := false;
+  END IF;
   v_attacker := CASE WHEN v_coin_player_first THEN 'player' ELSE 'opponent' END;
   v_block_remaining := NULL;
   v_player_status := NULL;
@@ -2070,6 +2154,13 @@ BEGIN
               'attacker_hp_after', v_player_hp, 'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', false
             ));
           END IF;
+          -- Un tour entièrement passé à cause d'un statut bloquant (paralysie,
+          -- gel, sommeil) met fin à la chaîne "Continue sur sa lancée" : la
+          -- capacité cesse d'être imposée, le tour suivant redevient un choix
+          -- libre. Une capacité qui IGNORE ce statut (ignore_status_block) ne
+          -- passe pas par ici et poursuit donc sa chaîne normalement.
+          v_player_keep_going_remaining := 0;
+          v_player_keep_going_count := 0;
           v_attacker := 'opponent';
           IF v_turn_no > 200 THEN v_outcome := 'lose'; EXIT; END IF;
           CONTINUE;
@@ -2094,6 +2185,13 @@ BEGIN
               'attacker_hp_after', v_opponent_hp, 'defender_hp_after', GREATEST(0, v_player_hp), 'ko', false
             ));
           END IF;
+          -- Un tour entièrement passé à cause d'un statut bloquant (paralysie,
+          -- gel, sommeil) met fin à la chaîne "Continue sur sa lancée" : la
+          -- capacité cesse d'être imposée, le tour suivant redevient un choix
+          -- libre. Une capacité qui IGNORE ce statut (ignore_status_block) ne
+          -- passe pas par ici et poursuit donc sa chaîne normalement.
+          v_opponent_keep_going_remaining := 0;
+          v_opponent_keep_going_count := 0;
           v_attacker := 'player';
           IF v_turn_no > 200 THEN v_outcome := 'lose'; EXIT; END IF;
           CONTINUE;
@@ -2134,6 +2232,13 @@ BEGIN
               'attacker_hp_after', v_player_hp, 'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', false
             ));
           END IF;
+          -- Un tour entièrement passé à cause d'un statut bloquant (paralysie,
+          -- gel, sommeil) met fin à la chaîne "Continue sur sa lancée" : la
+          -- capacité cesse d'être imposée, le tour suivant redevient un choix
+          -- libre. Une capacité qui IGNORE ce statut (ignore_status_block) ne
+          -- passe pas par ici et poursuit donc sa chaîne normalement.
+          v_player_keep_going_remaining := 0;
+          v_player_keep_going_count := 0;
           v_attacker := 'opponent';
           IF v_turn_no > 200 THEN v_outcome := 'lose'; EXIT; END IF;
           CONTINUE;
@@ -2162,6 +2267,13 @@ BEGIN
               'attacker_hp_after', v_opponent_hp, 'defender_hp_after', GREATEST(0, v_player_hp), 'ko', false
             ));
           END IF;
+          -- Un tour entièrement passé à cause d'un statut bloquant (paralysie,
+          -- gel, sommeil) met fin à la chaîne "Continue sur sa lancée" : la
+          -- capacité cesse d'être imposée, le tour suivant redevient un choix
+          -- libre. Une capacité qui IGNORE ce statut (ignore_status_block) ne
+          -- passe pas par ici et poursuit donc sa chaîne normalement.
+          v_opponent_keep_going_remaining := 0;
+          v_opponent_keep_going_count := 0;
           v_attacker := 'player';
           IF v_turn_no > 200 THEN v_outcome := 'lose'; EXIT; END IF;
           CONTINUE;
@@ -2301,21 +2413,33 @@ BEGIN
       -- consécutives — bonus cumulatif jusqu'à épuisement de la chaîne, puis
       -- remise à zéro. keep_going_count = numéro de l'utilisation en cours
       -- (1 = pas de bonus).
-      IF v_attacker = 'player' AND v_player_keep_going_turns IS NOT NULL THEN
-        IF v_player_keep_going_remaining <= 0 THEN
+      -- Mode "N tours" : keep_going_remaining à 0 marque une chaîne épuisée
+      -- (ou jamais commencée), la suivante repart de zéro. Mode "jusqu'à
+      -- l'échec" : ce compteur ne sert pas, c'est keep_going_count remis à 0
+      -- par un raté (voir plus bas) qui signale la fin de la chaîne.
+      IF v_attacker = 'player' AND (v_player_keep_going_turns IS NOT NULL OR v_player_keep_going_until_fail) THEN
+        IF NOT v_player_keep_going_until_fail AND v_player_keep_going_remaining <= 0 THEN
           v_player_keep_going_count := 1;
           v_player_keep_going_remaining := v_player_keep_going_turns;
+        ELSIF v_player_keep_going_until_fail AND v_player_keep_going_count <= 0 THEN
+          v_player_keep_going_count := 1;
         ELSE
           v_player_keep_going_count := v_player_keep_going_count + 1;
-          v_player_keep_going_remaining := v_player_keep_going_remaining - 1;
+          IF NOT v_player_keep_going_until_fail THEN
+            v_player_keep_going_remaining := v_player_keep_going_remaining - 1;
+          END IF;
         END IF;
-      ELSIF v_attacker = 'opponent' AND v_opponent_keep_going_turns IS NOT NULL THEN
-        IF v_opponent_keep_going_remaining <= 0 THEN
+      ELSIF v_attacker = 'opponent' AND (v_opponent_keep_going_turns IS NOT NULL OR v_opponent_keep_going_until_fail) THEN
+        IF NOT v_opponent_keep_going_until_fail AND v_opponent_keep_going_remaining <= 0 THEN
           v_opponent_keep_going_count := 1;
           v_opponent_keep_going_remaining := v_opponent_keep_going_turns;
+        ELSIF v_opponent_keep_going_until_fail AND v_opponent_keep_going_count <= 0 THEN
+          v_opponent_keep_going_count := 1;
         ELSE
           v_opponent_keep_going_count := v_opponent_keep_going_count + 1;
-          v_opponent_keep_going_remaining := v_opponent_keep_going_remaining - 1;
+          IF NOT v_opponent_keep_going_until_fail THEN
+            v_opponent_keep_going_remaining := v_opponent_keep_going_remaining - 1;
+          END IF;
         END IF;
       END IF;
 
@@ -2489,7 +2613,7 @@ BEGIN
         END IF;
         -- Un raté met fin à la chaîne "Continue sur sa lancée" : la capacité
         -- cesse d'être imposée, le tour suivant redevient un choix libre.
-        IF v_player_keep_going_turns IS NOT NULL THEN
+        IF v_player_keep_going_turns IS NOT NULL OR v_player_keep_going_until_fail THEN
           v_player_keep_going_remaining := 0;
           v_player_keep_going_count := 0;
         END IF;
@@ -2511,7 +2635,7 @@ BEGIN
           END IF;
           -- Un raté met fin à la chaîne "Continue sur sa lancée" : la capacité
           -- cesse d'être imposée, le tour suivant redevient un choix libre.
-          IF v_player_keep_going_turns IS NOT NULL THEN
+          IF v_player_keep_going_turns IS NOT NULL OR v_player_keep_going_until_fail THEN
             v_player_keep_going_remaining := 0;
             v_player_keep_going_count := 0;
           END IF;
@@ -2551,13 +2675,15 @@ BEGIN
               v_hit_damage := GREATEST(0, floor(v_opponent_hp * v_player_percent_hp_damage_percent / 100.0)::integer);
             END IF;
 
-            -- Dégâts additionnels conditionnels (voir bonus_damage_* et les 4
+            -- Dégâts additionnels conditionnels (voir bonus_damage_* et les
             -- conditions possibles) — appliqués après le dé, avant le
-            -- contre-coup.
+            -- contre-coup. 'has_status' regarde le statut de la CIBLE,
+            -- 'self_has_status' celui de l'utilisateur de la capacité.
             v_bonus_condition_met := v_player_bonus_condition = 'took_damage_last_turn' AND v_player_took_damage
               OR v_player_bonus_condition = 'first_use' AND NOT v_player_used_ability
               OR v_player_bonus_condition = 'dice_equals' AND v_hit_dice = v_player_bonus_dice_value
-              OR v_player_bonus_condition = 'has_status' AND v_opponent_status IS NOT NULL AND (v_player_bonus_status_filter IS NULL OR v_opponent_status = v_player_bonus_status_filter);
+              OR v_player_bonus_condition = 'has_status' AND v_opponent_status IS NOT NULL AND (v_player_bonus_status_filter IS NULL OR v_opponent_status = v_player_bonus_status_filter)
+              OR v_player_bonus_condition = 'self_has_status' AND v_player_status IS NOT NULL AND (v_player_bonus_status_filter IS NULL OR v_player_status = v_player_bonus_status_filter);
             IF v_player_bonus_type IS NOT NULL AND v_bonus_condition_met THEN
               IF v_player_bonus_type = 'multiply' THEN
                 v_hit_damage := floor(v_hit_damage * COALESCE(v_player_bonus_multiplier, 1))::integer;
@@ -2572,7 +2698,7 @@ BEGIN
             -- Bonus cumulatif de la chaîne "Continue sur sa lancée" : rien à
             -- la 1ère utilisation, puis +1 fois le bonus unitaire par
             -- réutilisation (voir v_player_keep_going_count plus haut).
-            IF v_player_keep_going_turns IS NOT NULL AND v_player_keep_going_count > 1 THEN
+            IF (v_player_keep_going_turns IS NOT NULL OR v_player_keep_going_until_fail) AND v_player_keep_going_count > 1 THEN
               v_keep_going_bonus := (v_player_keep_going_count - 1) * (CASE
                 WHEN v_player_keep_going_bonus_type = 'percent_damage'
                   THEN floor(v_player_damage * COALESCE(v_player_keep_going_bonus_percent, 0) / 100.0)::integer
@@ -2788,7 +2914,7 @@ BEGIN
         END IF;
         -- Un raté met fin à la chaîne "Continue sur sa lancée" : la capacité
         -- cesse d'être imposée, le tour suivant redevient un choix libre.
-        IF v_opponent_keep_going_turns IS NOT NULL THEN
+        IF v_opponent_keep_going_turns IS NOT NULL OR v_opponent_keep_going_until_fail THEN
           v_opponent_keep_going_remaining := 0;
           v_opponent_keep_going_count := 0;
         END IF;
@@ -2807,7 +2933,7 @@ BEGIN
           END IF;
           -- Un raté met fin à la chaîne "Continue sur sa lancée" : la capacité
           -- cesse d'être imposée, le tour suivant redevient un choix libre.
-          IF v_opponent_keep_going_turns IS NOT NULL THEN
+          IF v_opponent_keep_going_turns IS NOT NULL OR v_opponent_keep_going_until_fail THEN
             v_opponent_keep_going_remaining := 0;
             v_opponent_keep_going_count := 0;
           END IF;
@@ -2837,7 +2963,8 @@ BEGIN
             v_bonus_condition_met := v_opponent_bonus_condition = 'took_damage_last_turn' AND v_opponent_took_damage
               OR v_opponent_bonus_condition = 'first_use' AND NOT v_opponent_used_ability
               OR v_opponent_bonus_condition = 'dice_equals' AND v_hit_dice = v_opponent_bonus_dice_value
-              OR v_opponent_bonus_condition = 'has_status' AND v_player_status IS NOT NULL AND (v_opponent_bonus_status_filter IS NULL OR v_player_status = v_opponent_bonus_status_filter);
+              OR v_opponent_bonus_condition = 'has_status' AND v_player_status IS NOT NULL AND (v_opponent_bonus_status_filter IS NULL OR v_player_status = v_opponent_bonus_status_filter)
+              OR v_opponent_bonus_condition = 'self_has_status' AND v_opponent_status IS NOT NULL AND (v_opponent_bonus_status_filter IS NULL OR v_opponent_status = v_opponent_bonus_status_filter);
             IF v_opponent_bonus_type IS NOT NULL AND v_bonus_condition_met THEN
               IF v_opponent_bonus_type = 'multiply' THEN
                 v_hit_damage := floor(v_hit_damage * COALESCE(v_opponent_bonus_multiplier, 1))::integer;
@@ -2849,7 +2976,7 @@ BEGIN
               v_hit_damage := GREATEST(0, v_hit_damage);
             END IF;
 
-            IF v_opponent_keep_going_turns IS NOT NULL AND v_opponent_keep_going_count > 1 THEN
+            IF (v_opponent_keep_going_turns IS NOT NULL OR v_opponent_keep_going_until_fail) AND v_opponent_keep_going_count > 1 THEN
               v_keep_going_bonus := (v_opponent_keep_going_count - 1) * (CASE
                 WHEN v_opponent_keep_going_bonus_type = 'percent_damage'
                   THEN floor(v_opponent_damage * COALESCE(v_opponent_keep_going_bonus_percent, 0) / 100.0)::integer
@@ -3232,6 +3359,7 @@ DECLARE
   v_player_stat_mod_type_filter   text;
   v_player_prevention_duration    integer;
   v_player_keep_going_turns       integer;
+  v_player_keep_going_until_fail  boolean;
   v_player_keep_going_bonus_type  text;
   v_player_keep_going_bonus_flat  integer;
   v_player_keep_going_bonus_percent integer;
@@ -3277,6 +3405,7 @@ DECLARE
   v_opponent_stat_mod_type_filter   text;
   v_opponent_prevention_duration    integer;
   v_opponent_keep_going_turns       integer;
+  v_opponent_keep_going_until_fail  boolean;
   v_opponent_keep_going_bonus_type  text;
   v_opponent_keep_going_bonus_flat  integer;
   v_opponent_keep_going_bonus_percent integer;
@@ -3499,7 +3628,7 @@ BEGIN
   -- nom au tour précédent, renvoie de toute façon la même).
   v_effective_player_ability_nom := CASE
     WHEN v_player_preparing THEN v_player_preparing_ability_nom
-    WHEN COALESCE(v_player_keep_going_remaining, 0) > 0 AND v_player_keep_going_ability_nom IS NOT NULL THEN v_player_keep_going_ability_nom
+    WHEN v_player_keep_going_ability_nom IS NOT NULL THEN v_player_keep_going_ability_nom
     ELSE p_ability_nom END;
   SELECT * INTO v_ability FROM attacks WHERE nom = v_effective_player_ability_nom;
 
@@ -3514,7 +3643,7 @@ BEGIN
   IF v_opponent_preparing THEN
     v_opponent_ability_nom_round := v_opponent_preparing_ability_nom;
     v_opponent_ability_cycle_index := v_row.opponent_ability_cycle_index;
-  ELSIF COALESCE(v_opponent_keep_going_remaining, 0) > 0 AND v_opponent_keep_going_ability_nom IS NOT NULL THEN
+  ELSIF v_opponent_keep_going_ability_nom IS NOT NULL THEN
     -- Chaîne "Continue sur sa lancée" côté adverse : la capacité reste la
     -- même, la séquence configurée n'avance pas pendant ce temps.
     v_opponent_ability_nom_round := v_opponent_keep_going_ability_nom;
@@ -3620,7 +3749,7 @@ BEGIN
          stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
          heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
          stat_mod_type_filter, prevention_duration_turns,
-         keep_going_turns, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
+         keep_going_turns, keep_going_until_fail, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
          heal_dot_until_awake, ignore_status_block
     INTO v_player_turn_effect, v_player_repeat_max, v_player_heal_type, v_player_heal_amount, v_player_heal_percent, v_player_status_reversed,
          v_player_recoil_type, v_player_recoil_min, v_player_recoil_max, v_player_recoil_percent, v_player_invuln_grant,
@@ -3630,12 +3759,13 @@ BEGIN
          v_player_stat_mod_duration_type, v_player_stat_mod_duration_turns, v_player_stat_mod_max_uses,
          v_player_heal_dot_config_amount, v_player_heal_dot_config_turns, v_player_heal_dot_config_type, v_player_heal_dot_config_percent, v_player_cancel_heal_duration, v_player_percent_hp_damage_percent,
          v_player_stat_mod_type_filter, v_player_prevention_duration,
-         v_player_keep_going_turns, v_player_keep_going_bonus_type, v_player_keep_going_bonus_flat, v_player_keep_going_bonus_percent,
+         v_player_keep_going_turns, v_player_keep_going_until_fail, v_player_keep_going_bonus_type, v_player_keep_going_bonus_flat, v_player_keep_going_bonus_percent,
          v_player_heal_dot_config_until_awake, v_player_ignore_status_block
     FROM autobattle_ability_rules WHERE attack_nom = v_effective_player_ability_nom;
   v_player_status_reversed := COALESCE(v_player_status_reversed, false);
   v_player_invuln_grant := COALESCE(v_player_invuln_grant, false);
   v_player_heal_dot_config_until_awake := COALESCE(v_player_heal_dot_config_until_awake, false);
+  v_player_keep_going_until_fail := COALESCE(v_player_keep_going_until_fail, false);
 
   SELECT turn_effect, repeat_max_iterations, heal_type, heal_amount, heal_percent, status_reversed,
          recoil_type, recoil_min, recoil_max, recoil_percent, invulnerable_next_turn,
@@ -3645,7 +3775,7 @@ BEGIN
          stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
          heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
          stat_mod_type_filter, prevention_duration_turns,
-         keep_going_turns, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
+         keep_going_turns, keep_going_until_fail, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
          heal_dot_until_awake, ignore_status_block
     INTO v_opponent_turn_effect, v_opponent_repeat_max, v_opponent_heal_type, v_opponent_heal_amount, v_opponent_heal_percent, v_opponent_status_reversed,
          v_opponent_recoil_type, v_opponent_recoil_min, v_opponent_recoil_max, v_opponent_recoil_percent, v_opponent_invuln_grant,
@@ -3655,12 +3785,13 @@ BEGIN
          v_opponent_stat_mod_duration_type, v_opponent_stat_mod_duration_turns, v_opponent_stat_mod_max_uses,
          v_opponent_heal_dot_config_amount, v_opponent_heal_dot_config_turns, v_opponent_heal_dot_config_type, v_opponent_heal_dot_config_percent, v_opponent_cancel_heal_duration, v_opponent_percent_hp_damage_percent,
          v_opponent_stat_mod_type_filter, v_opponent_prevention_duration,
-         v_opponent_keep_going_turns, v_opponent_keep_going_bonus_type, v_opponent_keep_going_bonus_flat, v_opponent_keep_going_bonus_percent,
+         v_opponent_keep_going_turns, v_opponent_keep_going_until_fail, v_opponent_keep_going_bonus_type, v_opponent_keep_going_bonus_flat, v_opponent_keep_going_bonus_percent,
          v_opponent_heal_dot_config_until_awake, v_opponent_ignore_status_block
     FROM autobattle_ability_rules WHERE attack_nom = v_opponent_ability_nom_round;
   v_opponent_status_reversed := COALESCE(v_opponent_status_reversed, false);
   v_opponent_invuln_grant := COALESCE(v_opponent_invuln_grant, false);
   v_opponent_heal_dot_config_until_awake := COALESCE(v_opponent_heal_dot_config_until_awake, false);
+  v_opponent_keep_going_until_fail := COALESCE(v_opponent_keep_going_until_fail, false);
 
   -- Empaquette l'état/la capacité de chaque camp dans les types partagés
   -- (voir autobattle_resolve_round_core, juste après autobattle_ability_burst
@@ -3769,6 +3900,7 @@ BEGIN
   v_player_ability_cfg.stat_mod_type_filter := v_player_stat_mod_type_filter;
   v_player_ability_cfg.prevention_duration := v_player_prevention_duration;
   v_player_ability_cfg.keep_going_turns := v_player_keep_going_turns;
+  v_player_ability_cfg.keep_going_until_fail := v_player_keep_going_until_fail;
   v_player_ability_cfg.keep_going_bonus_type := v_player_keep_going_bonus_type;
   v_player_ability_cfg.keep_going_bonus_flat := v_player_keep_going_bonus_flat;
   v_player_ability_cfg.keep_going_bonus_percent := v_player_keep_going_bonus_percent;
@@ -3823,6 +3955,7 @@ BEGIN
   v_opponent_ability_cfg.stat_mod_type_filter := v_opponent_stat_mod_type_filter;
   v_opponent_ability_cfg.prevention_duration := v_opponent_prevention_duration;
   v_opponent_ability_cfg.keep_going_turns := v_opponent_keep_going_turns;
+  v_opponent_ability_cfg.keep_going_until_fail := v_opponent_keep_going_until_fail;
   v_opponent_ability_cfg.keep_going_bonus_type := v_opponent_keep_going_bonus_type;
   v_opponent_ability_cfg.keep_going_bonus_flat := v_opponent_keep_going_bonus_flat;
   v_opponent_ability_cfg.keep_going_bonus_percent := v_opponent_keep_going_bonus_percent;
@@ -3909,9 +4042,16 @@ BEGIN
   -- deviner à partir du turn_effect de la capacité jouée.
   v_player_forced_ability_nom := CASE
     WHEN v_outcome IS NOT NULL THEN NULL
+    -- Le joueur n'a pas agi de tout le round : l'adversaire a ouvert ET gagné
+    -- une action supplémentaire, ce qui a mis fin au round avant son tour
+    -- (voir autobattle_resolve_round_core). La capacité qu'il vient de
+    -- soumettre n'a donc rien fait — on la lui réimpose au round suivant au
+    -- lieu de la lui faire choisir une deuxième fois pour rien.
+    WHEN NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_turns) t WHERE t ->> 'attacker' = 'player')
+      THEN v_effective_player_ability_nom
     WHEN v_player_preparing THEN v_player_preparing_ability_nom
     WHEN v_player_skip_pending THEN v_effective_player_ability_nom
-    WHEN COALESCE(v_player_keep_going_remaining, 0) > 0 THEN v_player_keep_going_ability_nom
+    WHEN v_player_keep_going_ability_nom IS NOT NULL THEN v_player_keep_going_ability_nom
     ELSE NULL END;
 
   IF v_outcome = 'win' THEN
@@ -4133,7 +4273,7 @@ BEGIN
   -- rules.keep_going_turns) verrouille la capacité comme une préparation.
   v_effective_a_ability_nom := CASE
     WHEN v_row.attacker_preparing THEN v_row.attacker_preparing_ability_nom
-    WHEN COALESCE(v_row.attacker_keep_going_remaining, 0) > 0 AND v_row.attacker_keep_going_ability_nom IS NOT NULL THEN v_row.attacker_keep_going_ability_nom
+    WHEN v_row.attacker_keep_going_ability_nom IS NOT NULL THEN v_row.attacker_keep_going_ability_nom
     ELSE p_ability_nom END;
   SELECT * INTO v_ability FROM attacks WHERE nom = v_effective_a_ability_nom;
 
@@ -4145,7 +4285,7 @@ BEGIN
   IF v_row.defender_preparing THEN
     v_d_ability_nom_round := v_row.defender_preparing_ability_nom;
     v_d_ability_cycle_index := v_row.defender_ability_cycle_index;
-  ELSIF COALESCE(v_row.defender_keep_going_remaining, 0) > 0 AND v_row.defender_keep_going_ability_nom IS NOT NULL THEN
+  ELSIF v_row.defender_keep_going_ability_nom IS NOT NULL THEN
     v_d_ability_nom_round := v_row.defender_keep_going_ability_nom;
     v_d_ability_cycle_index := v_row.defender_ability_cycle_index;
   ELSE
@@ -4242,7 +4382,7 @@ BEGIN
          stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
          heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
          stat_mod_type_filter, prevention_duration_turns,
-         keep_going_turns, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
+         keep_going_turns, keep_going_until_fail, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
          heal_dot_until_awake, ignore_status_block
     INTO v_a_ability_cfg.turn_effect, v_a_ability_cfg.repeat_max, v_a_ability_cfg.heal_type, v_a_ability_cfg.heal_amount, v_a_ability_cfg.heal_percent, v_a_ability_cfg.status_reversed,
          v_a_ability_cfg.recoil_type, v_a_ability_cfg.recoil_min, v_a_ability_cfg.recoil_max, v_a_ability_cfg.recoil_percent, v_a_ability_cfg.invuln_grant,
@@ -4252,7 +4392,7 @@ BEGIN
          v_a_ability_cfg.stat_mod_duration_type, v_a_ability_cfg.stat_mod_duration_turns, v_a_ability_cfg.stat_mod_max_uses,
          v_a_ability_cfg.heal_dot_config_amount, v_a_ability_cfg.heal_dot_config_turns, v_a_ability_cfg.heal_dot_config_type, v_a_ability_cfg.heal_dot_config_percent, v_a_ability_cfg.cancel_heal_duration, v_a_ability_cfg.percent_hp_damage_percent,
          v_a_ability_cfg.stat_mod_type_filter, v_a_ability_cfg.prevention_duration,
-         v_a_ability_cfg.keep_going_turns, v_a_ability_cfg.keep_going_bonus_type, v_a_ability_cfg.keep_going_bonus_flat, v_a_ability_cfg.keep_going_bonus_percent,
+         v_a_ability_cfg.keep_going_turns, v_a_ability_cfg.keep_going_until_fail, v_a_ability_cfg.keep_going_bonus_type, v_a_ability_cfg.keep_going_bonus_flat, v_a_ability_cfg.keep_going_bonus_percent,
          v_a_ability_cfg.heal_dot_until_awake, v_a_ability_cfg.ignore_status_block
     FROM autobattle_ability_rules WHERE attack_nom = v_effective_a_ability_nom;
   v_a_ability_cfg.status_reversed := COALESCE(v_a_ability_cfg.status_reversed, false);
@@ -4276,7 +4416,7 @@ BEGIN
          stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
          heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
          stat_mod_type_filter, prevention_duration_turns,
-         keep_going_turns, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
+         keep_going_turns, keep_going_until_fail, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
          heal_dot_until_awake, ignore_status_block
     INTO v_d_ability_cfg.turn_effect, v_d_ability_cfg.repeat_max, v_d_ability_cfg.heal_type, v_d_ability_cfg.heal_amount, v_d_ability_cfg.heal_percent, v_d_ability_cfg.status_reversed,
          v_d_ability_cfg.recoil_type, v_d_ability_cfg.recoil_min, v_d_ability_cfg.recoil_max, v_d_ability_cfg.recoil_percent, v_d_ability_cfg.invuln_grant,
@@ -4286,7 +4426,7 @@ BEGIN
          v_d_ability_cfg.stat_mod_duration_type, v_d_ability_cfg.stat_mod_duration_turns, v_d_ability_cfg.stat_mod_max_uses,
          v_d_ability_cfg.heal_dot_config_amount, v_d_ability_cfg.heal_dot_config_turns, v_d_ability_cfg.heal_dot_config_type, v_d_ability_cfg.heal_dot_config_percent, v_d_ability_cfg.cancel_heal_duration, v_d_ability_cfg.percent_hp_damage_percent,
          v_d_ability_cfg.stat_mod_type_filter, v_d_ability_cfg.prevention_duration,
-         v_d_ability_cfg.keep_going_turns, v_d_ability_cfg.keep_going_bonus_type, v_d_ability_cfg.keep_going_bonus_flat, v_d_ability_cfg.keep_going_bonus_percent,
+         v_d_ability_cfg.keep_going_turns, v_d_ability_cfg.keep_going_until_fail, v_d_ability_cfg.keep_going_bonus_type, v_d_ability_cfg.keep_going_bonus_flat, v_d_ability_cfg.keep_going_bonus_percent,
          v_d_ability_cfg.heal_dot_until_awake, v_d_ability_cfg.ignore_status_block
     FROM autobattle_ability_rules WHERE attack_nom = v_d_ability_nom_round;
   v_d_ability_cfg.status_reversed := COALESCE(v_d_ability_cfg.status_reversed, false);
@@ -4339,9 +4479,14 @@ BEGIN
     -- autobattle_resolve_manual_round, le client verrouille sa grille dessus.
     'player_forced_ability_nom', CASE
       WHEN v_round_result.outcome IS NOT NULL THEN NULL
+      -- Voir autobattle_resolve_manual_round : capacité soumise mais jamais
+      -- jouée (le défenseur a ouvert le round et gagné une action
+      -- supplémentaire), réimposée au round suivant.
+      WHEN NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_round_result.turns) t WHERE t ->> 'attacker' = 'player')
+        THEN v_effective_a_ability_nom
       WHEN (v_round_result.player_state).preparing THEN (v_round_result.player_state).preparing_ability_nom
       WHEN (v_round_result.player_state).skip_pending THEN v_effective_a_ability_nom
-      WHEN COALESCE((v_round_result.player_state).keep_going_remaining, 0) > 0 THEN (v_round_result.player_state).keep_going_ability_nom
+      WHEN (v_round_result.player_state).keep_going_ability_nom IS NOT NULL THEN (v_round_result.player_state).keep_going_ability_nom
       ELSE NULL END
   );
 
@@ -4485,7 +4630,7 @@ BEGIN
   IF v_row.attacker_preparing THEN
     v_a_ability_nom_round := v_row.attacker_preparing_ability_nom;
     v_a_ability_cycle_index := v_row.attacker_ability_cycle_index;
-  ELSIF COALESCE(v_row.attacker_keep_going_remaining, 0) > 0 AND v_row.attacker_keep_going_ability_nom IS NOT NULL THEN
+  ELSIF v_row.attacker_keep_going_ability_nom IS NOT NULL THEN
     v_a_ability_nom_round := v_row.attacker_keep_going_ability_nom;
     v_a_ability_cycle_index := v_row.attacker_ability_cycle_index;
   ELSE
@@ -4589,7 +4734,7 @@ BEGIN
          stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
          heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
          stat_mod_type_filter, prevention_duration_turns,
-         keep_going_turns, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
+         keep_going_turns, keep_going_until_fail, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
          heal_dot_until_awake, ignore_status_block
     INTO v_a_ability_cfg.turn_effect, v_a_ability_cfg.repeat_max, v_a_ability_cfg.heal_type, v_a_ability_cfg.heal_amount, v_a_ability_cfg.heal_percent, v_a_ability_cfg.status_reversed,
          v_a_ability_cfg.recoil_type, v_a_ability_cfg.recoil_min, v_a_ability_cfg.recoil_max, v_a_ability_cfg.recoil_percent, v_a_ability_cfg.invuln_grant,
@@ -4599,7 +4744,7 @@ BEGIN
          v_a_ability_cfg.stat_mod_duration_type, v_a_ability_cfg.stat_mod_duration_turns, v_a_ability_cfg.stat_mod_max_uses,
          v_a_ability_cfg.heal_dot_config_amount, v_a_ability_cfg.heal_dot_config_turns, v_a_ability_cfg.heal_dot_config_type, v_a_ability_cfg.heal_dot_config_percent, v_a_ability_cfg.cancel_heal_duration, v_a_ability_cfg.percent_hp_damage_percent,
          v_a_ability_cfg.stat_mod_type_filter, v_a_ability_cfg.prevention_duration,
-         v_a_ability_cfg.keep_going_turns, v_a_ability_cfg.keep_going_bonus_type, v_a_ability_cfg.keep_going_bonus_flat, v_a_ability_cfg.keep_going_bonus_percent,
+         v_a_ability_cfg.keep_going_turns, v_a_ability_cfg.keep_going_until_fail, v_a_ability_cfg.keep_going_bonus_type, v_a_ability_cfg.keep_going_bonus_flat, v_a_ability_cfg.keep_going_bonus_percent,
          v_a_ability_cfg.heal_dot_until_awake, v_a_ability_cfg.ignore_status_block
     FROM autobattle_ability_rules WHERE attack_nom = v_a_ability_nom_round;
   v_a_ability_cfg.status_reversed := COALESCE(v_a_ability_cfg.status_reversed, false);
@@ -4623,7 +4768,7 @@ BEGIN
          stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
          heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
          stat_mod_type_filter, prevention_duration_turns,
-         keep_going_turns, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
+         keep_going_turns, keep_going_until_fail, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
          heal_dot_until_awake, ignore_status_block
     INTO v_d_ability_cfg.turn_effect, v_d_ability_cfg.repeat_max, v_d_ability_cfg.heal_type, v_d_ability_cfg.heal_amount, v_d_ability_cfg.heal_percent, v_d_ability_cfg.status_reversed,
          v_d_ability_cfg.recoil_type, v_d_ability_cfg.recoil_min, v_d_ability_cfg.recoil_max, v_d_ability_cfg.recoil_percent, v_d_ability_cfg.invuln_grant,
@@ -4633,7 +4778,7 @@ BEGIN
          v_d_ability_cfg.stat_mod_duration_type, v_d_ability_cfg.stat_mod_duration_turns, v_d_ability_cfg.stat_mod_max_uses,
          v_d_ability_cfg.heal_dot_config_amount, v_d_ability_cfg.heal_dot_config_turns, v_d_ability_cfg.heal_dot_config_type, v_d_ability_cfg.heal_dot_config_percent, v_d_ability_cfg.cancel_heal_duration, v_d_ability_cfg.percent_hp_damage_percent,
          v_d_ability_cfg.stat_mod_type_filter, v_d_ability_cfg.prevention_duration,
-         v_d_ability_cfg.keep_going_turns, v_d_ability_cfg.keep_going_bonus_type, v_d_ability_cfg.keep_going_bonus_flat, v_d_ability_cfg.keep_going_bonus_percent,
+         v_d_ability_cfg.keep_going_turns, v_d_ability_cfg.keep_going_until_fail, v_d_ability_cfg.keep_going_bonus_type, v_d_ability_cfg.keep_going_bonus_flat, v_d_ability_cfg.keep_going_bonus_percent,
          v_d_ability_cfg.heal_dot_until_awake, v_d_ability_cfg.ignore_status_block
     FROM autobattle_ability_rules WHERE attack_nom = v_row.dummy_ability_nom;
   v_d_ability_cfg.status_reversed := COALESCE(v_d_ability_cfg.status_reversed, false);

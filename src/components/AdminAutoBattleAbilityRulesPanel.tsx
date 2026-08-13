@@ -63,6 +63,7 @@ const BONUS_DAMAGE_CONDITION_LABEL: Record<AutoBattleBonusDamageCondition, strin
   first_use: "C'est la toute première capacité utilisée par ce camp",
   dice_equals: 'Le dé de dégâts de cette capacité tombe sur une valeur précise',
   has_status: "L'adversaire est actuellement affecté par un statut",
+  self_has_status: "L'utilisateur de la capacité est lui-même affecté par un statut",
 }
 
 const STAT_MOD_TARGET_LABEL: Record<AutoBattleStatModTarget, string> = {
@@ -202,8 +203,10 @@ function AbilityRuleRow({
   const handleBonusConditionChange = (value: string) => {
     if (value === 'dice_equals') {
       onUpdate(rule.attack_nom, { bonus_damage_condition: 'dice_equals', bonus_damage_condition_dice_value: rule.bonus_damage_condition_dice_value ?? 6, bonus_damage_status_filter: null })
-    } else if (value === 'has_status') {
-      onUpdate(rule.attack_nom, { bonus_damage_condition: 'has_status', bonus_damage_condition_dice_value: null })
+    } else if (value === 'has_status' || value === 'self_has_status') {
+      // Les deux conditions de statut partagent bonus_damage_status_filter :
+      // passer de l'une à l'autre garde le statut déjà choisi.
+      onUpdate(rule.attack_nom, { bonus_damage_condition: value, bonus_damage_condition_dice_value: null })
     } else {
       onUpdate(rule.attack_nom, { bonus_damage_condition: value as AutoBattleBonusDamageCondition, bonus_damage_condition_dice_value: null, bonus_damage_status_filter: null })
     }
@@ -302,16 +305,26 @@ function AbilityRuleRow({
     }
   }
 
+  // Les deux durées sont exclusives côté SQL (voir la contrainte
+  // autobattle_ability_rules_keep_going_fields) : passer à "jusqu'au premier
+  // raté" doit donc vider keep_going_turns, et inversement.
+  const handleKeepGoingDurationChange = (value: string) => {
+    onUpdate(rule.attack_nom, value === 'until_fail'
+      ? { keep_going_until_fail: true, keep_going_turns: null }
+      : { keep_going_until_fail: false, keep_going_turns: rule.keep_going_turns ?? 2 })
+  }
+
   const handleKeepGoingToggle = (enabled: boolean) => {
     if (enabled) {
       onUpdate(rule.attack_nom, {
         keep_going_turns: rule.keep_going_turns ?? 2,
+        keep_going_until_fail: false,
         keep_going_bonus_type: rule.keep_going_bonus_type ?? 'flat',
         keep_going_bonus_flat: (rule.keep_going_bonus_type ?? 'flat') === 'flat' ? (rule.keep_going_bonus_flat ?? 5) : null,
         keep_going_bonus_percent: rule.keep_going_bonus_type === 'percent_damage' ? (rule.keep_going_bonus_percent ?? 20) : null,
       })
     } else {
-      onUpdate(rule.attack_nom, { keep_going_turns: null, keep_going_bonus_type: null, keep_going_bonus_flat: null, keep_going_bonus_percent: null })
+      onUpdate(rule.attack_nom, { keep_going_turns: null, keep_going_until_fail: false, keep_going_bonus_type: null, keep_going_bonus_flat: null, keep_going_bonus_percent: null })
     }
   }
 
@@ -333,6 +346,9 @@ function AbilityRuleRow({
   // carte de réglages dès qu'on cochait la case, en donnant l'impression que
   // la configuration avait été effacée).
   const isHealDotActive = rule.heal_dot_duration_turns != null || rule.heal_dot_until_awake
+  // Même raisonnement pour la chaîne "Continue sur sa lancée" : en mode
+  // "jusqu'au premier raté", keep_going_turns est nul par construction.
+  const isKeepGoingActive = rule.keep_going_turns != null || rule.keep_going_until_fail
   const healDotType = rule.heal_dot_type ?? 'flat'
 
   // Effets inactifs proposés dans le menu "+ Ajouter un effet spécial" en bas
@@ -346,7 +362,7 @@ function AbilityRuleRow({
   if (rule.heal_type == null) addableEffects.push({ value: 'heal', label: 'Soin instantané', group: 'Soins' })
   if (!isHealDotActive) addableEffects.push({ value: 'healdot', label: 'Soin passif (heal over time)', group: 'Soins' })
   if (rule.cancel_heal_duration_turns == null) addableEffects.push({ value: 'cancelheal', label: 'Anti-Soin', group: 'Soins' })
-  if (rule.keep_going_turns == null) addableEffects.push({ value: 'keepgoing', label: 'Continue sur sa lancée (rejeu automatique)', group: 'Rythme des tours' })
+  if (!isKeepGoingActive) addableEffects.push({ value: 'keepgoing', label: 'Continue sur sa lancée (rejeu automatique)', group: 'Rythme des tours' })
   if (rule.ignore_status_block == null) addableEffects.push({ value: 'ignorestatus', label: 'Utilisable malgré un statut bloquant', group: 'Rythme des tours' })
   if (rule.stat_mod_target == null) addableEffects.push({ value: 'statmod', label: 'Modificateur de stat', group: 'Statistiques' })
   if (!rule.invulnerable_next_turn) addableEffects.push({ value: 'invuln', label: 'Invulnérabilité au prochain tour adverse', group: 'Défense' })
@@ -450,19 +466,33 @@ function AbilityRuleRow({
             )}
           </EffectSection>
         )}
-        {rule.keep_going_turns != null && (
+        {isKeepGoingActive && (
           <EffectSection label="Continue sur sa lancée (rejeu automatique, bonus cumulatif)" onRemove={() => handleKeepGoingToggle(false)}>
-            <div className="flex items-center gap-2">
-              <span className="text-ink-muted-2 text-xs">Se rejoue pendant</span>
-              <NumberInput
-                min={1}
-                fallback={rule.keep_going_turns ?? 2}
-                value={rule.keep_going_turns ?? 2}
-                onCommit={(v) => onUpdate(rule.attack_nom, { keep_going_turns: Math.max(1, v) })}
-                className={NUM_CLASS_SM}
-              />
-              <span className="text-ink-muted-2 text-xs">tours de plus (capacité imposée)</span>
-            </div>
+            <select
+              value={rule.keep_going_until_fail ? 'until_fail' : 'turns'}
+              onChange={(e) => handleKeepGoingDurationChange(e.target.value)}
+              className={SELECT_CLASS}
+            >
+              <option value="turns">Pendant un nombre de tours</option>
+              <option value="until_fail">Jusqu'au premier raté</option>
+            </select>
+            {rule.keep_going_until_fail ? (
+              <span className="text-ink-muted-2 text-xs mt-1">
+                Se rejoue à chaque tour (une seule fois par tour, capacité imposée) tant qu'elle touche — la main revient au premier raté.
+              </span>
+            ) : (
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-ink-muted-2 text-xs">Se rejoue pendant</span>
+                <NumberInput
+                  min={1}
+                  fallback={rule.keep_going_turns ?? 2}
+                  value={rule.keep_going_turns ?? 2}
+                  onCommit={(v) => onUpdate(rule.attack_nom, { keep_going_turns: Math.max(1, v) })}
+                  className={NUM_CLASS_SM}
+                />
+                <span className="text-ink-muted-2 text-xs">tours de plus (capacité imposée)</span>
+              </div>
+            )}
             <select value={rule.keep_going_bonus_type ?? 'flat'} onChange={(e) => handleKeepGoingBonusTypeChange(e.target.value)} className={`${SELECT_CLASS} mt-1`}>
               {(Object.keys(KEEP_GOING_BONUS_TYPE_LABEL) as AutoBattleKeepGoingBonusType[]).map((t) => (
                 <option key={t} value={t}>{KEEP_GOING_BONUS_TYPE_LABEL[t]}</option>
@@ -493,7 +523,7 @@ function AbilityRuleRow({
               </div>
             )}
             <span className="text-ink-muted-2 text-[11px] mt-1">
-              La 1ère utilisation n'a aucun bonus, la 2e en a un, la 3e le double, etc. La chaîne s'interrompt au premier raté.
+              La 1ère utilisation n'a aucun bonus, la 2e en a un, la 3e le double, etc. La chaîne s'interrompt toujours au premier raté, ou si un statut bloquant (paralysie, gel, sommeil) fait passer le tour.
             </span>
           </EffectSection>
         )}
@@ -606,7 +636,7 @@ function AbilityRuleRow({
                   />
                 </div>
               )}
-              {rule.bonus_damage_condition === 'has_status' && (
+              {(rule.bonus_damage_condition === 'has_status' || rule.bonus_damage_condition === 'self_has_status') && (
                 <div className="flex items-center gap-2 mt-1">
                   <span className="text-ink-muted-2 text-xs">Statut</span>
                   <select

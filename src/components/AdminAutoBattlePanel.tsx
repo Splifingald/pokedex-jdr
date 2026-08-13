@@ -1,17 +1,15 @@
 import { AdminAutoBattleEconomyPanel } from './AdminAutoBattleEconomyPanel'
-import { AdminAutoBattleBannedAttacksPanel } from './AdminAutoBattleBannedAttacksPanel'
-import { AdminAutoBattleAbilityRulesPanel } from './AdminAutoBattleAbilityRulesPanel'
 import { AdminAutoBattleVariantsPanel } from './AdminAutoBattleVariantsPanel'
 
+// Section admin "Combat JcE" : uniquement les réglages généraux et les
+// parcours (variantes). Les bans de capacités et leurs effets spéciaux sont
+// partagés avec le Combat JcJ et vivent donc dans leur propre section
+// (AdminCombatAbilitiesPanel).
 export function AdminAutoBattlePanel() {
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-        <AdminAutoBattleEconomyPanel />
-        <AdminAutoBattleBannedAttacksPanel />
-      </div>
+      <AdminAutoBattleEconomyPanel />
       <AdminAutoBattleVariantsPanel />
-      <AdminAutoBattleAbilityRulesPanel />
     </div>
   )
 }

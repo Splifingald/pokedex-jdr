@@ -22,6 +22,7 @@ export function getAttaques(pokemon: Pokemon | undefined): string[] {
   return [
     pokemon.attaque_1, pokemon.attaque_2, pokemon.attaque_3, pokemon.attaque_4, pokemon.attaque_5,
     pokemon.attaque_6, pokemon.attaque_7, pokemon.attaque_8, pokemon.attaque_9, pokemon.attaque_10,
+    pokemon.attaque_11, pokemon.attaque_12, pokemon.attaque_13, pokemon.attaque_14, pokemon.attaque_15,
   ].filter(Boolean) as string[]
 }
 

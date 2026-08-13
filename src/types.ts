@@ -35,6 +35,11 @@ export interface Pokemon {
   attaque_8: string | null
   attaque_9: string | null
   attaque_10: string | null
+  attaque_11: string | null
+  attaque_12: string | null
+  attaque_13: string | null
+  attaque_14: string | null
+  attaque_15: string | null
   xp_10: string | null
   xp_20: string | null
   xp_30: string | null
@@ -81,6 +86,11 @@ export interface CsvRow {
   'Attaque 8': string
   'Attaque 9': string
   'Attaque 10': string
+  'Attaque 11': string
+  'Attaque 12': string
+  'Attaque 13': string
+  'Attaque 14': string
+  'Attaque 15': string
   '10 XP': string
   '20 XP': string
   '30 XP': string
@@ -1012,9 +1022,12 @@ export type AutoBattleBonusDamageType = 'multiply' | 'flat' | 'range'
 // took_damage_last_turn : ce camp a été touché par l'adversaire depuis son
 // propre dernier tour. first_use : 1ère fois que ce camp attaque dans le
 // combat. dice_equals : le dé de dégâts de CETTE capacité est tombé sur
-// bonus_damage_condition_dice_value. has_status : ce camp est actuellement
-// affecté par un statut (quel qu'il soit).
-export type AutoBattleBonusDamageCondition = 'took_damage_last_turn' | 'first_use' | 'dice_equals' | 'has_status'
+// bonus_damage_condition_dice_value. has_status : l'ADVERSAIRE est
+// actuellement affecté par un statut. self_has_status : c'est L'UTILISATEUR
+// de la capacité qui l'est (frapper plus fort en étant soi-même empoisonné,
+// brûlé…). Ces deux dernières partagent bonus_damage_status_filter, qui
+// restreint la condition à un statut précis (NULL = n'importe lequel).
+export type AutoBattleBonusDamageCondition = 'took_damage_last_turn' | 'first_use' | 'dice_equals' | 'has_status' | 'self_has_status'
 // Modificateur de stat (dégâts de base ou précision) — 'opponent' = débuff
 // (appliqué à l'adversaire du lanceur), 'self' = buff (appliqué au lanceur
 // lui-même) : le sens (hausse/baisse) découle directement de la cible, pas
@@ -1054,7 +1067,7 @@ export interface AutoBattleAbilityRule {
   bonus_damage_max: number | null
   bonus_damage_condition: AutoBattleBonusDamageCondition | null
   bonus_damage_condition_dice_value: number | null
-  // Ne s'applique qu'à bonus_damage_condition = 'has_status' : NULL =
+  // Ne s'applique qu'aux conditions 'has_status' / 'self_has_status' : NULL =
   // "n'importe quel statut" (comportement historique), sinon la condition
   // n'est vérifiée que pour ce statut précis.
   bonus_damage_status_filter: AutoBattleStatusEffect | null
@@ -1106,9 +1119,14 @@ export interface AutoBattleAbilityRule {
   // pendant keep_going_turns tours supplémentaires de son utilisateur (choix
   // verrouillé côté client, voir AutoBattleManualRoundResult.
   // player_forced_ability_nom), avec un bonus de dégâts cumulatif à chaque
-  // réutilisation (la 1ère utilisation n'en a aucun). La chaîne s'interrompt
-  // au premier raté : la capacité cesse d'être imposée.
+  // réutilisation (la 1ère utilisation n'en a aucun). La chaîne s'interrompt au
+  // premier raté, ou au premier tour passé à cause d'un statut bloquant
+  // (paralysie/gel/sommeil) : la capacité cesse alors d'être imposée.
+  // Deux durées possibles, exclusives : keep_going_turns = N réutilisations
+  // forcées, ou keep_going_until_fail = rejeu illimité (une fois par tour)
+  // jusqu'au premier raté, sans plafond sur le bonus cumulatif.
   keep_going_turns: number | null
+  keep_going_until_fail: boolean
   keep_going_bonus_type: AutoBattleKeepGoingBonusType | null
   keep_going_bonus_flat: number | null
   keep_going_bonus_percent: number | null

@@ -1,11 +1,13 @@
-import { useState } from 'react'
-import type { AutoBattleLevel, AutoBattleLevelReward, AutoBattleRewardType, AutoBattleGameMode, Pokemon, Attack, Item } from '../types'
+import { useState, useMemo } from 'react'
+import type { AutoBattleVariant, AutoBattleLevel, AutoBattleLevelReward, AutoBattleRewardType, AutoBattleGameMode, Pokemon, PokemonEvolution, Attack, Item } from '../types'
 import { useAutoBattleVariants } from '../hooks/useAutoBattleVariants'
 import { useAutoBattleBannedAttacks } from '../hooks/useAutoBattleBannedAttacks'
 import { usePokemon } from '../hooks/usePokemon'
 import { useAttacks } from '../hooks/useAttacks'
 import { useItems } from '../hooks/useItems'
+import { usePokemonEvolutions } from '../hooks/usePokemonEvolutions'
 import { getStatusEffectDisplay } from '../lib/autoBattle'
+import { getAttaquesWithPreEvolutions } from '../lib/pokemonFacts'
 import { NumberInput } from './NumberInput'
 import { PokemonSearchInput } from './PokemonSearchInput'
 import { MoveSearchInput } from './MoveSearchInput'
@@ -32,7 +34,27 @@ const OPPONENT_ABILITY_EXTRA_KEYS = [
   'opponent_ability_nom_5', 'opponent_ability_nom_6', 'opponent_ability_nom_7',
   'opponent_ability_nom_8', 'opponent_ability_nom_9', 'opponent_ability_nom_10',
 ] as const satisfies readonly (keyof AutoBattleLevel)[]
+// Séquence complète (position 1 incluse), dans l'ordre de jeu.
+const ABILITY_KEYS = ['opponent_ability_nom', ...OPPONENT_ABILITY_EXTRA_KEYS] as const satisfies readonly (keyof AutoBattleLevel)[]
 const isItemReward = (t: AutoBattleRewardType) => t === 'item' || t === 'badge'
+
+// Récompenses cumulées d'une liste de niveaux : XP additionnée, objets (item/
+// badge — mécaniquement identiques, voir types.ts) regroupés par nom avec
+// quantités additionnées. Sert au récapitulatif de la ligne de liste comme à
+// celui du bas du panneau d'édition.
+function computeRewardTotals(levels: AutoBattleLevel[], rewardsByLevel: Map<number, AutoBattleLevelReward[]>) {
+  const totals = { xp: 0, items: new Map<string, number>() }
+  for (const level of levels) {
+    for (const r of rewardsByLevel.get(level.id) ?? []) {
+      if (r.reward_type === 'xp') {
+        totals.xp += r.xp_amount ?? 0
+      } else if (r.item_nom) {
+        totals.items.set(r.item_nom, (totals.items.get(r.item_nom) ?? 0) + (r.item_quantity ?? 0))
+      }
+    }
+  }
+  return totals
+}
 
 // "Objet" cliqué mais pas encore d'objet choisi : seul cas où l'affichage
 // diverge temporairement de reward.reward_type — passer sur "Objet" ne
@@ -156,68 +178,163 @@ function RewardEditor({
   )
 }
 
-// Une position de la séquence de capacités adverses. La 1ʳᵉ (opponent_ability_
-// nom) est toujours requise (attacks.opponent_ability_nom NOT NULL) — les 3
-// suivantes (mode Manuel uniquement, voir types.ts) sont optionnelles et
-// peuvent être retirées via "Changer" → laisser vide n'est pas possible ici,
-// on utilise onClear pour repasser le champ à null.
-function OpponentAbilitySlot({
-  label, value, attacks, onSelect, onClear, clearable,
+// Une capacité déjà configurée dans la séquence adverse : récapitulatif
+// complet (type / dégâts / dé / précision / statut) + retrait.
+function ConfiguredAbilityRow({
+  nom, position, attacks, onRemove,
 }: {
-  label: string
-  value: string | null
+  nom: string
+  /** Rang dans la séquence (mode Manuel) — masqué en mode Auto, où il n'y en a qu'une. */
+  position?: number
   attacks: Attack[]
-  onSelect: (nom: string) => void
-  onClear?: () => void
-  clearable?: boolean
+  onRemove: () => void
 }) {
-  const ability = attacks.find((a) => a.nom === value)
+  const ability = attacks.find((a) => a.nom === nom)
   return (
-    <div>
-      <p className="text-ink-muted-2 text-xs mb-1">{label}</p>
-      {value ? (
-        <div className="flex items-center gap-2 flex-wrap">
-          <TypeBadge type={ability?.type ?? '?'} small />
-          <span className="text-ink text-sm flex-1 truncate">{value}</span>
-          <span className="flex items-center gap-1 shrink-0">
-            <PixelIcon src={STAT_ICON.damage} size={14} colored className="text-ink" />
-            <span className="text-ink text-sm font-bold">{ability?.degats_base ?? '—'}</span>
+    <div className={`flex items-center gap-2 flex-wrap p-1.5 rounded ${PIXEL_BORDER_SM} bg-white`}>
+      {position != null && <span className="text-ink-muted-2 text-xs font-bold shrink-0">{position}.</span>}
+      <TypeBadge type={ability?.type ?? '?'} small />
+      <span className="text-ink text-sm flex-1 truncate">{nom}</span>
+      <span className="flex items-center gap-1 shrink-0">
+        <PixelIcon src={STAT_ICON.damage} size={14} colored className="text-ink" />
+        <span className="text-ink text-sm font-bold">{ability?.degats_base ?? '—'}</span>
+      </span>
+      {ability?.degats_de != null && (
+        <span className="flex items-center gap-1 shrink-0">
+          <PixelIcon src={DICE_GENERIC_ICON} size={14} colored className="text-ink" />
+          <span className="text-ink text-sm font-bold">{ability.degats_de}</span>
+        </span>
+      )}
+      <span className="flex items-center gap-1 shrink-0">
+        <span className="text-sm">🎯</span>
+        <span className="text-sm font-bold" style={{ color: getPrecisionColor(ability?.precision) }}>{formatPrecision(ability?.precision)}</span>
+      </span>
+      {ability?.status_effect && (() => {
+        const statusDisplay = getStatusEffectDisplay(ability.status_effect)
+        return (
+          <span
+            className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full text-white shrink-0 whitespace-nowrap"
+            style={{ backgroundColor: statusDisplay.color }}
+          >
+            <PixelIcon src={statusDisplay.iconSrc} size={14} colored />
+            {statusDisplay.label} {ability.status_chance ?? 0}%
           </span>
-          {ability?.degats_de != null && (
-            <span className="flex items-center gap-1 shrink-0">
-              <PixelIcon src={DICE_GENERIC_ICON} size={14} colored className="text-ink" />
-              <span className="text-ink text-sm font-bold">{ability.degats_de}</span>
-            </span>
+        )
+      })()}
+      <button onClick={onRemove} title="Retirer" className={`text-xs px-2 py-1 rounded shrink-0 ${BUTTON_STYLE.gray}`}>
+        <CloseIcon className="w-3 h-3" />
+      </button>
+    </div>
+  )
+}
+
+// Séquence de capacités de l'opposant, dans l'ordre où il les joue (en boucle
+// en mode Manuel — mode Auto : une seule, la nouvelle remplace l'ancienne).
+// Trois façons d'en ajouter une, de haut en bas :
+//  1. les capacités APPRENABLES par le pokémon adverse (mêmes règles que la
+//     fiche Pokémon : ses attaques + celles de ses pré-évolutions), en un clic ;
+//  2. la recherche libre, pour n'importe quelle capacité du jeu ;
+//  3. rien — la liste en dessous montre ce qui est déjà configuré.
+// Les positions sont stockées à plat (opponent_ability_nom + _2.._10, voir
+// schema.sql) mais réécrites en bloc à chaque ajout/retrait, ce qui garantit
+// qu'il n'y a jamais de trou dans la séquence.
+function OpponentAbilitiesEditor({
+  level, attacks, selectableAttacks, learnableMoves, bannedAttacks, manual, onUpdate,
+}: {
+  level: AutoBattleLevel
+  /** Toutes les capacités, pour l'affichage des lignes déjà configurées (y compris une capacité bannie configurée avant son ban). */
+  attacks: Attack[]
+  /** Capacités proposables à l'ajout (bannies exclues). */
+  selectableAttacks: Attack[]
+  learnableMoves: string[]
+  bannedAttacks: Set<string>
+  manual: boolean
+  onUpdate: (id: number, patch: Partial<Omit<AutoBattleLevel, 'id' | 'variant_id' | 'created_at'>>) => void
+}) {
+  const configured = ABILITY_KEYS.map((k) => level[k]).filter((n): n is string => !!n)
+  const atCap = manual && configured.length >= ABILITY_KEYS.length
+
+  const writeList = (next: string[]) => {
+    const patch: Record<string, string | null> = { opponent_ability_nom: next[0] ?? '' }
+    OPPONENT_ABILITY_EXTRA_KEYS.forEach((k, i) => { patch[k] = next[i + 1] ?? null })
+    onUpdate(level.id, patch as Partial<Omit<AutoBattleLevel, 'id' | 'variant_id' | 'created_at'>>)
+  }
+
+  // Mode Auto : une seule capacité, donc remplacement pur et simple. En mode
+  // Manuel, une même capacité peut occuper plusieurs positions de la séquence
+  // (l'opposant la rejoue plus souvent) — rien n'est donc retiré des listes
+  // d'ajout une fois configuré.
+  const addAbility = (nom: string) => {
+    if (!manual) { writeList([nom]); return }
+    if (atCap) return
+    writeList([...configured, nom])
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-ink-muted-2 text-xs">
+        {manual
+          ? "Séquence de capacités de l'opposant (mode Manuel) — jouées dans cet ordre, en boucle."
+          : "Capacité offensive de l'opposant"}
+      </p>
+
+      {level.opponent_pokemon_nom && (
+        <div>
+          <p className="text-ink-muted-2 text-xs mb-1">Capacités apprenables par {level.opponent_pokemon_nom}</p>
+          {learnableMoves.length === 0 ? (
+            <p className="text-ink-muted-2 text-xs italic">Aucune capacité renseignée sur cette espèce.</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {learnableMoves.map((nom) => {
+                const ability = attacks.find((a) => a.nom === nom)
+                const banned = bannedAttacks.has(nom)
+                return (
+                  <button
+                    key={nom}
+                    onClick={() => { if (!banned && !atCap) addAbility(nom) }}
+                    disabled={banned || atCap}
+                    title={banned ? 'Capacité bannie' : atCap ? 'Séquence complète (10 capacités)' : `Ajouter ${nom}`}
+                    className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-bold ${BUTTON_STYLE.gray} disabled:opacity-40 disabled:cursor-not-allowed`}
+                  >
+                    <TypeBadge type={ability?.type ?? '?'} small />
+                    <span className="text-ink">{nom}</span>
+                    {banned && <span>🛑</span>}
+                  </button>
+                )
+              })}
+            </div>
           )}
-          <span className="flex items-center gap-1 shrink-0">
-            <span className="text-sm">🎯</span>
-            <span className="text-sm font-bold" style={{ color: getPrecisionColor(ability?.precision) }}>{formatPrecision(ability?.precision)}</span>
-          </span>
-          {ability?.status_effect && (() => {
-            const statusDisplay = getStatusEffectDisplay(ability.status_effect)
-            return (
-              <span
-                className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full text-white shrink-0 whitespace-nowrap"
-                style={{ backgroundColor: statusDisplay.color }}
-              >
-                <PixelIcon src={statusDisplay.iconSrc} size={14} colored />
-                {statusDisplay.label} {ability.status_chance ?? 0}%
-              </span>
-            )
-          })()}
-          <button onClick={onClear ?? (() => onSelect(''))} className={`text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>
-            {clearable ? <CloseIcon className="w-3 h-3" /> : 'Changer'}
-          </button>
         </div>
+      )}
+
+      <MoveSearchInput
+        options={selectableAttacks}
+        disabled={atCap}
+        showDamage
+        onSelect={(a) => addAbility(a.nom)}
+      />
+
+      {configured.length === 0 ? (
+        <p className="text-hp-red text-xs font-bold">Aucune capacité configurée — le niveau est incomplet.</p>
       ) : (
-        <MoveSearchInput options={attacks} disabled={false} showDamage onSelect={(a) => onSelect(a.nom)} />
+        <div className="flex flex-col gap-1.5">
+          {configured.map((nom, i) => (
+            <ConfiguredAbilityRow
+              key={`${nom}-${i}`}
+              nom={nom}
+              position={manual ? i + 1 : undefined}
+              attacks={attacks}
+              onRemove={() => writeList(configured.filter((_, j) => j !== i))}
+            />
+          ))}
+        </div>
       )}
     </div>
   )
 }
 
 function LevelEditor({
-  level, index, total, rewards, pokemon, attacks, items, bannedAttacks, manual,
+  level, index, total, rewards, pokemon, pokemonByName, evolutionsByPokemonNom, attacks, items, bannedAttacks, manual,
   onUpdate, onMoveUp, onMoveDown, onDelete, onAddReward, onUpdateReward, onRemoveReward,
 }: {
   level: AutoBattleLevel
@@ -225,6 +342,8 @@ function LevelEditor({
   total: number
   rewards: AutoBattleLevelReward[]
   pokemon: Pokemon[]
+  pokemonByName: Map<string, Pokemon>
+  evolutionsByPokemonNom: Map<string, PokemonEvolution[]>
   attacks: Attack[]
   items: Item[]
   bannedAttacks: Set<string>
@@ -241,6 +360,9 @@ function LevelEditor({
   const opponentSpecies = pokemon.find((p) => p.nom === level.opponent_pokemon_nom)
   const damagingAttacks = attacks.filter((a) => !bannedAttacks.has(a.nom))
   const invalid = !level.opponent_pokemon_nom || !level.opponent_ability_nom
+  // Mêmes capacités que celles listées par la fiche Pokémon : celles de
+  // l'espèce + celles de ses pré-évolutions.
+  const learnableMoves = getAttaquesWithPreEvolutions(opponentSpecies, pokemonByName, evolutionsByPokemonNom)
 
   return (
     <div className={`rounded ${PIXEL_BORDER_SM} ${invalid ? 'bg-red-50' : 'bg-cream-secondary'}`}>
@@ -321,41 +443,15 @@ function LevelEditor({
             </div>
           </div>
 
-          {manual ? (
-            <div className="flex flex-col gap-2">
-              <p className="text-ink-muted-2 text-xs -mb-1">
-                Séquence de capacités de l'opposant (mode Manuel) — jouées dans cet ordre, en boucle.
-              </p>
-              <OpponentAbilitySlot
-                label="Capacité 1"
-                value={level.opponent_ability_nom || null}
-                attacks={damagingAttacks}
-                onSelect={(nom) => onUpdate(level.id, { opponent_ability_nom: nom })}
-              />
-              {OPPONENT_ABILITY_EXTRA_KEYS.map((key, i) => {
-                const prevKey = i === 0 ? null : OPPONENT_ABILITY_EXTRA_KEYS[i - 1]
-                if (prevKey && !level[prevKey]) return null
-                return (
-                  <OpponentAbilitySlot
-                    key={key}
-                    label={`Capacité ${i + 2} (optionnelle)`}
-                    value={level[key]}
-                    attacks={damagingAttacks}
-                    onSelect={(nom) => onUpdate(level.id, { [key]: nom })}
-                    onClear={() => onUpdate(level.id, { [key]: null })}
-                    clearable
-                  />
-                )
-              })}
-            </div>
-          ) : (
-            <OpponentAbilitySlot
-              label="Capacité offensive de l'opposant"
-              value={level.opponent_ability_nom || null}
-              attacks={damagingAttacks}
-              onSelect={(nom) => onUpdate(level.id, { opponent_ability_nom: nom })}
-            />
-          )}
+          <OpponentAbilitiesEditor
+            level={level}
+            attacks={attacks}
+            selectableAttacks={damagingAttacks}
+            learnableMoves={learnableMoves}
+            bannedAttacks={bannedAttacks}
+            manual={manual}
+            onUpdate={onUpdate}
+          />
 
           <div className="border-t-2 border-[#cfc7a8] pt-2">
             <p className="text-ink-muted-2 text-xs mb-2">Récompenses</p>
@@ -379,6 +475,10 @@ export function AdminAutoBattleVariantsPanel() {
   const { pokemon } = usePokemon()
   const { attacks } = useAttacks()
   const { items } = useItems()
+  // Évolutions : servent à lister les capacités apprenables d'un opposant en
+  // incluant celles de ses pré-évolutions, comme la fiche Pokémon.
+  const { byPokemonNom: evolutionsByPokemonNom } = usePokemonEvolutions()
+  const pokemonByName = useMemo(() => new Map(pokemon.map((p) => [p.nom, p])), [pokemon])
   const [selected, setSelected] = useState<number | null>(null)
   const [newVariantName, setNewVariantName] = useState('')
 
@@ -390,45 +490,26 @@ export function AdminAutoBattleVariantsPanel() {
     )
   }
 
-  const selectedVariant = variants.find((v) => v.id === selected) ?? null
-  const selectedLevels = selected ? levelsByVariant.get(selected) ?? [] : []
-  const canEnable = !!selectedVariant?.nom.trim() && !!selectedVariant.banner_url.trim() && !!selectedVariant.icon_url.trim() && selectedLevels.length > 0
-
-  // Récapitulatif fusionné de toutes les récompenses de tous les niveaux de
-  // la variante sélectionnée : XP additionnée en un seul total, objets (item/
-  // badge — mécaniquement identiques, voir types.ts) regroupés par nom avec
-  // quantités additionnées.
-  const variantRewardTotals = selectedLevels.reduce(
-    (acc, level) => {
-      for (const r of rewardsByLevel.get(level.id) ?? []) {
-        if (r.reward_type === 'xp') {
-          acc.xp += r.xp_amount ?? 0
-        } else if (r.item_nom) {
-          acc.items.set(r.item_nom, (acc.items.get(r.item_nom) ?? 0) + (r.item_quantity ?? 0))
-        }
-      }
-      return acc
-    },
-    { xp: 0, items: new Map<string, number>() }
-  )
-
   const handleDuplicate = async (id: number) => {
     const copy = await duplicateVariant(id)
     if (copy) setSelected(copy.id)
   }
 
-  const handleResetProgress = async () => {
-    if (!selectedVariant) return
+  const handleResetProgress = async (variant: AutoBattleVariant) => {
     const ok = window.confirm(
-      `Réinitialiser la progression de "${selectedVariant.nom}" pour TOUS les joueurs ? Ils repartiront du niveau 1 et la variante ne sera plus marquée comme terminée. Cette action est irréversible.`
+      `Réinitialiser la progression de "${variant.nom}" pour TOUS les joueurs ? Ils repartiront du niveau 1 et la variante ne sera plus marquée comme terminée. Cette action est irréversible.`
     )
     if (!ok) return
-    await resetVariantProgress(selectedVariant.id)
+    await resetVariantProgress(variant.id)
   }
 
+  // Liste TOUJOURS pleine largeur : l'édition d'une variante se déplie
+  // directement sous sa ligne (même principe que les niveaux à l'intérieur
+  // d'une variante), au lieu de rétrécir la liste pour afficher un second
+  // panneau à côté.
   return (
-    <div className="flex flex-col md:flex-row gap-4 w-full items-start">
-      <div className={`bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] w-full p-6 ${selected ? 'md:w-80 shrink-0' : ''}`}>
+    <div className="w-full">
+      <div className="bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] w-full p-6">
         <div className="flex items-center gap-2 mb-5">
           <span className="text-2xl">⚔️</span>
           <h3 className="text-[#a3841a] text-lg font-bold">Variantes</h3>
@@ -454,144 +535,193 @@ export function AdminAutoBattleVariantsPanel() {
           <p className="text-ink-muted-2 text-sm">Aucune variante pour l'instant.</p>
         ) : (
           <div className="flex flex-col gap-2">
-            {variants.map((v, i) => (
-              <div key={v.id} className="flex items-center gap-2">
-                <button onClick={() => swapVariantOrder(v, variants[i - 1])} disabled={i === 0} className={`text-xs px-1.5 py-1 rounded ${BUTTON_STYLE.gray} disabled:opacity-30`}>▲</button>
-                <button onClick={() => swapVariantOrder(v, variants[i + 1])} disabled={i === variants.length - 1} className={`text-xs px-1.5 py-1 rounded ${BUTTON_STYLE.gray} disabled:opacity-30`}>▼</button>
-                <button
-                  onClick={() => setSelected(selected === v.id ? null : v.id)}
-                  className={`flex-1 text-left px-3 py-2 rounded text-sm font-bold ${PIXEL_BORDER_SM} ${selected === v.id ? 'bg-yellow-100 ring-2 ring-[#a3841a]' : 'bg-cream-secondary'}`}
-                >
-                  {v.nom || '(sans nom)'} {v.enabled && <span className="text-[#2f6b3f]">●</span>}
-                </button>
-              </div>
-            ))}
+            {/* La variante de la ligne courante s'appelle `selectedVariant` :
+                le panneau d'édition dépliable en dessous est le même code
+                qu'avant son déplacement dans la liste. */}
+            {variants.map((selectedVariant, i) => {
+              const selectedLevels = levelsByVariant.get(selectedVariant.id) ?? []
+              const canEnable = !!selectedVariant.nom.trim() && !!selectedVariant.banner_url.trim()
+                && !!selectedVariant.icon_url.trim() && selectedLevels.length > 0
+              const variantRewardTotals = computeRewardTotals(selectedLevels, rewardsByLevel)
+              const isOpen = selected === selectedVariant.id
+              return (
+                <div key={selectedVariant.id} className={`rounded ${PIXEL_BORDER_SM} ${isOpen ? 'bg-yellow-50 ring-2 ring-[#a3841a]' : 'bg-cream-secondary'}`}>
+                  <div className="flex items-center gap-2 p-2">
+                    <div className="flex flex-col shrink-0">
+                      <button onClick={() => swapVariantOrder(selectedVariant, variants[i - 1])} disabled={i === 0} className={`text-[10px] leading-none px-1.5 py-0.5 rounded ${BUTTON_STYLE.gray} disabled:opacity-30`}>▲</button>
+                      <button onClick={() => swapVariantOrder(selectedVariant, variants[i + 1])} disabled={i === variants.length - 1} className={`text-[10px] leading-none px-1.5 py-0.5 rounded mt-0.5 ${BUTTON_STYLE.gray} disabled:opacity-30`}>▼</button>
+                    </div>
+
+                    <button
+                      onClick={() => setSelected(isOpen ? null : selectedVariant.id)}
+                      className="flex-1 min-w-0 flex items-center gap-2 text-left"
+                    >
+                      <span className="w-7 h-7 shrink-0 flex items-center justify-center">
+                        {selectedVariant.icon_url ? (
+                          <img src={selectedVariant.icon_url} alt="" className="w-full h-full object-contain" />
+                        ) : (
+                          <span className="text-lg">⚔️</span>
+                        )}
+                      </span>
+                      <span className="text-ink text-sm font-bold truncate">{selectedVariant.nom || '(sans nom)'}</span>
+                      <span className="text-ink-muted-2 text-xs shrink-0">{selectedLevels.length} niv.</span>
+                    </button>
+
+                    {/* Récapitulatif des récompenses du parcours : icônes seules
+                        (pas de nom ni de quantité), l'XP restant chiffrée. */}
+                    <div className="flex flex-wrap items-center justify-end gap-1 shrink-0 max-w-[12rem]">
+                      {variantRewardTotals.xp > 0 && (
+                        <span className="text-xp-blue text-xs font-bold">{variantRewardTotals.xp} XP</span>
+                      )}
+                      {[...variantRewardTotals.items.keys()].map((itemNom) => {
+                        const image = items.find((it) => it.nom === itemNom)?.image_url
+                        return (
+                          <span key={itemNom} title={itemNom} className="w-5 h-5 shrink-0 flex items-center justify-center">
+                            {image ? <img src={image} alt="" className="w-full h-full object-contain" /> : <span className="text-xs">🎒</span>}
+                          </span>
+                        )
+                      })}
+                    </div>
+
+                    {/* Activation directement dans la liste : plus de case à
+                        cocher dans le panneau d'édition, ni de pastille verte. */}
+                    <button
+                      role="switch"
+                      aria-checked={selectedVariant.enabled}
+                      disabled={!canEnable && !selectedVariant.enabled}
+                      onClick={() => updateVariant(selectedVariant.id, { enabled: !selectedVariant.enabled })}
+                      title={canEnable || selectedVariant.enabled ? (selectedVariant.enabled ? 'Activée' : 'Désactivée') : 'Nom, bannière, icône et au moins un niveau requis'}
+                      className={`w-10 h-6 shrink-0 rounded-full ${PIXEL_BORDER_SM} flex items-center p-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${selectedVariant.enabled ? 'bg-[#5fd67a] justify-end' : 'bg-cream-button justify-start'}`}
+                    >
+                      <span className="w-4 h-4 rounded-full bg-white border-2 border-ink" />
+                    </button>
+                  </div>
+
+                  {isOpen && (
+                    <div className="p-3 border-t-2 border-[#cfc7a8]">
+                      <div className="flex items-center justify-end gap-2 mb-3">
+                        <button onClick={() => handleDuplicate(selectedVariant.id)} title="Dupliquer" className={`text-xs px-2 py-1.5 rounded ${BUTTON_STYLE.gray}`}>
+                          📋
+                        </button>
+                        <button onClick={() => deleteVariant(selectedVariant.id)} title="Supprimer" className={`text-xs px-2 py-1.5 rounded ${BUTTON_STYLE.gray}`}>
+                          <CloseIcon className="w-3 h-3" />
+                        </button>
+                        <button onClick={() => handleResetProgress(selectedVariant)} className={`text-xs px-3 py-1.5 rounded font-bold ${BUTTON_STYLE.gray}`}>
+                          ↺ Réinitialiser la progression (tous joueurs)
+                        </button>
+                      </div>
+                      <div className="flex flex-col gap-3 mb-4">
+                        <div>
+                          <label className="text-ink-muted-2 text-sm block mb-1">Nom</label>
+                          <input
+                            type="text"
+                            value={selectedVariant.nom}
+                            onChange={(e) => updateVariant(selectedVariant.id, { nom: e.target.value })}
+                            className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-ink-muted-2 text-sm block mb-1">Bannière (URL)</label>
+                          <input
+                            type="text"
+                            value={selectedVariant.banner_url}
+                            onChange={(e) => updateVariant(selectedVariant.id, { banner_url: e.target.value })}
+                            className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-ink-muted-2 text-sm block mb-1">Icône (URL)</label>
+                          <input
+                            type="text"
+                            value={selectedVariant.icon_url}
+                            onChange={(e) => updateVariant(selectedVariant.id, { icon_url: e.target.value })}
+                            className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+                          />
+                        </div>
+                        {!canEnable && (
+                          <p className="text-ink-muted-2 text-xs italic">
+                            Activation impossible tant qu'il manque le nom, la bannière, l'icône ou au moins un niveau.
+                          </p>
+                        )}
+                        <div>
+                          <label className="text-ink-muted-2 text-sm block mb-1">Mode de jeu</label>
+                          <select
+                            value={selectedVariant.game_mode}
+                            onChange={(e) => updateVariant(selectedVariant.id, { game_mode: e.target.value as AutoBattleGameMode })}
+                            className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
+                          >
+                            <option value="auto">Auto (une capacité choisie avant le combat)</option>
+                            <option value="manual">Manuel (une capacité choisie à chaque tour)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="border-t-2 border-[#cfc7a8] pt-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-ink-muted-2 text-sm font-bold">Niveaux ({selectedLevels.length})</p>
+                          <button onClick={() => addLevel(selectedVariant.id)} className={`text-xs px-3 py-1.5 rounded font-bold ${BUTTON_STYLE.gray}`}>+ Ajouter un niveau</button>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          {selectedLevels.map((level, i) => (
+                            <LevelEditor
+                              key={level.id}
+                              level={level}
+                              index={i}
+                              total={selectedLevels.length}
+                              rewards={rewardsByLevel.get(level.id) ?? []}
+                              pokemon={pokemon}
+                              pokemonByName={pokemonByName}
+                              evolutionsByPokemonNom={evolutionsByPokemonNom}
+                              attacks={attacks}
+                              items={items}
+                              bannedAttacks={bannedNames}
+                              manual={selectedVariant.game_mode === 'manual'}
+                              onUpdate={updateLevel}
+                              onMoveUp={() => i > 0 && swapLevelOrder(level, selectedLevels[i - 1])}
+                              onMoveDown={() => i < selectedLevels.length - 1 && swapLevelOrder(level, selectedLevels[i + 1])}
+                              onDelete={() => deleteLevel(level.id)}
+                              onAddReward={(levelId) => addReward(levelId, { reward_type: 'xp', xp_amount: 1, item_nom: null, item_quantity: null, sort_order: (rewardsByLevel.get(levelId)?.length ?? 0) })}
+                              onUpdateReward={updateReward}
+                              onRemoveReward={removeReward}
+                            />
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="border-t-2 border-[#cfc7a8] pt-3 mt-3">
+                        <p className="text-ink-muted-2 text-sm font-bold mb-2">Récompenses totales de la variante</p>
+                        {variantRewardTotals.xp === 0 && variantRewardTotals.items.size === 0 ? (
+                          <p className="text-ink-muted-2 text-xs italic">Aucune récompense configurée sur cette variante.</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {variantRewardTotals.xp > 0 && (
+                              <span className="text-xs font-bold px-2 py-1 rounded bg-cream-secondary border-2 border-ink text-blue-600">
+                                {variantRewardTotals.xp} XP
+                              </span>
+                            )}
+                            {[...variantRewardTotals.items.entries()].map(([itemNom, qty]) => (
+                              <span key={itemNom} className="flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded bg-cream-secondary border-2 border-ink text-ink">
+                                <span className="w-4 h-4 shrink-0 flex items-center justify-center">
+                                  {items.find((it) => it.nom === itemNom)?.image_url ? (
+                                    <img src={items.find((it) => it.nom === itemNom)?.image_url ?? ''} alt="" className="w-full h-full object-contain" />
+                                  ) : (
+                                    <span className="text-xs">🎒</span>
+                                  )}
+                                </span>
+                                {itemNom} ×{qty}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
-
-      {selectedVariant && (
-        <div className="flex-1 min-w-0 bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] w-full p-6">
-          <div className="flex items-center justify-end gap-2 mb-3">
-            <button onClick={() => handleDuplicate(selectedVariant.id)} title="Dupliquer" className={`text-xs px-2 py-1.5 rounded ${BUTTON_STYLE.gray}`}>
-              📋
-            </button>
-            <button onClick={() => deleteVariant(selectedVariant.id)} title="Supprimer" className={`text-xs px-2 py-1.5 rounded ${BUTTON_STYLE.gray}`}>
-              <CloseIcon className="w-3 h-3" />
-            </button>
-            <button onClick={handleResetProgress} className={`text-xs px-3 py-1.5 rounded font-bold ${BUTTON_STYLE.gray}`}>
-              ↺ Réinitialiser la progression (tous joueurs)
-            </button>
-          </div>
-          <div className="flex flex-col gap-3 mb-4">
-            <div>
-              <label className="text-ink-muted-2 text-sm block mb-1">Nom</label>
-              <input
-                type="text"
-                value={selectedVariant.nom}
-                onChange={(e) => updateVariant(selectedVariant.id, { nom: e.target.value })}
-                className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-ink-muted-2 text-sm block mb-1">Bannière (URL)</label>
-              <input
-                type="text"
-                value={selectedVariant.banner_url}
-                onChange={(e) => updateVariant(selectedVariant.id, { banner_url: e.target.value })}
-                className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-ink-muted-2 text-sm block mb-1">Icône (URL)</label>
-              <input
-                type="text"
-                value={selectedVariant.icon_url}
-                onChange={(e) => updateVariant(selectedVariant.id, { icon_url: e.target.value })}
-                className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
-              />
-            </div>
-            <label className="flex items-center gap-2 text-sm text-ink-muted">
-              <input
-                type="checkbox"
-                checked={selectedVariant.enabled}
-                disabled={!canEnable}
-                onChange={(e) => updateVariant(selectedVariant.id, { enabled: e.target.checked })}
-                className="w-4 h-4"
-              />
-              <span>Activée {!canEnable && '(nom, bannière, icône et au moins un niveau requis)'}</span>
-            </label>
-            <div>
-              <label className="text-ink-muted-2 text-sm block mb-1">Mode de jeu</label>
-              <select
-                value={selectedVariant.game_mode}
-                onChange={(e) => updateVariant(selectedVariant.id, { game_mode: e.target.value as AutoBattleGameMode })}
-                className="w-full bg-white border-2 border-ink rounded px-3 py-2 text-ink text-sm outline-none"
-              >
-                <option value="auto">Auto (une capacité choisie avant le combat)</option>
-                <option value="manual">Manuel (une capacité choisie à chaque tour)</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="border-t-2 border-[#cfc7a8] pt-3">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-ink-muted-2 text-sm font-bold">Niveaux ({selectedLevels.length})</p>
-              <button onClick={() => addLevel(selectedVariant.id)} className={`text-xs px-3 py-1.5 rounded font-bold ${BUTTON_STYLE.gray}`}>+ Ajouter un niveau</button>
-            </div>
-            <div className="flex flex-col gap-2">
-              {selectedLevels.map((level, i) => (
-                <LevelEditor
-                  key={level.id}
-                  level={level}
-                  index={i}
-                  total={selectedLevels.length}
-                  rewards={rewardsByLevel.get(level.id) ?? []}
-                  pokemon={pokemon}
-                  attacks={attacks}
-                  items={items}
-                  bannedAttacks={bannedNames}
-                  manual={selectedVariant.game_mode === 'manual'}
-                  onUpdate={updateLevel}
-                  onMoveUp={() => i > 0 && swapLevelOrder(level, selectedLevels[i - 1])}
-                  onMoveDown={() => i < selectedLevels.length - 1 && swapLevelOrder(level, selectedLevels[i + 1])}
-                  onDelete={() => deleteLevel(level.id)}
-                  onAddReward={(levelId) => addReward(levelId, { reward_type: 'xp', xp_amount: 1, item_nom: null, item_quantity: null, sort_order: (rewardsByLevel.get(levelId)?.length ?? 0) })}
-                  onUpdateReward={updateReward}
-                  onRemoveReward={removeReward}
-                />
-              ))}
-            </div>
-          </div>
-
-          <div className="border-t-2 border-[#cfc7a8] pt-3 mt-3">
-            <p className="text-ink-muted-2 text-sm font-bold mb-2">Récompenses totales de la variante</p>
-            {variantRewardTotals.xp === 0 && variantRewardTotals.items.size === 0 ? (
-              <p className="text-ink-muted-2 text-xs italic">Aucune récompense configurée sur cette variante.</p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {variantRewardTotals.xp > 0 && (
-                  <span className="text-xs font-bold px-2 py-1 rounded bg-cream-secondary border-2 border-ink text-blue-600">
-                    {variantRewardTotals.xp} XP
-                  </span>
-                )}
-                {[...variantRewardTotals.items.entries()].map(([itemNom, qty]) => (
-                  <span key={itemNom} className="flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded bg-cream-secondary border-2 border-ink text-ink">
-                    <span className="w-4 h-4 shrink-0 flex items-center justify-center">
-                      {items.find((it) => it.nom === itemNom)?.image_url ? (
-                        <img src={items.find((it) => it.nom === itemNom)?.image_url ?? ''} alt="" className="w-full h-full object-contain" />
-                      ) : (
-                        <span className="text-xs">🎒</span>
-                      )}
-                    </span>
-                    {itemNom} ×{qty}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

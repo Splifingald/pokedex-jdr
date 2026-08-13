@@ -70,7 +70,7 @@ export function isDamagingAbility(attack: Attack): boolean {
 // celles-ci sont sélectionnables en Combat Auto (voir
 // AutoBattleAbilityPicker). Plus de restriction aux capacités offensives : le
 // système de ban gère désormais toutes les limitations manuellement. Note :
-// moves n'est PAS restreint au pool attaque_1..10 de l'espèce (voir
+// moves n'est PAS restreint au pool attaque_1..15 de l'espèce (voir
 // PokemonDetailSheet.tsx où addableMoves propose tout le catalogue
 // d'attaques, pas seulement celles de l'espèce) — il ne faut donc jamais
 // recroiser avec ce pool ici.
@@ -163,8 +163,10 @@ export function describeAbilityRule(rule: AutoBattleAbilityRule | undefined, abi
   } else if (rule.turn_effect === 'first_and_replay') {
     lines.push('Ne consomme pas le tour : rejoue aussitôt et passe premier')
   }
-  if (rule.keep_going_turns) {
-    lines.push(`Se rejoue automatiquement pendant ${rule.keep_going_turns} tour${rule.keep_going_turns > 1 ? 's' : ''} de plus (s'arrête au premier raté)`)
+  if (rule.keep_going_turns || rule.keep_going_until_fail) {
+    lines.push(rule.keep_going_until_fail
+      ? "Se rejoue automatiquement à chaque tour jusqu'au premier raté"
+      : `Se rejoue automatiquement pendant ${rule.keep_going_turns} tour${(rule.keep_going_turns ?? 0) > 1 ? 's' : ''} de plus (s'arrête au premier raté)`)
     if (rule.keep_going_bonus_type === 'flat' && rule.keep_going_bonus_flat) {
       lines.push(`+${rule.keep_going_bonus_flat} dégâts cumulés à chaque réutilisation`)
     } else if (rule.keep_going_bonus_type === 'percent_damage' && rule.keep_going_bonus_percent) {
@@ -220,6 +222,8 @@ export function describeAbilityRule(rule: AutoBattleAbilityRule | undefined, abi
       : rule.bonus_damage_condition === 'dice_equals' ? `si le dé tombe sur ${rule.bonus_damage_condition_dice_value}`
       : rule.bonus_damage_condition === 'has_status'
         ? (rule.bonus_damage_status_filter ? `si l'adversaire est ${STATUS_EFFECT_LABEL[rule.bonus_damage_status_filter].toLowerCase()}` : "si l'adversaire est affecté par un statut (n'importe lequel)")
+      : rule.bonus_damage_condition === 'self_has_status'
+        ? (rule.bonus_damage_status_filter ? `s'il est lui-même ${STATUS_EFFECT_LABEL[rule.bonus_damage_status_filter].toLowerCase()}` : "s'il est lui-même affecté par un statut (n'importe lequel)")
       : ''
     const bonusLabel = rule.bonus_damage_type === 'multiply' ? `dégâts ×${rule.bonus_damage_multiplier}`
       : rule.bonus_damage_type === 'flat' ? `+${rule.bonus_damage_flat} dégâts`
