@@ -108,6 +108,13 @@ function outlineWidth(size: number): number {
   return Math.max(2, Math.min(5, Math.round(size * 0.18)))
 }
 
+// Les styles inline ci-dessous portent des variables CSS (--len, --tx, --ty,
+// --arc) lues par les keyframes de index.css. CSSProperties ne connaît pas ces
+// propriétés custom : on l'étend explicitement plutôt que de caster en
+// CSSProperties (cast que TS refuse dès que le littéral vient d'un spread
+// conditionnel, cf. le rayon plus bas).
+type VfxStyle = CSSProperties & Record<`--${string}`, string>
+
 function ballStyle(size: number, palette: ReturnType<typeof vfxPalette>): CSSProperties {
   return {
     position: 'absolute',
@@ -146,7 +153,7 @@ export function AutoBattleAttackVfx({ kind, color, sign, reachPx, travelMs, dama
           boxShadow: `0 0 ${Math.round(thickness * 0.8)}px ${Math.round(thickness * 0.25)}px ${palette.glow}`,
           '--len': `${length}px`,
           animation: `battle-beam ${travelMs}ms ease-out forwards`,
-        } as CSSProperties}
+        } as VfxStyle}
       />
     )
   }
@@ -164,7 +171,7 @@ export function AutoBattleAttackVfx({ kind, color, sign, reachPx, travelMs, dama
             ...ballStyle(PROJECTILE_SIZE_PX, palette),
             '--tx': `${travelPx}px`,
             animation: `battle-projectile ${travelMs}ms linear forwards`,
-          } as CSSProperties}
+          } as VfxStyle}
         />
       </div>
     )
@@ -184,7 +191,7 @@ export function AutoBattleAttackVfx({ kind, color, sign, reachPx, travelMs, dama
               '--tx': `${travelPx}px`,
               '--ty': `${offset}px`,
               animation: `battle-projectile-multi ${travelMs - stagger * (MULTI_PROJECTILE_COUNT - 1)}ms linear ${stagger * i}ms forwards`,
-            } as CSSProperties}
+            } as VfxStyle}
           />
         ))}
       </div>
@@ -202,14 +209,14 @@ export function AutoBattleAttackVfx({ kind, color, sign, reachPx, travelMs, dama
         style={{
           '--tx': `${travelPx}px`,
           animation: `battle-bomb-x ${travelMs}ms linear forwards`,
-        } as CSSProperties}
+        } as VfxStyle}
       >
         <div
           className="absolute"
           style={{
             '--arc': `${BOMB_ARC_PX}px`,
             animation: `battle-bomb-y ${travelMs}ms linear forwards`,
-          } as CSSProperties}
+          } as VfxStyle}
         >
           <div style={ballStyle(PROJECTILE_SIZE_PX, palette)} />
         </div>
