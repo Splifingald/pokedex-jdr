@@ -153,6 +153,10 @@ export function AutoBattleVariantBanner({
           <div className="absolute inset-0 bg-cream-secondary" />
         )}
 
+        {/* Voile noir sur un parcours terminé : l'image passe en retrait et le
+            "🏆 Terminé !" ressort par-dessus. */}
+        {completed && <div className="absolute inset-0 bg-black/50" />}
+
         {/* Compteur masqué une fois le parcours terminé : la mention "Terminé !"
             au centre dit déjà tout, un "5 / 5" en plus fait doublon. */}
         {!completed && levels.length > 0 && (

@@ -13,7 +13,7 @@ import { ItemSearchInput } from './ItemSearchInput'
 import { TypeBadge } from './TypeBadge'
 import { PixelIcon } from './icons/PixelIcon'
 import { STAT_ICON, DICE_GENERIC_ICON } from '../lib/icons'
-import { getPrecisionColor } from '../lib/precisionColor'
+import { getPrecisionColor, formatPrecision } from '../lib/precisionColor'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { CloseIcon } from './icons/CloseIcon'
@@ -191,7 +191,7 @@ function OpponentAbilitySlot({
           )}
           <span className="flex items-center gap-1 shrink-0">
             <span className="text-sm">🎯</span>
-            <span className="text-sm font-bold" style={{ color: getPrecisionColor(ability?.precision ?? 10) }}>{ability?.precision ?? 10}</span>
+            <span className="text-sm font-bold" style={{ color: getPrecisionColor(ability?.precision) }}>{formatPrecision(ability?.precision)}</span>
           </span>
           {ability?.status_effect && (() => {
             const statusDisplay = getStatusEffectDisplay(ability.status_effect)

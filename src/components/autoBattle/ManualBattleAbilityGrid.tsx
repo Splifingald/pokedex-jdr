@@ -4,7 +4,7 @@ import { getSuperEfficace } from '../../lib/pokemonFacts'
 import { TypeBadge } from '../TypeBadge'
 import { PixelIcon } from '../icons/PixelIcon'
 import { STAT_ICON, DICE_GENERIC_ICON } from '../../lib/icons'
-import { getPrecisionColor } from '../../lib/precisionColor'
+import { getPrecisionColor, formatPrecision } from '../../lib/precisionColor'
 import { PANEL } from '../../lib/panelStyles'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 import { useToast } from '../../context/ToastContext'
@@ -90,7 +90,7 @@ export function ManualBattleAbilityGrid({ abilityNoms, playerSpecies, opponentSp
                 {precisionEnabled && (
                   <span className="flex items-center gap-1 shrink-0">
                     <span className="text-xs">🎯</span>
-                    <span className="text-xs font-bold" style={{ color: getPrecisionColor(a.precision ?? 10) }}>{a.precision ?? 10}</span>
+                    <span className="text-xs font-bold" style={{ color: getPrecisionColor(a.precision) }}>{formatPrecision(a.precision)}</span>
                   </span>
                 )}
                 {a.status_effect && (() => {

@@ -10,6 +10,7 @@ import { AutoBattleDiceRoll } from './AutoBattleDiceRoll'
 import { AutoBattleHistoryLog, type AutoBattleHistoryEntryData } from './AutoBattleHistoryLog'
 import { AutoBattleAttackVfx } from './AutoBattleAttackVfx'
 import { getStatusEffectDisplay, STATUS_EFFECT_LABEL } from '../../lib/autoBattle'
+import { isAbsolutePrecision } from '../../lib/precisionColor'
 import {
   battleAnimationStyle, battleAnimationSquashesTarget, getBattleAnimationVfx,
   BATTLE_DEFAULT_REACH_PX, type BattleAnimationId, type BattleVfxKind,
@@ -335,7 +336,18 @@ export function AutoBattleScreen({
 
   // Détail complet du calcul de précision en admin, même esprit que
   // damageFormula plus bas ("X (base) - Y (statut) + Z (buff) = total").
-  const buildPrecisionFormula = (basePrecision: number, info: ReturnType<typeof getEffectivePrecision>): string => {
+  // Une précision ABSOLUE (case vide ou 0 dans le CSV) n'a aucune formule à
+  // montrer : le serveur ne lance pas le dé du tout et aucun statut ni
+  // modificateur n'entre en jeu (voir isAbsolutePrecision) — afficher
+  // "10 (précision de base) - 5 (Peur) = 5/10" serait purement faux.
+  const buildPrecisionDebug = (
+    precision: number | null | undefined,
+    status: AutoBattleStatusEffect | null,
+    precisionModAmount: number
+  ): string => {
+    if (isAbsolutePrecision(precision)) return 'Précision absolue (-) : ne peut jamais rater'
+    const basePrecision = precision as number
+    const info = getEffectivePrecision(basePrecision, status, precisionModAmount)
     let formula = `${basePrecision} (précision de base)`
     if (info.statusModifier !== 0) {
       formula += ` ${info.statusModifier > 0 ? '+' : '-'} ${Math.abs(info.statusModifier)} (${info.statusLabel})`
@@ -756,11 +768,14 @@ export function AutoBattleScreen({
 
           const abilityNom = turn.ability_nom ?? (attackerSide === 'player' ? playerAbilityNom : opponentAbilityNom)
           const ability = attacksByName?.get(abilityNom)
-          const basePrecision = ability?.precision ?? 10
-          const precisionInfo = isAdmin ? getEffectivePrecision(basePrecision, attackerPrecisionStatus, turn.precision_mod_amount ?? 0) : null
 
           pushHistory(attackerSide, `a manqué son attaque ${sideInfo(attackerSide, turn).ability}`, {
-            precisionFormula: isAdmin && precisionInfo ? buildPrecisionFormula(basePrecision, precisionInfo) : undefined,
+            // Un coup arrêté par l'invulnérabilité adverse n'a rien à voir
+            // avec la précision (le serveur court-circuite le jet) : pas de
+            // détail à afficher dans ce cas.
+            precisionFormula: isAdmin && !turn.invulnerable_miss
+              ? buildPrecisionDebug(ability?.precision, attackerPrecisionStatus, turn.precision_mod_amount ?? 0)
+              : undefined,
           })
           // Peur/confusion : cette attaque ratée (ou non) est précisément
           // celle sous l'effet révélé par le tick précédent (turns[i-1]) —
@@ -801,9 +816,9 @@ export function AutoBattleScreen({
 
         const abilityNom = turn.ability_nom ?? (attackerSide === 'player' ? playerAbilityNom : opponentAbilityNom)
         const ability = attacksByName?.get(abilityNom)
-        const basePrecision = ability?.precision ?? 10
-        const precisionInfo = isAdmin ? getEffectivePrecision(basePrecision, attackerPrecisionStatus, turn.precision_mod_amount ?? 0) : null
-        const precisionFormula = isAdmin && precisionInfo ? buildPrecisionFormula(basePrecision, precisionInfo) : undefined
+        const precisionFormula = isAdmin
+          ? buildPrecisionDebug(ability?.precision, attackerPrecisionStatus, turn.precision_mod_amount ?? 0)
+          : undefined
 
         // Détail complet du calcul de dégâts/soin en admin — voir
         // AutoBattleTurn.damage_species_xp/damage_dice (fournis PAR TOUR par

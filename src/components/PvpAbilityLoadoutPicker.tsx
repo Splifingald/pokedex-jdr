@@ -4,7 +4,7 @@ import { TypeBadge } from './TypeBadge'
 import { PixelIcon } from './icons/PixelIcon'
 import { CloseIcon } from './icons/CloseIcon'
 import { STAT_ICON, DICE_GENERIC_ICON } from '../lib/icons'
-import { getPrecisionColor } from '../lib/precisionColor'
+import { getPrecisionColor, formatPrecision } from '../lib/precisionColor'
 import { PANEL } from '../lib/panelStyles'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { useToast } from '../context/ToastContext'
@@ -140,7 +140,7 @@ export function PvpAbilityLoadoutPicker({
                   {precisionEnabled && (
                     <span className="flex items-center gap-1 shrink-0">
                       <span className="text-sm">🎯</span>
-                      <span className="text-sm font-bold" style={{ color: getPrecisionColor(a.precision ?? 10) }}>{a.precision ?? 10}</span>
+                      <span className="text-sm font-bold" style={{ color: getPrecisionColor(a.precision) }}>{formatPrecision(a.precision)}</span>
                     </span>
                   )}
                   {a.status_effect && (() => {

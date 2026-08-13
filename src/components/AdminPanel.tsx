@@ -88,7 +88,11 @@ function mapAttackCsvRow(row: AttackCsvRow) {
     degats_de:     row['Dégâts dé']?.trim() ? parseInt(row['Dégâts dé']) : null,
     cible:         row['Cible']?.trim() || null,
     distance:      row['Distance']?.trim() ? parseInt(row['Distance']) : null,
-    precision:     row['Précision']?.trim() ? parseInt(row['Précision']) : null,
+    // Une case "-" (ou tout autre texte non numérique) vaut précision ABSOLUE,
+    // au même titre qu'une case vide : la capacité ne peut jamais rater (voir
+    // isAbsolutePrecision). Sans le test Number.isFinite, parseInt('-') donne
+    // NaN — sérialisé en null par hasard, mais c'était fragile et illisible.
+    precision:     Number.isFinite(parseInt(row['Précision'] ?? '')) ? parseInt(row['Précision']) : null,
     degats_moyens: row['Dégâts moyens']?.trim() ? parseFloat(row['Dégâts moyens'].replace(',', '.')) : null,
     effet:         row['Effet']?.trim() || null,
     // Statut "mini-jeu" (Combat Auto) — voir parseStatusEffectCsvLabel.

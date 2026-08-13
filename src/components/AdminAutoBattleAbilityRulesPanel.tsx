@@ -267,12 +267,17 @@ function AbilityRuleRow({
   // coup qui accorde l'effet) — résolu en un montant fixe une seule fois par
   // le serveur au moment de l'octroi, voir autobattle_ability_rules.
   const handleHealDotTypeChange = (value: string) => {
+    // Durée : on ne la (re)pose QUE si l'effet n'est pas en mode "jusqu'au
+    // réveil", où elle doit rester nulle — sinon changer le type de montant
+    // ferait cohabiter les deux durées et l'écriture serait rejetée par la
+    // contrainte autobattle_ability_rules_heal_dot_fields.
+    const duration = rule.heal_dot_until_awake ? null : (rule.heal_dot_duration_turns ?? 3)
     if (value === 'percent_max_hp') {
-      onUpdate(rule.attack_nom, { heal_dot_type: 'percent_max_hp', heal_dot_percent: rule.heal_dot_percent ?? 10, heal_dot_amount: null, heal_dot_duration_turns: rule.heal_dot_duration_turns ?? 3 })
+      onUpdate(rule.attack_nom, { heal_dot_type: 'percent_max_hp', heal_dot_percent: rule.heal_dot_percent ?? 10, heal_dot_amount: null, heal_dot_duration_turns: duration })
     } else if (value === 'percent_damage') {
-      onUpdate(rule.attack_nom, { heal_dot_type: 'percent_damage', heal_dot_percent: rule.heal_dot_percent ?? 25, heal_dot_amount: null, heal_dot_duration_turns: rule.heal_dot_duration_turns ?? 3 })
+      onUpdate(rule.attack_nom, { heal_dot_type: 'percent_damage', heal_dot_percent: rule.heal_dot_percent ?? 25, heal_dot_amount: null, heal_dot_duration_turns: duration })
     } else {
-      onUpdate(rule.attack_nom, { heal_dot_type: 'flat', heal_dot_amount: rule.heal_dot_amount ?? 5, heal_dot_percent: null, heal_dot_duration_turns: rule.heal_dot_duration_turns ?? 3 })
+      onUpdate(rule.attack_nom, { heal_dot_type: 'flat', heal_dot_amount: rule.heal_dot_amount ?? 5, heal_dot_percent: null, heal_dot_duration_turns: duration })
     }
   }
 
@@ -322,7 +327,12 @@ function AbilityRuleRow({
     onUpdate(rule.attack_nom, { percent_hp_damage_percent: enabled ? (rule.percent_hp_damage_percent ?? 50) : null })
   }
 
-  const isHealDotActive = rule.heal_dot_duration_turns != null
+  // L'effet est actif dès qu'il a une durée, QUELLE QU'ELLE SOIT : un nombre
+  // de tours, ou "jusqu'au réveil" (auquel cas heal_dot_duration_turns est
+  // justement nul — ne tester que cette colonne faisait disparaître toute la
+  // carte de réglages dès qu'on cochait la case, en donnant l'impression que
+  // la configuration avait été effacée).
+  const isHealDotActive = rule.heal_dot_duration_turns != null || rule.heal_dot_until_awake
   const healDotType = rule.heal_dot_type ?? 'flat'
 
   // Effets inactifs proposés dans le menu "+ Ajouter un effet spécial" en bas

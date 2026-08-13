@@ -4,7 +4,7 @@ import { TypeBadge } from './TypeBadge'
 import { PixelIcon } from './icons/PixelIcon'
 import { STAT_ICON, DICE_GENERIC_ICON } from '../lib/icons'
 import { normalizeSearch } from '../lib/normalizeSearch'
-import { getPrecisionColor } from '../lib/precisionColor'
+import { getPrecisionColor, formatPrecision } from '../lib/precisionColor'
 import { getStatusEffectDisplay } from '../lib/autoBattle'
 
 interface Props {
@@ -75,7 +75,7 @@ export function MoveSearchInput({ options, disabled, onSelect, showDamage = fals
                     )}
                     <span className="flex items-center gap-1">
                       <span className="text-xs">🎯</span>
-                      <span className="text-xs font-bold" style={{ color: getPrecisionColor(a.precision ?? 10) }}>{a.precision ?? 10}</span>
+                      <span className="text-xs font-bold" style={{ color: getPrecisionColor(a.precision) }}>{formatPrecision(a.precision)}</span>
                     </span>
                     {a.status_effect && (() => {
                       const statusDisplay = getStatusEffectDisplay(a.status_effect)

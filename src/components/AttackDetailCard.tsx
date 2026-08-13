@@ -1,5 +1,5 @@
 import type { Attack } from '../types'
-import { getPrecisionColor } from '../lib/precisionColor'
+import { getPrecisionColor, formatPrecision } from '../lib/precisionColor'
 import { PixelIcon } from './icons/PixelIcon'
 import { STAT_ICON, DICE_GENERIC_ICON, ABILITY_DISTANCE_ICON } from '../lib/icons'
 
@@ -28,7 +28,7 @@ export function AttackDetailCard({ attack }: { attack: Attack }) {
           <MoveStatIcon icon="👤" value={attack.cible} />
           <MoveStatIcon
             icon="🎯"
-            value={attack.precision}
+            value={formatPrecision(attack.precision)}
             style={{ color: getPrecisionColor(attack.precision), fontWeight: 'bold' }}
           />
         </div>
