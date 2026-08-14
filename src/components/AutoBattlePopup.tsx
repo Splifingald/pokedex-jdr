@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import type { Player, PlayerPokemon, Pokemon, Attack, PokemonEvolution, Item, AutoBattleVariant, AutoBattleLevel, AutoBattleResolveResult, AutoBattleManualRoundResult, AutoBattleStartManualBattleResult, AutoBattleAbilityRule } from '../types'
+import type { Player, PlayerPokemon, Pokemon, Attack, PokemonEvolution, Item, AutoBattleVariant, AutoBattleLevel, AutoBattleResolveResult, AutoBattleManualRoundResult, AutoBattleStartManualBattleResult, AutoBattleAbilityRule, AutoBattleTurn } from '../types'
 import { TICKET_AUTOBATTLE_ITEM_NAME, POKEDOLLAR_ITEM_NAME, ownedPokemonName } from '../types'
 import { supabase } from '../lib/supabase'
 import { usePlayerItems } from '../hooks/usePlayerItems'
@@ -9,6 +9,7 @@ import { useAutoBattleVariants } from '../hooks/useAutoBattleVariants'
 import { useAutoBattleProgress } from '../hooks/useAutoBattleProgress'
 import { useAutoBattleBannedAttacks } from '../hooks/useAutoBattleBannedAttacks'
 import { useAutoBattleAbilityRules } from '../hooks/useAutoBattleAbilityRules'
+import { useAutoBattleTalents } from '../hooks/useAutoBattleTalents'
 import { isPurchaseCapReached, localDateString, formatCountdown } from '../lib/casino'
 import { generateIdempotencyKey } from '../lib/autoBattle'
 import { getHpBreakdown } from '../lib/xpBonuses'
@@ -73,6 +74,7 @@ export function AutoBattlePopup({
   const { progressByVariant, stateByLevel } = useAutoBattleProgress(player.id)
   const { bannedNames } = useAutoBattleBannedAttacks()
   const { rules: abilityRules } = useAutoBattleAbilityRules()
+  const { talentsByPokemon } = useAutoBattleTalents()
   const { showToast } = useToast()
 
   const abilityRulesByName = useMemo(() => {
@@ -178,6 +180,10 @@ export function AutoBattlePopup({
   // 'manual-coin-toss') puis transmis à ManualBattleScreen pour le badge
   // "(1er)"/"(2ème)" sur l'invite de sélection de capacité.
   const [manualFirstAttacker, setManualFirstAttacker] = useState<'player' | 'opponent' | null>(null)
+  // Tours de talent joués à l'ouverture (voir autobattle_start_manual_battle) —
+  // transmis tels quels à ManualBattleScreen, qui les anime avant la 1ère
+  // sélection de capacité.
+  const [manualStartTurns, setManualStartTurns] = useState<AutoBattleTurn[]>([])
 
   const ticketRow = playerItems.inventory.find((r) => r.item_nom === TICKET_AUTOBATTLE_ITEM_NAME)
   const ticketCount = ticketRow?.quantity ?? 0
@@ -286,6 +292,7 @@ export function AutoBattlePopup({
     })
 
     setManualFirstAttacker(result.first_attacker)
+    setManualStartTurns(result.turns ?? [])
     setView('manual-coin-toss')
   }
 
@@ -640,6 +647,9 @@ export function AutoBattlePopup({
               bannedAttacks={bannedNames}
               opponentSpecies={activeLevel ? pokemonByName.get(activeLevel.opponent_pokemon_nom) : undefined}
               opponentDiscovered={activeLevel ? (stateByLevel.get(activeLevel.id)?.discovered ?? false) : false}
+              // Talents masqués quand la bascule globale du mode est coupée :
+              // rien ne se déclencherait, autant ne rien annoncer.
+              talentsByPokemon={config.talents_enabled ? talentsByPokemon : undefined}
               // Mode Manuel : le combat démarre (et le ticket est débité) dès
               // le choix du pokémon, d'où la confirmation par "Lancer". Mode
               // Auto : le choix du pokémon ne fait qu'ouvrir la sélection de
@@ -669,6 +679,13 @@ export function AutoBattlePopup({
           {view === 'manual-battle' && activeLevel && selectedPokemon && manualFirstAttacker && (
             <ManualBattleScreen
               firstAttacker={manualFirstAttacker}
+              startTurns={manualStartTurns}
+              // Même règle que le serveur (voir autobattle_resolve_manual_round) :
+              // le talent 'transform' remplace l'ancien test sur le nom d'espèce.
+              playerTransforms={
+                config.talents_enabled
+                && (talentsByPokemon.get(selectedPokemon.pokemon_nom) ?? []).some((t) => t.kind === 'transform')
+              }
               playerPokemon={selectedPokemon}
               playerSpecies={activeSpecies}
               playerMaxHp={Math.max(1, getHpBreakdown(activeSpecies, selectedPokemon.xp).total)}

@@ -227,19 +227,37 @@ export function useAutoBattleVariants() {
   // Échange l'ordre de deux niveaux adjacents — seule façon de réordonner
   // (pas de glisser-déposer dans ce codebase, voir AdminSafariGroupsPanel) :
   // garantit par construction que level_index reste 0..n-1 sans trou/doublon.
+  //
+  // En TROIS écritures séquentielles, en passant par un index temporaire
+  // négatif : autobattle_levels porte UNIQUE (variant_id, level_index), donc
+  // écrire directement l'index de B sur A (les 2 UPDATE en parallèle, comme
+  // avant) violait la contrainte — l'échange échouait toujours, et le
+  // fetchAll() de secours donnait l'impression que la page se rechargeait.
+  // Les index réels étant tous >= 0, un index négatif ne peut entrer en
+  // collision avec aucune ligne existante.
   const swapLevelOrder = useCallback(async (levelA: AutoBattleLevel, levelB: AutoBattleLevel) => {
+    if (levelA.id === levelB.id) return
     setLevels((prev) => prev.map((l) => {
       if (l.id === levelA.id) return { ...l, level_index: levelB.level_index }
       if (l.id === levelB.id) return { ...l, level_index: levelA.level_index }
       return l
     }))
-    const [resA, resB] = await Promise.all([
-      supabase.from('autobattle_levels').update({ level_index: levelB.level_index }).eq('id', levelA.id),
-      supabase.from('autobattle_levels').update({ level_index: levelA.level_index }).eq('id', levelB.id),
-    ])
-    if (resA.error || resB.error) {
-      console.error('Erreur lors du réordonnancement des niveaux Combat Auto :', resA.error ?? resB.error)
-      await fetchAll()
+    const tempIndex = -1 - levelA.level_index
+    const steps = [
+      { id: levelA.id, level_index: tempIndex },
+      { id: levelB.id, level_index: levelA.level_index },
+      { id: levelA.id, level_index: levelB.level_index },
+    ]
+    for (const step of steps) {
+      const { error } = await supabase
+        .from('autobattle_levels')
+        .update({ level_index: step.level_index })
+        .eq('id', step.id)
+      if (error) {
+        console.error('Erreur lors du réordonnancement des niveaux Combat Auto :', error)
+        await fetchAll()
+        return
+      }
     }
   }, [fetchAll])
 

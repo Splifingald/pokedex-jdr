@@ -1,4 +1,7 @@
-import type { Attack, Item, PlayerPokemon, AutoBattleLevelReward, AutoBattleStatusEffect, AutoBattleAbilityRule } from '../types'
+import type {
+  Attack, Item, PlayerPokemon, AutoBattleLevelReward, AutoBattleStatusEffect, AutoBattleAbilityRule,
+  AutoBattleTalent, AutoBattleTalentKind, AutoBattleTalentTrigger,
+} from '../types'
 import { getStatusInfo, type StatusId } from './status'
 
 // Libellés propres à Combat Auto (alignés sur les libellés du CSV des
@@ -170,7 +173,7 @@ export function describeAbilityRule(rule: AutoBattleAbilityRule | undefined, abi
     if (rule.keep_going_bonus_type === 'flat' && rule.keep_going_bonus_flat) {
       lines.push(`+${rule.keep_going_bonus_flat} dégâts cumulés à chaque réutilisation`)
     } else if (rule.keep_going_bonus_type === 'percent_damage' && rule.keep_going_bonus_percent) {
-      lines.push(`+${rule.keep_going_bonus_percent}% de ses dégâts de base, cumulés à chaque réutilisation`)
+      lines.push(`+${rule.keep_going_bonus_percent}% des dégâts de base du pokémon, cumulés à chaque réutilisation`)
     }
   }
   if (rule.heal_type === 'static' && rule.heal_amount) {
@@ -243,6 +246,106 @@ export function describeAbilityRule(rule: AutoBattleAbilityRule | undefined, abi
     lines.push('Le statut affecte son utilisateur, pas l\'adversaire')
   }
   return lines
+}
+
+// ── Talents d'espèce ────────────────────────────────────────────────────────
+
+export const TALENT_KIND_LABEL: Record<AutoBattleTalentKind, string> = {
+  stat_boost: 'Bonus de statistique',
+  absorb_first_damage: 'Absorbe les premiers dégâts',
+  endure_ko: 'Encaisse le K.O.',
+  poison_damage_boost: 'Dégâts de poison augmentés',
+  burn_damage_boost: 'Dégâts de brûlure augmentés',
+  priority: "Priorité d'initiative",
+  inflict_status: 'Inflige un statut',
+  status_immunity: 'Immunité à des statuts',
+  type_immunity: 'Immunité à des types',
+  type_damage_to_heal: 'Dégâts d’un type convertis en soin',
+  no_recoil: 'Immunité au contre-coup',
+  dice_bonus_damage: 'Bonus de dégâts sur un dé',
+  auto_cure_first_status: 'Guérit le premier statut subi',
+  invulnerable_until_hit: 'Invulnérable jusqu’à son premier coup',
+  heal_below_hp: 'Soin sous un seuil de PV',
+  transform: 'Transformation (copie l’adversaire)',
+}
+
+export const TALENT_TRIGGER_LABEL: Record<AutoBattleTalentTrigger, string> = {
+  battle_start: 'À l’entrée en combat',
+  each_turn: 'À chaque tour (avant sa capacité)',
+  // Ne se déclenche que sur un coup DIRECT qui a porté — voir le commentaire de
+  // autobattle_talents.kind dans supabase/schema.sql.
+  on_ability_type: 'En touchant avec une capacité offensive d’un type donné',
+}
+
+const formatSigned = (n: number) => (n >= 0 ? `+${n}` : String(n))
+const listOrAll = (list: string[] | null) => (list && list.length > 0 ? list.join(', ') : 'tous')
+
+// Résumé lisible d'un talent, pour l'UI admin. Volontairement aligné sur
+// autobattle_talent_detail (SQL), qui produit la phrase affichée en combat —
+// les deux doivent rester cohérents.
+export function describeTalent(talent: AutoBattleTalent): string {
+  switch (talent.kind) {
+    case 'stat_boost': {
+      const stat = talent.stat === 'precision' ? 'précision' : 'dégâts'
+      const parts = [`${formatSigned(talent.amount ?? 0)} ${stat}`]
+      if (talent.type_filter && talent.type_filter.length > 0) parts.push(`capacités ${talent.type_filter.join(', ')}`)
+      if (talent.require_damage_taken) parts.push('par coup direct encaissé')
+      if (talent.hp_condition === 'below') parts.push(`PV ≤ ${talent.hp_percent} %`)
+      if (talent.hp_condition === 'above') parts.push(`PV ≥ ${talent.hp_percent} %`)
+      if (talent.opponent_status) {
+        parts.push(talent.opponent_status === 'any'
+          ? 'adversaire affecté par un statut'
+          : `adversaire sous ${STATUS_EFFECT_LABEL[talent.opponent_status].toLowerCase()}`)
+      }
+      if (talent.self_status) {
+        parts.push(talent.self_status === 'any'
+          ? 'lui-même affecté par un statut'
+          : `lui-même sous ${STATUS_EFFECT_LABEL[talent.self_status].toLowerCase()}`)
+      }
+      return parts.join(' — ')
+    }
+    case 'absorb_first_damage':
+      return 'Le premier coup direct encaissé du combat inflige 0'
+    case 'endure_ko':
+      return 'Survit à 1 PV la première fois qu’il devrait tomber K.O.'
+    case 'poison_damage_boost':
+      return `Tous les dégâts de poison du combat : ${formatSigned(talent.amount ?? 0)}`
+    case 'burn_damage_boost':
+      return `Tous les dégâts de brûlure du combat : ${formatSigned(talent.amount ?? 0)}`
+    case 'priority':
+      return `Initiative ${talent.amount ?? 0} — joue en premier face à une priorité plus basse`
+    case 'inflict_status': {
+      const status = talent.status_filter?.[0]
+      const label = status ? STATUS_EFFECT_LABEL[status].toLowerCase() : 'un statut'
+      const trigger = talent.trigger ? TALENT_TRIGGER_LABEL[talent.trigger].toLowerCase() : ''
+      const types = talent.trigger === 'on_ability_type' ? ` (${listOrAll(talent.type_filter)})` : ''
+      return `${talent.percent ?? 0} % d’infliger ${label} — ${trigger}${types}`
+    }
+    case 'status_immunity':
+      return `Insensible à : ${(talent.status_filter ?? []).map((s) => STATUS_EFFECT_LABEL[s]).join(', ') || '—'}`
+    case 'type_immunity':
+      return `Insensible aux dégâts de type : ${listOrAll(talent.type_filter)}`
+    case 'type_damage_to_heal':
+      return `Les dégâts de type ${listOrAll(talent.type_filter)} le soignent`
+    case 'no_recoil':
+      return 'Ne subit jamais le contre-coup de ses propres capacités'
+    case 'dice_bonus_damage':
+      return `Dé de dégâts à ${talent.dice_value ?? '?'} : ${formatSigned(talent.amount ?? 0)} dégâts`
+    case 'auto_cure_first_status':
+      return 'Guérit immédiatement le premier statut subi du combat'
+    case 'invulnerable_until_hit':
+      return 'Invulnérable tant qu’il n’a pas lui-même infligé de dégâts'
+    case 'heal_below_hp': {
+      const amount = talent.value_type === 'percent_max_hp'
+        ? `${talent.percent ?? 0} % des PV max`
+        : talent.value_type === 'range'
+          ? `${talent.amount ?? 0} à ${talent.amount_max ?? 0} PV`
+          : `${talent.amount ?? 0} PV`
+      return `Récupère ${amount} en passant sous ${talent.hp_percent ?? 0} % de ses PV (une fois par combat)`
+    }
+    case 'transform':
+      return 'Copie l’apparence, le type et les capacités de son adversaire (jamais ses PV) — sans effet en PvP'
+  }
 }
 
 // Vocabulaire du champ `first_attacker` renvoyé par les RPC de démarrage de

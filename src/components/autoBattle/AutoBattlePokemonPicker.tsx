@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import type { Pokemon, PlayerPokemon, Attack } from '../../types'
+import type { Pokemon, PlayerPokemon, Attack, AutoBattleTalent } from '../../types'
 import { ownedPokemonName } from '../../types'
-import { getEligiblePlayerPokemon } from '../../lib/autoBattle'
+import { getEligiblePlayerPokemon, describeTalent } from '../../lib/autoBattle'
 import { getSuperEfficace } from '../../lib/pokemonFacts'
 import { getHpBreakdown, getDamageBreakdown } from '../../lib/xpBonuses'
 import { normalizeSearch } from '../../lib/normalizeSearch'
@@ -22,6 +22,8 @@ interface Props {
   opponentSpecies?: Pokemon
   /** Ce niveau a-t-il déjà été joué au moins une fois (autobattle_player_level_state.discovered) — le badge "Super Efficace" ne doit apparaître qu'une fois l'adversaire réellement découvert, jamais en avant-première sur un niveau jamais tenté. */
   opponentDiscovered: boolean
+  /** Talents d'espèce (voir autobattle_talents), indexés par nom d'espèce — affichés sur la ligne du milieu. Omis quand la bascule globale du mode est désactivée (autobattle_config/pvp_config.talents_enabled), auquel cas la ligne disparaît plutôt que d'annoncer un effet qui ne se produira pas. */
+  talentsByPokemon?: Map<string, AutoBattleTalent[]>
   /** Choix en deux temps (Combat Manuel) : le tap ne fait que sélectionner le pokémon, onSelect n'est appelée qu'au bouton "Lancer" — c'est là que le ticket est débité (voir handleStartManualBattle). Sans ce drapeau (Combat Auto, PvP), le tap appelle onSelect directement : l'écran suivant ne coûte rien. */
   requireLaunch?: boolean
   /** Avec requireLaunch : plus aucun ticket, "Lancer" reste visible mais désactivé. */
@@ -44,7 +46,7 @@ const SORT_LABELS: Record<SortKey, string> = {
 // pokémon ayant au moins une capacité apprise non-bannie (voir requirement
 // #6/#9). Partagée telle quelle entre Combat Auto (auto ET manuel) et PvP
 // (AutoBattlePopup / PvpPopup) — aucune différence d'affichage entre modes.
-export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, bannedAttacks, opponentSpecies, opponentDiscovered, requireLaunch, noTicket, onSelect, onBack }: Props) {
+export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, bannedAttacks, opponentSpecies, opponentDiscovered, talentsByPokemon, requireLaunch, noTicket, onSelect, onBack }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('default')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<PlayerPokemon | null>(null)
@@ -136,6 +138,8 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
             const superEffective = isSuperEffective(pp)
             const damage = getDamageBreakdown(species, pp.xp).total
             const hp = getHpBreakdown(species, pp.xp).total
+            const talents = talentsByPokemon?.get(pp.pokemon_nom) ?? []
+            const wins = pp.battles_won ?? 0
             return (
               <button
                 key={pp.id}
@@ -167,8 +171,25 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
                       </span>
                     </span>
                   </div>
+                  {/* Ligne du milieu : talents à gauche, efficacité et type à
+                      droite. L'icône remplace le nom du talent — la place est
+                      comptée, et seul l'EFFET est utile pour choisir. */}
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-ink-muted-2 text-xs">🏆 {pp.battles_won ?? 0} combat{(pp.battles_won ?? 0) > 1 ? 's' : ''} gagné{(pp.battles_won ?? 0) > 1 ? 's' : ''}</span>
+                    {/* Le résumé tient sur une ligne le plus souvent — l'icône y
+                        est alors parfaitement centrée (items-center) — et peut
+                        courir sur 2 lignes avant d'être coupé. */}
+                    <span className="flex items-center gap-1 flex-1 min-w-0">
+                      {talents.length > 0 && (
+                        <>
+                          <span className="shrink-0">
+                            <PixelIcon src={STAT_ICON.talent} size={14} colored />
+                          </span>
+                          <span className="text-ink-muted-2 text-xs min-w-0 line-clamp-2 leading-snug">
+                            {talents.map(describeTalent).join(' · ')}
+                          </span>
+                        </>
+                      )}
+                    </span>
                     <span className="flex items-center gap-1.5 shrink-0">
                       {superEffective && (
                         <span className="text-xs font-bold px-1.5 py-0.5 rounded-full text-white bg-[#d9761e] whitespace-nowrap">
@@ -177,6 +198,9 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
                       )}
                       {species && <TypeBadge type={species.type} small />}
                     </span>
+                  </div>
+                  <div className="text-ink-muted-2 text-xs">
+                    🏆 {wins} combat{wins > 1 ? 's' : ''} gagné{wins > 1 ? 's' : ''}
                   </div>
                 </div>
               </button>

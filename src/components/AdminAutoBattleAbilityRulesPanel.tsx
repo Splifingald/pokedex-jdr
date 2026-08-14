@@ -32,7 +32,7 @@ const IGNORE_STATUS_BLOCK_VALUES: AutoBattleIgnoreStatusBlock[] = ['sleep', 'par
 
 const KEEP_GOING_BONUS_TYPE_LABEL: Record<AutoBattleKeepGoingBonusType, string> = {
   flat: 'Montant fixe',
-  percent_damage: 'Pourcentage de ses dégâts de base',
+  percent_damage: 'Pourcentage des dégâts de base du pokémon',
 }
 
 const HEAL_TYPE_LABEL: Record<AutoBattleHealType, string> = {
@@ -125,7 +125,7 @@ function EffectCategory({ label, children }: { label: string; children: React.Re
 }
 
 function AbilityRuleRow({
-  rule, attack, attackTypes, onUpdate, onRemove, rowRef, highlighted,
+  rule, attack, attackTypes, onUpdate, onRemove, rowRef, highlighted, expanded, onToggle,
 }: {
   rule: AutoBattleAbilityRule
   attack: Attack | undefined
@@ -135,6 +135,9 @@ function AbilityRuleRow({
   onRemove: (attackNom: string) => void
   rowRef?: (el: HTMLDivElement | null) => void
   highlighted?: boolean
+  /** Repliée par défaut : la liste tient alors sur une ligne par capacité. */
+  expanded: boolean
+  onToggle: () => void
 }) {
   const handleTurnEffectChange = (value: string) => {
     if (value === '') {
@@ -398,14 +401,22 @@ function AbilityRuleRow({
       data-attack-nom={rule.attack_nom}
       className={`flex flex-col gap-2 p-3 rounded ${PIXEL_BORDER_SM} bg-white transition-shadow duration-500 ${highlighted ? 'ring-4 ring-[#f0c419]' : ''}`}
     >
-      <div className="flex items-center gap-2">
+      {/* Vue repliée : type + nom, rien d'autre. Toute la ligne est cliquable
+          pour déplier ; la suppression n'est offerte qu'une fois dépliée, pour
+          ne pas risquer un clic malheureux en parcourant la liste. */}
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex items-center gap-2 text-left w-full"
+        aria-expanded={expanded}
+      >
+        <span className="text-ink-muted-2 text-xs w-3 shrink-0">{expanded ? '▾' : '▸'}</span>
         <TypeBadge type={attack?.type ?? '?'} small />
         <span className="text-ink text-sm font-bold flex-1 truncate">{rule.attack_nom}</span>
-        <button onClick={() => onRemove(rule.attack_nom)} className={`text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>
-          <CloseIcon className="w-3 h-3" />
-        </button>
-      </div>
+      </button>
 
+      {!expanded ? null : (
+      <>
       {/* Plus de réglage d'animation ici : elle vient désormais uniquement des
           colonnes « Animation » / « Animation 2 » du CSV des attaques (voir
           src/lib/battleAnimations.ts). */}
@@ -519,7 +530,7 @@ function AbilityRuleRow({
                   onCommit={(v) => onUpdate(rule.attack_nom, { keep_going_bonus_percent: Math.max(1, v) })}
                   className={NUM_CLASS_MD}
                 />
-                <span className="text-ink-muted-2 text-xs">% de ses dégâts de base par réutilisation (cumulatif)</span>
+                <span className="text-ink-muted-2 text-xs">% des dégâts de base du pokémon (hors dégâts de la capacité) par réutilisation (cumulatif)</span>
               </div>
             )}
             <span className="text-ink-muted-2 text-[11px] mt-1">
@@ -978,6 +989,18 @@ function AbilityRuleRow({
           ))}
         </select>
       )}
+
+      <div className="flex justify-end border-t-2 border-[#cfc7a8] pt-2 mt-1">
+        <button
+          onClick={() => onRemove(rule.attack_nom)}
+          className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}
+        >
+          <CloseIcon className="w-3 h-3" />
+          Retirer cette capacité
+        </button>
+      </div>
+      </>
+      )}
     </div>
   )
 }
@@ -1006,8 +1029,10 @@ export function AdminAutoBattleAbilityRulesPanel() {
     [attacks]
   )
 
+  // La recherche porte sur TOUT le catalogue, y compris les capacités déjà
+  // configurées : sélectionner une capacité déjà présente sert à la RETROUVER
+  // (on déplie sa ligne et on scrolle jusqu'à elle) plutôt qu'à la recréer.
   const configuredNames = useMemo(() => new Set(rules.map((r) => r.attack_nom)), [rules])
-  const selectableAttacks = useMemo(() => attacks.filter((a) => !configuredNames.has(a.nom)), [attacks, configuredNames])
 
   const [sortMode, setSortMode] = useState<'name' | 'type'>('name')
   const sortedRules = useMemo(() => {
@@ -1039,9 +1064,22 @@ export function AdminAutoBattleAbilityRulesPanel() {
     if (nom) rowRefs.current.set(nom, el)
   }, [])
   const [justAddedNom, setJustAddedNom] = useState<string | null>(null)
+  // Lignes dépliées (repliées par défaut) — l'ajout et la recherche déplient
+  // automatiquement la ligne concernée.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const toggleExpanded = useCallback((nom: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(nom)) next.delete(nom)
+      else next.add(nom)
+      return next
+    })
+  }, [])
 
-  const handleAddRule = async (attackNom: string) => {
-    await addRule(attackNom)
+  /** Sélection depuis la barre de recherche : crée la règle si besoin, puis la révèle. */
+  const handleSelectAttack = async (attackNom: string) => {
+    if (!configuredNames.has(attackNom)) await addRule(attackNom)
+    setExpanded((prev) => new Set(prev).add(attackNom))
     setJustAddedNom(attackNom)
   }
 
@@ -1070,9 +1108,10 @@ export function AdminAutoBattleAbilityRulesPanel() {
       </div>
       <p className="text-ink-muted-2 text-sm mb-3">
         S'appliquent que la capacité soit choisie par un joueur ou configurée pour un opposant.
+        La recherche sert aussi à retrouver une capacité déjà configurée : elle se déplie et défile jusqu'à toi.
       </p>
 
-      <MoveSearchInput options={selectableAttacks} disabled={false} showDamage onSelect={(a) => void handleAddRule(a.nom)} />
+      <MoveSearchInput options={attacks} disabled={false} showDamage onSelect={(a) => void handleSelectAttack(a.nom)} />
 
       {rules.length > 1 && (
         <div className="flex items-center gap-2 mt-3">
@@ -1106,12 +1145,14 @@ export function AdminAutoBattleAbilityRulesPanel() {
               onRemove={removeRule}
               rowRef={setRowRef}
               highlighted={rule.attack_nom === justAddedNom}
+              expanded={expanded.has(rule.attack_nom)}
+              onToggle={() => toggleExpanded(rule.attack_nom)}
             />
           ))
         )}
       </div>
 
-      <MoveSearchInput options={selectableAttacks} disabled={false} showDamage onSelect={(a) => void handleAddRule(a.nom)} className="mt-4" />
+      <MoveSearchInput options={attacks} disabled={false} showDamage onSelect={(a) => void handleSelectAttack(a.nom)} className="mt-4" />
     </div>
   )
 }

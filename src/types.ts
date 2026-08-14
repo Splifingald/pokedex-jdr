@@ -870,6 +870,10 @@ export interface AutoBattleConfig {
   // Système de précision (attacks.precision, 1-10, NULL = 10) désactivable
   // globalement — désactivé, toute capacité touche systématiquement.
   precision_enabled: boolean
+  // Talents d'espèce (autobattle_talents) désactivables globalement, comme la
+  // précision — désactivés, aucun talent n'est lu ni déclenché, y compris les
+  // annonces d'ouverture de combat. Les configurations restent en base.
+  talents_enabled: boolean
   // Icônes du mode de jeu affichées sur la bannière de chaque parcours
   // (AutoBattleVariantBanner) selon son game_mode — partagées par toutes les
   // variantes, réglées dans l'admin "Combat Auto — Général".
@@ -987,7 +991,8 @@ export interface AutoBattleBannedAttack {
 export type AutoBattleTurnEffect = 'skip' | 'play_twice' | 'play_three' | 'play_random' | 'repeat_until_fail' | 'prepare_release' | 'charge_double_next' | 'first_and_replay'
 // Bonus cumulatif de la chaîne "Continue sur sa lancée" (voir
 // AutoBattleAbilityRule.keep_going_turns) : montant fixe, ou pourcentage des
-// dégâts de base de son utilisateur. Appliqué une fois par réutilisation
+// dégâts de base du POKÉMON (espèce + bonus XP seuls, sans les dégâts propres
+// de la capacité ni le x2 d'efficacité de type). Appliqué une fois par réutilisation
 // (rien à la 1ère, ×1 à la 2e, ×2 à la 3e...).
 export type AutoBattleKeepGoingBonusType = 'flat' | 'percent_damage'
 // Statut bloquant qu'une capacité peut ignorer (voir
@@ -1033,10 +1038,11 @@ export type AutoBattleBonusDamageCondition = 'took_damage_last_turn' | 'first_us
 // lui-même) : le sens (hausse/baisse) découle directement de la cible, pas
 // un champ séparé. 'percent' n'est valable que pour stat = 'damage' (la
 // précision n'a pas d'équivalent "stat de base" en %, voir requirement).
-// Un seul modificateur actif à la fois par (camp, stat) — une réapplication
-// écrase la précédente (même montant rejoué au lieu d'empiler), au même
-// titre que le statut. Dure soit stat_mod_duration_turns tours de COMBAT
-// (compteur global, pas propre à un camp), soit jusqu'à la fin du combat.
+// Les modificateurs se CUMULENT : chaque application s'empile avec sa propre
+// échéance, donc deux "+2 dégâts pendant 3 tours" joués coup sur coup donnent
+// +4, puis retombent à +2 quand le plus ancien expire. Chaque application dure
+// soit stat_mod_duration_turns tours de COMBAT (compteur global, pas propre à
+// un camp), soit jusqu'à la fin du combat.
 // stat_mod_max_uses plafonne le nombre d'applications RÉUSSIES (un raté ne
 // compte pas) sur tout le combat — au-delà, la capacité continue de
 // s'utiliser normalement mais n'applique plus le modificateur (voir
@@ -1142,6 +1148,77 @@ export interface AutoBattleAbilityRule {
   created_at: string
 }
 
+// ── Talents (effets passifs PAR ESPÈCE, table autobattle_talents) ────────────
+// Pendant par ESPÈCE d'AutoBattleAbilityRule (qui est par CAPACITÉ) : un talent
+// s'applique quelle que soit la capacité jouée, dans TOUS les modes de combat
+// et pour LES DEUX camps. Édités depuis AdminAutoBattleTalentsPanel, appliqués
+// exclusivement côté serveur (voir les helpers autobattle_talent_* dans
+// supabase/schema.sql) — le client ne fait que rejouer les tours talent_tick.
+export type AutoBattleTalentKind =
+  | 'stat_boost'
+  | 'absorb_first_damage'
+  | 'endure_ko'
+  | 'poison_damage_boost'
+  | 'burn_damage_boost'
+  | 'priority'
+  | 'inflict_status'
+  | 'status_immunity'
+  | 'type_immunity'
+  | 'type_damage_to_heal'
+  | 'no_recoil'
+  | 'dice_bonus_damage'
+  | 'auto_cure_first_status'
+  | 'invulnerable_until_hit'
+  | 'heal_below_hp'
+  /** Copie l'adversaire (sprite, type, super efficace, dégâts de base, movepool) — anciennement le cas spécial « Métamorph », codé en dur sur le nom d'espèce. Sans effet en PvP. */
+  | 'transform'
+
+export type AutoBattleTalentStat = 'damage' | 'precision'
+export type AutoBattleTalentValueType = 'flat' | 'percent_max_hp' | 'range'
+export type AutoBattleTalentHpCondition = 'below' | 'above'
+/**
+ * Quand un 'inflict_status' tente de s'appliquer. 'on_ability_type' exige un
+ * COUP DIRECT qui a porté (capacité offensive, non ratée, dégâts non nuls) ;
+ * 'each_turn' se tente avant la capacité, qu'elle touche ou non.
+ */
+export type AutoBattleTalentTrigger = 'battle_start' | 'each_turn' | 'on_ability_type'
+/** Condition « statut » d'un bonus de stat : 'any' = n'importe lequel. */
+export type AutoBattleTalentStatusCondition = 'any' | AutoBattleStatusEffect
+
+// Une ligne d'autobattle_talents. Colonnes volontairement mutualisées entre les
+// kinds (voir le commentaire de la table) : `amount`/`amount_max`/`percent`/
+// `value_type` portent la valeur, `type_filter`/`status_filter` les listes, le
+// reste les conditions. Seul un sous-ensemble est pertinent par kind.
+export interface AutoBattleTalent {
+  id: number
+  pokemon_nom: string
+  /** Libellé affiché en combat, prérempli depuis pokemon.nom_talent à la création. */
+  nom: string
+  kind: AutoBattleTalentKind
+  /** Animation jouée sur le pokémon au déclenchement — null = 'idle'. */
+  animation: BattleAnimationId | null
+  stat: AutoBattleTalentStat | null
+  /** Montant signé (bonus de stat, priorité, dégâts de tick, soin plat, min d'une fourchette). */
+  amount: number | null
+  amount_max: number | null
+  /** % (soin en % des PV max, chance d'infliger un statut). */
+  percent: number | null
+  value_type: AutoBattleTalentValueType | null
+  /** Types de capacité (bonus de stat) ou de dégâts (immunité, conversion en soin). */
+  type_filter: string[] | null
+  status_filter: AutoBattleStatusEffect[] | null
+  hp_condition: AutoBattleTalentHpCondition | null
+  /** Seuil en % des PV max — condition d'un bonus de stat, ou déclencheur de 'heal_below_hp'. */
+  hp_percent: number | null
+  opponent_status: AutoBattleTalentStatusCondition | null
+  self_status: AutoBattleTalentStatusCondition | null
+  /** Bonus CUMULATIF : multiplié par le nombre de coups DIRECTS encaissés — la brûlure et le poison ne comptent pas. */
+  require_damage_taken: boolean
+  trigger: AutoBattleTalentTrigger | null
+  dice_value: number | null
+  created_at: string
+}
+
 // Un tour du journal de combat renvoyé par le RPC autobattle_resolve_battle —
 // le client se contente de rejouer cette séquence (jamais recalculée côté
 // client). skipped = le camp a passé son tour sans attaquer (effet spécial
@@ -1223,6 +1300,20 @@ export interface AutoBattleTurn {
   prevention_granted?: boolean
   prevention_blocked?: boolean
   keep_going_bonus?: number
+  // talent_tick = ce tour est un déclenchement de TALENT d'espèce (voir
+  // autobattle_talents) : `attacker` désigne le camp PROPRIÉTAIRE du talent,
+  // pas un attaquant, et defender_hp_after n'a pas de sens (il reprend les PV
+  // du propriétaire). Le client resynchronise les PV sur attacker_hp_after —
+  // indispensable pour 'endure_ko' (remonte à 1 PV) et 'heal_below_hp'.
+  // talent_animation = animation à jouer sur le pokémon lui-même (NULL =
+  // 'idle') ; talent_detail = phrase prête à afficher dans l'historique ;
+  // talent_absorbed = dégâts annulés ou convertis en soin le cas échéant.
+  talent_tick?: boolean
+  talent_nom?: string
+  talent_kind?: AutoBattleTalentKind
+  talent_animation?: BattleAnimationId | null
+  talent_detail?: string
+  talent_absorbed?: number
   // Décoration CLIENT UNIQUEMENT (jamais renvoyée par le serveur) — voir
   // ManualBattleScreen : en Combat Manuel la capacité change à chaque tour,
   // contrairement au Combat Auto où elle est fixe (playerAbilityNom/
@@ -1294,6 +1385,13 @@ export type AutoBattleManualRoundStatus = AutoBattleResolveStatus | 'wrong_mode'
 export interface AutoBattleStartManualBattleResult {
   status: AutoBattleManualRoundStatus
   first_attacker?: 'player' | 'opponent'
+  /**
+   * Tours de talent joués à l'OUVERTURE du combat (talent_tick, turn = 0) :
+   * passifs permanents annoncés et statuts infligés « à l'entrée en combat ».
+   * Résolus ici plutôt qu'au 1er round pour que leur animation passe AVANT la
+   * première sélection de capacité (voir ManualBattleScreen.startTurns).
+   */
+  turns?: AutoBattleTurn[]
 }
 
 // Réponse du RPC autobattle_resolve_manual_round (voir supabase/schema.sql) —
@@ -1348,6 +1446,9 @@ export interface PvpConfig {
   nom: string
   icon_url: string
   precision_enabled: boolean
+  // Voir AutoBattleConfig.talents_enabled — même bascule, propre au mode JcJ
+  // (elle couvre aussi le combat d'essai "Tester").
+  talents_enabled: boolean
   // Nombre maximum de capacités dans la boucle défensive d'un défi — les
   // doublons comptent (voir PvpAbilityLoadoutPicker, pvp_post_challenge).
   loadout_max: number
@@ -1421,6 +1522,8 @@ export type PvpStartBattleStatus = 'ok' | 'not_found' | 'challenge_inactive' | '
 export interface PvpStartBattleResult {
   status: PvpStartBattleStatus
   first_attacker?: 'player' | 'opponent'
+  /** Voir AutoBattleStartManualBattleResult.turns — tours de talent d'ouverture. */
+  turns?: AutoBattleTurn[]
 }
 
 export type PvpRoundStatus = PvpStartBattleStatus | 'ineligible_ability' | 'not_started'
@@ -1457,6 +1560,8 @@ export type PvpTrialStartStatus = 'ok' | 'invalid_abilities' | 'ineligible_pokem
 export interface PvpTrialStartResult {
   status: PvpTrialStartStatus
   first_attacker?: 'player' | 'opponent'
+  /** Voir AutoBattleStartManualBattleResult.turns — tours de talent d'ouverture. */
+  turns?: AutoBattleTurn[]
 }
 
 export type PvpTrialRoundStatus = PvpTrialStartStatus | 'not_started' | 'not_found' | 'ineligible_ability'

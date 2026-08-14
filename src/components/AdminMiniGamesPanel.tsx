@@ -7,10 +7,11 @@ import { AdminPensionPanel } from './AdminPensionPanel'
 import { AdminSafariPanel } from './AdminSafariPanel'
 import { AdminAutoBattlePanel } from './AdminAutoBattlePanel'
 import { AdminCombatAbilitiesPanel } from './AdminCombatAbilitiesPanel'
+import { AdminAutoBattleTalentsPanel } from './AdminAutoBattleTalentsPanel'
 import { AdminPvpPanel } from './AdminPvpPanel'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 
-type SubSection = 'casino' | 'magikarp' | 'mining' | 'pension' | 'safari' | 'combat-abilities' | 'autobattle' | 'pvp'
+type SubSection = 'casino' | 'magikarp' | 'mining' | 'pension' | 'safari' | 'combat-abilities' | 'talents' | 'autobattle' | 'pvp'
 
 const SUB_SECTIONS: { id: SubSection; label: string }[] = [
   { id: 'casino', label: '🎰 Casino' },
@@ -21,6 +22,8 @@ const SUB_SECTIONS: { id: SubSection; label: string }[] = [
   // Capacités de combat en premier des 3 sections Combat : elles s'appliquent
   // aux deux modes (JcE et JcJ), qui suivent.
   { id: 'combat-abilities', label: '✨ Capacités de combat' },
+  // Même portée que les capacités de combat (les deux modes), mais par ESPÈCE.
+  { id: 'talents', label: '🧬 Talents' },
   { id: 'autobattle', label: '⚔️ Combat JcE' },
   { id: 'pvp', label: '🛡️ Combat JcJ' },
 ]
@@ -58,6 +61,8 @@ export function AdminMiniGamesPanel() {
       {sub === 'safari' && <AdminSafariPanel />}
 
       {sub === 'combat-abilities' && <AdminCombatAbilitiesPanel />}
+
+      {sub === 'talents' && <AdminAutoBattleTalentsPanel />}
 
       {sub === 'autobattle' && <AdminAutoBattlePanel />}
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import type { Player, Item, Pokemon, Attack, PlayerItem, PlayerPokemon, Trade, TradeKind, TradeItemEntry, TradeItemsPayload, TradePokemonRequestPayload, TradeAcceptStatus } from '../../types'
 import { TRADE_MAX_ITEMS } from '../../types'
 import type { useTrades } from '../../hooks/useTrades'
@@ -47,6 +47,38 @@ const ACCEPT_ERROR_LABEL: Record<Exclude<TradeAcceptStatus, 'ok'>, string> = {
   error: "Une erreur est survenue, réessaie.",
 }
 
+// Les deux côtés de l'échange sont empilés verticalement sur mobile (chaque
+// côté prend toute la largeur, bien plus lisible que deux colonnes de ~150px)
+// et repassent côte à côte à partir de `sm`.
+function TradeSides({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2 sm:grid sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-start">
+      {children}
+    </div>
+  )
+}
+
+function TradeSide({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <section className="min-w-0">
+      <p className="text-ink-muted text-xs font-bold mb-2 text-center bg-cream-secondary border-2 border-ink rounded-md py-1 sm:bg-transparent sm:border-0 sm:rounded-none sm:py-0">
+        {label}
+      </p>
+      {children}
+    </section>
+  )
+}
+
+function TradeDivider() {
+  return (
+    <div className="flex items-center gap-2 sm:h-full sm:justify-center sm:pt-8">
+      <div className="h-0.5 flex-1 bg-[#cfc7a8] sm:hidden" />
+      <span className="text-2xl leading-none text-ink-muted-2">🔁</span>
+      <div className="h-0.5 flex-1 bg-[#cfc7a8] sm:hidden" />
+    </div>
+  )
+}
+
 function ItemChip({ entry, item, onRemove, onQuantityChange, max }: {
   entry: TradeItemEntry
   item: Item | undefined
@@ -55,34 +87,41 @@ function ItemChip({ entry, item, onRemove, onQuantityChange, max }: {
   max?: number
 }) {
   return (
-    <div className="flex items-center gap-2 bg-white border-2 border-ink rounded-lg px-2 py-1.5 min-w-0">
+    // Le sélecteur de quantité occupe sa propre ligne (`w-full` + `flex-wrap`) :
+    // sur une seule ligne il mange toute la largeur et le nom de l'objet est
+    // tronqué à quelques caractères, aussi bien dans la colonne mobile que dans
+    // les deux colonnes ~275px du desktop.
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 bg-white border-2 border-ink rounded-lg px-2 py-2 sm:py-1.5 min-w-0">
       {item?.image_url ? (
-        <img src={item.image_url} alt="" className="w-6 h-6 object-contain pixelated shrink-0" />
+        <img src={item.image_url} alt="" className="w-7 h-7 sm:w-6 sm:h-6 object-contain pixelated shrink-0" />
       ) : (
         <span className="text-lg shrink-0">🎒</span>
       )}
-      <span className="flex-1 min-w-0 text-ink text-xs font-bold truncate">{item?.nom ?? entry.item_nom}</span>
+      {/* `min-w-[5rem]` garantit une largeur lisible au nom : quand il ne reste
+          plus assez de place, c'est le sélecteur de quantité qui passe à la
+          ligne plutôt que le nom qui se réduit à quelques caractères. */}
+      <span className="flex-1 min-w-[5rem] text-ink text-sm sm:text-xs font-bold truncate">{item?.nom ?? entry.item_nom}</span>
+      {onRemove && (
+        <button onClick={onRemove} className="w-7 h-7 sm:w-5 sm:h-5 rounded bg-cream-secondary border border-ink text-ink text-xs shrink-0">✕</button>
+      )}
       {onQuantityChange ? (
-        <div className="flex items-center gap-1 shrink-0">
-          <button onClick={() => onQuantityChange(entry.quantity - 1)} className="w-5 h-5 rounded bg-cream-secondary border border-ink text-ink text-xs font-bold">−</button>
+        <div className="flex items-center justify-end gap-1 w-full shrink-0">
+          <button onClick={() => onQuantityChange(entry.quantity - 1)} className="w-7 h-7 sm:w-5 sm:h-5 rounded bg-cream-secondary border border-ink text-ink text-sm sm:text-xs font-bold">−</button>
           <NumberInput
             value={entry.quantity}
             min={1}
             fallback={1}
             onCommit={(q) => onQuantityChange(Math.max(1, max != null ? Math.min(q, max) : q))}
-            className="w-10 bg-cream-secondary border border-ink rounded text-ink text-xs font-bold text-center"
+            className="w-12 h-7 sm:w-10 sm:h-5 bg-cream-secondary border border-ink rounded text-ink text-sm sm:text-xs font-bold text-center"
           />
           <button
             onClick={() => onQuantityChange(entry.quantity + 1)}
             disabled={max != null && entry.quantity >= max}
-            className="w-5 h-5 rounded bg-cream-secondary border border-ink text-ink text-xs font-bold disabled:opacity-40"
+            className="w-7 h-7 sm:w-5 sm:h-5 rounded bg-cream-secondary border border-ink text-ink text-sm sm:text-xs font-bold disabled:opacity-40"
           >+</button>
         </div>
       ) : (
-        <span className="text-ink text-xs font-bold shrink-0">×{entry.quantity}</span>
-      )}
-      {onRemove && (
-        <button onClick={onRemove} className="w-5 h-5 rounded bg-cream-secondary border border-ink text-ink text-xs shrink-0">✕</button>
+        <span className="text-ink text-sm sm:text-xs font-bold shrink-0">×{entry.quantity}</span>
       )}
     </div>
   )
@@ -103,7 +142,7 @@ function ItemAddSearch({ candidates, itemsByName, onAdd }: { candidates: { item_
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Ajouter un objet…"
-        className="w-full bg-white border-2 border-ink rounded-lg px-3 py-1.5 text-ink text-sm placeholder-ink-muted-2 outline-none"
+        className="w-full bg-white border-2 border-ink rounded-lg px-3 py-2 sm:py-1.5 text-ink text-sm placeholder-ink-muted-2 outline-none"
       />
       {query && (
         <div className="absolute z-10 top-full left-0 right-0 mt-1 bg-cream border-2 border-ink rounded-lg shadow-[var(--shadow-pixel)] max-h-48 overflow-y-auto">
@@ -116,9 +155,9 @@ function ItemAddSearch({ candidates, itemsByName, onAdd }: { candidates: { item_
                 <button
                   key={c.item_nom}
                   onClick={() => { onAdd(c.item_nom); setQuery('') }}
-                  className="w-full flex items-center gap-2 px-3 py-2 border-b border-[#cfc7a8] last:border-b-0 hover:bg-cream-secondary transition-colors text-left"
+                  className="w-full flex items-center gap-2 px-3 py-2.5 sm:py-2 border-b border-[#cfc7a8] last:border-b-0 hover:bg-cream-secondary transition-colors text-left"
                 >
-                  {item?.image_url ? <img src={item.image_url} alt="" className="w-5 h-5 object-contain pixelated" /> : <span>🎒</span>}
+                  {item?.image_url ? <img src={item.image_url} alt="" className="w-6 h-6 sm:w-5 sm:h-5 object-contain pixelated" /> : <span>🎒</span>}
                   <span className="flex-1 text-ink text-sm truncate">{item?.nom ?? c.item_nom}</span>
                   {c.max != null && <span className="text-ink-muted-2 text-xs shrink-0">×{c.max}</span>}
                 </button>
@@ -141,20 +180,20 @@ function PokemonListRow({ pp, pokemonByName, selected, onSelect, onInfo }: {
   const pokemon = pokemonByName.get(pp.pokemon_nom)
   return (
     <div className={`flex items-center gap-2 pl-1 pr-2 py-1 rounded-lg border-2 ${selected ? 'border-hp-orange bg-cream-secondary' : 'border-ink bg-white'}`}>
-      <button onClick={onSelect} className="flex items-center gap-2 flex-1 min-w-0 text-left py-0.5">
-        <div className="w-8 h-8 flex items-center justify-center shrink-0">
+      <button onClick={onSelect} className="flex items-center gap-2 flex-1 min-w-0 text-left py-1 sm:py-0.5">
+        <div className="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center shrink-0">
           {pokemon?.image_miniature ? (
             <img src={pokemon.image_miniature} alt="" className="w-full h-full object-contain pixelated" />
           ) : (
             <span className="text-xl">❓</span>
           )}
         </div>
-        <span className="text-ink text-xs font-bold truncate">{pp.nickname?.trim() || pp.pokemon_nom}</span>
+        <span className="text-ink text-sm sm:text-xs font-bold truncate">{pp.nickname?.trim() || pp.pokemon_nom}</span>
       </button>
       <button
         onClick={onInfo}
         title="Plus d'infos"
-        className="w-6 h-6 rounded-full border-2 border-ink bg-cream-secondary text-ink text-xs font-bold shrink-0 flex items-center justify-center"
+        className="w-7 h-7 sm:w-6 sm:h-6 rounded-full border-2 border-ink bg-cream-secondary text-ink text-xs font-bold shrink-0 flex items-center justify-center"
       >
         i
       </button>
@@ -175,9 +214,9 @@ function PokemonTile({ nom, nickname, pokemonByName, selected, onClick, placehol
   return (
     <Tag
       onClick={onClick}
-      className={`flex flex-col items-center gap-1 p-2 rounded-lg border-2 ${selected ? 'border-hp-orange bg-cream-secondary' : 'border-ink bg-white'}`}
+      className={`w-full flex items-center gap-3 p-2 sm:flex-col sm:gap-1 rounded-lg border-2 ${selected ? 'border-hp-orange bg-cream-secondary' : 'border-ink bg-white'}`}
     >
-      <div className="w-16 h-16 flex items-center justify-center">
+      <div className="w-14 h-14 sm:w-16 sm:h-16 shrink-0 flex items-center justify-center">
         {nom ? (
           pokemon?.image_miniature ? (
             <img src={pokemon.image_miniature} alt={nom} className="w-full h-full object-contain pixelated" />
@@ -188,7 +227,7 @@ function PokemonTile({ nom, nickname, pokemonByName, selected, onClick, placehol
           <span className="text-3xl">❓</span>
         )}
       </div>
-      <span className="text-ink text-xs font-bold text-center leading-tight">
+      <span className="flex-1 min-w-0 text-ink text-sm sm:text-xs font-bold text-left sm:text-center leading-tight">
         {nom ? (nickname?.trim() || nom) : (placeholder ?? '???')}
       </span>
     </Tag>
@@ -368,8 +407,8 @@ export function TradePopup({ player, players, inventory, roster, itemsByName, po
   const readOnlyItemsOk = hasAllItems(readOnlyRequestItems, inventory)
 
   return (
-    <div className="fixed inset-0 z-[65] flex items-center justify-center bg-black/80 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="bg-cream border-[3px] border-ink rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel-lg)] max-w-lg w-full min-h-[30rem] max-h-[92vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-[65] flex items-center justify-center bg-black/80 p-2 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="bg-cream border-[3px] border-ink rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel-lg)] max-w-lg w-full min-h-[min(30rem,92vh)] max-h-[92vh] flex flex-col overflow-hidden">
         <div className="flex items-center gap-2 p-3 border-b-2 border-[#cfc7a8] shrink-0">
           <span className="text-xl">🔄</span>
           <h3 className="text-ink font-bold flex-1">Échange</h3>
@@ -379,7 +418,7 @@ export function TradePopup({ player, players, inventory, roster, itemsByName, po
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-4">
           {kind === null && (
             <div>
               <p className="text-ink-muted text-sm mb-3 text-center">Que veux-tu échanger ?</p>
@@ -403,9 +442,8 @@ export function TradePopup({ player, players, inventory, roster, itemsByName, po
           )}
 
           {kind === 'item' && (
-            <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-2 items-start">
-              <div>
-                <p className="text-ink-muted text-xs font-bold mb-2 text-center">Moi</p>
+            <TradeSides>
+              <TradeSide label="Moi">
                 <div className="space-y-1.5 min-h-[2.5rem]">
                   {(editing ? selfItems : readOnlyRequestItems).map((e) => (
                     <ItemChip
@@ -424,12 +462,11 @@ export function TradePopup({ player, players, inventory, roster, itemsByName, po
                     <ItemAddSearch candidates={inventoryCandidates} itemsByName={itemsByName} onAdd={(nom) => setSelfItems((prev) => [...prev, { item_nom: nom, quantity: 1 }])} />
                   </div>
                 )}
-              </div>
+              </TradeSide>
 
-              <div className="flex items-center justify-center h-full pt-8 text-2xl text-ink-muted-2">🔁</div>
+              <TradeDivider />
 
-              <div>
-                <p className="text-ink-muted text-xs font-bold mb-2 text-center">Je veux</p>
+              <TradeSide label="Je veux">
                 <div className="space-y-1.5 min-h-[2.5rem]">
                   {(editing ? wantItems : readOnlyOfferItems).map((e) => (
                     <ItemChip
@@ -447,16 +484,15 @@ export function TradePopup({ player, players, inventory, roster, itemsByName, po
                     <ItemAddSearch candidates={catalogCandidates} itemsByName={itemsByName} onAdd={(nom) => setWantItems((prev) => [...prev, { item_nom: nom, quantity: 1 }])} />
                   </div>
                 )}
-              </div>
-            </div>
+              </TradeSide>
+            </TradeSides>
           )}
 
           {kind === 'pokemon' && (
-            <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-2 items-start">
-              <div>
-                <p className="text-ink-muted text-xs font-bold mb-2 text-center">Moi</p>
+            <TradeSides>
+              <TradeSide label="Moi">
                 {editing ? (
-                  <div className="space-y-1.5 max-h-56 overflow-y-auto">
+                  <div className="space-y-1.5 max-h-44 sm:max-h-56 overflow-y-auto">
                     {roster.map((pp) => (
                       <PokemonListRow
                         key={pp.id}
@@ -469,12 +505,12 @@ export function TradePopup({ player, players, inventory, roster, itemsByName, po
                     ))}
                   </div>
                 ) : existingTrade?.status === 'pending' && !viewerIsProposer ? (
-                  acceptCandidates.length > 0 && (
+                  acceptCandidates.length > 0 ? (
                     <>
                       {acceptCandidates.length > 1 && (
                         <p className="text-ink-muted text-xs font-bold mb-1.5 text-center">Sélectionne le Pokémon à échanger</p>
                       )}
-                      <div className="space-y-1.5 max-h-56 overflow-y-auto">
+                      <div className="space-y-1.5 max-h-44 sm:max-h-56 overflow-y-auto">
                         {acceptCandidates.map((pp) => (
                           <PokemonListRow
                             key={pp.id}
@@ -487,6 +523,8 @@ export function TradePopup({ player, players, inventory, roster, itemsByName, po
                         ))}
                       </div>
                     </>
+                  ) : (
+                    <p className="text-ink-muted-2 text-xs italic text-center py-2">Aucun Pokémon correspondant</p>
                   )
                 ) : (
                   <PokemonTile
@@ -495,17 +533,16 @@ export function TradePopup({ player, players, inventory, roster, itemsByName, po
                     placeholder="N'importe lequel"
                   />
                 )}
-              </div>
+              </TradeSide>
 
-              <div className="flex items-center justify-center h-full pt-8 text-2xl text-ink-muted-2">🔁</div>
+              <TradeDivider />
 
-              <div>
-                <p className="text-ink-muted text-xs font-bold mb-2 text-center">Je veux</p>
+              <TradeSide label="Je veux">
                 {editing ? (
                   <div className="space-y-2">
                     <PokemonTile nom={wantAny ? null : wantPokemonNom} pokemonByName={pokemonByName} placeholder="N'importe lequel" />
-                    <label className="flex items-center gap-2 text-xs text-ink-muted">
-                      <input type="checkbox" checked={wantAny} onChange={(e) => setWantAny(e.target.checked)} className="w-4 h-4" />
+                    <label className="flex items-center gap-2 text-xs text-ink-muted py-1 sm:py-0">
+                      <input type="checkbox" checked={wantAny} onChange={(e) => setWantAny(e.target.checked)} className="w-5 h-5 sm:w-4 sm:h-4 shrink-0" />
                       N'importe quel Pokémon non possédé
                     </label>
                     {!wantAny && (
@@ -515,7 +552,7 @@ export function TradePopup({ player, players, inventory, roster, itemsByName, po
                           value={pokemonQuery}
                           onChange={(e) => setPokemonQuery(e.target.value)}
                           placeholder="Rechercher une espèce…"
-                          className="w-full bg-white border-2 border-ink rounded-lg px-3 py-1.5 text-ink text-sm placeholder-ink-muted-2 outline-none"
+                          className="w-full bg-white border-2 border-ink rounded-lg px-3 py-2 sm:py-1.5 text-ink text-sm placeholder-ink-muted-2 outline-none"
                         />
                         {pokemonQuery && (
                           <div className="absolute z-10 top-full left-0 right-0 mt-1 bg-cream border-2 border-ink rounded-lg shadow-[var(--shadow-pixel)] max-h-40 overflow-y-auto">
@@ -526,7 +563,7 @@ export function TradePopup({ player, players, inventory, roster, itemsByName, po
                                 <button
                                   key={p.nom}
                                   onClick={() => { setWantPokemonNom(p.nom); setPokemonQuery('') }}
-                                  className="w-full flex items-center gap-2 px-3 py-2 border-b border-[#cfc7a8] last:border-b-0 hover:bg-cream-secondary transition-colors text-left"
+                                  className="w-full flex items-center gap-2 px-3 py-2.5 sm:py-2 border-b border-[#cfc7a8] last:border-b-0 hover:bg-cream-secondary transition-colors text-left"
                                 >
                                   <img src={p.image_miniature} alt="" className="w-6 h-6 object-contain pixelated" />
                                   <span className="text-ink text-sm truncate">{p.nom}</span>
@@ -545,8 +582,8 @@ export function TradePopup({ player, players, inventory, roster, itemsByName, po
                     pokemonByName={pokemonByName}
                   />
                 )}
-              </div>
-            </div>
+              </TradeSide>
+            </TradeSides>
           )}
 
           {actionError && <p className="text-hp-red text-xs font-bold mt-3 text-center">{actionError}</p>}

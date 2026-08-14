@@ -256,6 +256,11 @@ export function AutoBattleScreen({
   const [skipSide, setSkipSide] = useState<Side | null>(null)
   const [skipKey, setSkipKey] = useState(0)
   const [skipLabel, setSkipLabel] = useState('Tour passé !')
+  // Déclenchement d'un talent d'espèce (voir AutoBattleTurn.talent_tick) : nom
+  // du talent en texte flottant doré au-dessus du pokémon concerné.
+  const [talentSide, setTalentSide] = useState<Side | null>(null)
+  const [talentKey, setTalentKey] = useState(0)
+  const [talentLabel, setTalentLabel] = useState('')
   const [recoilFx, setRecoilFx] = useState<{ side: Side; amount: number } | null>(null)
   const [recoilKey, setRecoilKey] = useState(0)
   const [playerInvulnerable, setPlayerInvulnerable] = useState(false)
@@ -437,20 +442,28 @@ export function AutoBattleScreen({
       ? { name: ownedPokemonName(playerPokemon), iconSrc: playerImageOverride ?? playerSpecies?.image_miniature, ability: turn?.ability_nom ?? playerAbilityNom }
       : { name: opponentNom, iconSrc: opponentImageOverride ?? opponentSpecies?.image_miniature, ability: turn?.ability_nom ?? opponentAbilityNom }
 
+    // `content` : soit une phrase simple, soit un découpage autour d'une
+    // mention à mettre en valeur — un STATUT (coloré) ou un nom de TALENT (gras).
     const pushHistory = (
       side: Side,
-      content: string | { before: string; status: AutoBattleStatusEffect; after: string },
+      content:
+        | string
+        | { before: string; status: AutoBattleStatusEffect; after: string }
+        | { before: string; talent: string; after: string },
       extra?: { damage?: number; heal?: number; superEffective?: boolean; precisionFormula?: string; damageFormula?: string; healFormula?: string }
     ) => {
       const info = sideInfo(side)
       historyIdRef.current += 1
+      const isStatus = typeof content !== 'string' && 'status' in content
+      const isTalent = typeof content !== 'string' && 'talent' in content
       const entry: AutoBattleHistoryEntryData = {
         id: historyIdRef.current, elapsedMs: Date.now() - battleStart, side, pokemonName: info.name, iconSrc: info.iconSrc,
         text: typeof content === 'string' ? content : undefined,
-        statusText: typeof content === 'string' ? undefined : (() => {
+        statusText: !isStatus ? undefined : (() => {
           const display = getStatusEffectDisplay(content.status)
           return { before: content.before, statusLabel: display.label, statusColor: display.color, after: content.after }
         })(),
+        talentText: !isTalent ? undefined : { before: content.before, talentLabel: content.talent, after: content.after },
         damage: extra?.damage && extra.damage > 0 ? extra.damage : undefined,
         heal: extra?.heal && extra.heal > 0 ? extra.heal : undefined,
         superEffective: extra?.superEffective,
@@ -572,17 +585,60 @@ export function AutoBattleScreen({
       // 'status_tick' et 'heal_dot_tick' n'appartiennent jamais à un tel
       // bloc, cassent toujours la série (un tick n'est pas "réutiliser la
       // capacité").
-      if (turn.skipped || turn.status_tick || turn.heal_dot_tick) {
+      if (turn.skipped || turn.status_tick || turn.heal_dot_tick || turn.talent_tick) {
         streak = 0
         prevStreakAttacker = null
       } else {
         streak = attackerSide === prevStreakAttacker ? streak + 1 : 1
         prevStreakAttacker = attackerSide
       }
-      const multiplier = (turn.skipped || turn.status_tick || turn.heal_dot_tick) ? 1 : speedMultiplierForRepeat(streak)
+      const multiplier = (turn.skipped || turn.status_tick || turn.heal_dot_tick || turn.talent_tick) ? 1 : speedMultiplierForRepeat(streak)
       const durations = computeDurations(multiplier * speedMultiplier)
       const impactOffset = durations.anticipation + durations.lunge + durations.strikeRise + durations.strikeLand
       const turnDuration = impactOffset + durations.return + durations.gap
+
+      // Déclenchement d'un TALENT d'espèce (voir autobattle_talents) : jamais
+      // l'usage d'une capacité, donc jamais sideInfo(...).ability — en Combat
+      // Manuel/PvP, turn.ability_nom porte la capacité choisie ce tour-là, qui
+      // n'a aucun rapport avec le talent (même piège que heal_dot_tick).
+      // L'animation est auto-ciblée (celle configurée en admin, 'idle' par
+      // défaut) et le serveur fournit déjà la phrase d'historique.
+      if (turn.talent_tick) {
+        const animation = turn.talent_animation ?? 'idle'
+        scheduleAttackAnimation({
+          side: attackerSide, animation, abilityNom: '', durations, turnStart, full: true, damage: 0,
+        })
+        timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'return', durations, animation }), turnStart + impactOffset))
+        timers.push(window.setTimeout(() => setAttackState(null), turnStart + impactOffset + durations.return))
+
+        timers.push(window.setTimeout(() => {
+          setShownTurnIndex(i)
+          const label = turn.talent_nom ?? 'Talent'
+          setTalentSide(attackerSide)
+          setTalentLabel(label)
+          setTalentKey((k) => k + 1)
+          // 'endure_ko' remonte les PV à 1 et 'heal_below_hp' soigne : c'est
+          // attacker_hp_after (le propriétaire du talent) qui fait foi ici,
+          // jamais defender_hp_after.
+          if (turn.attacker_hp_after != null) {
+            if (attackerSide === 'player') setPlayerHp(turn.attacker_hp_after)
+            else setOpponentHp(turn.attacker_hp_after)
+          }
+          if (turn.heal != null && turn.heal > 0) {
+            setHealSide(attackerSide)
+            setLastHeal({ side: attackerSide, amount: turn.heal })
+            setHealKey((k) => k + 1)
+          }
+          pushHistory(
+            attackerSide,
+            { before: 'déclenche son talent ', talent: label, after: turn.talent_detail ? ` : ${turn.talent_detail}` : '' },
+            { heal: turn.heal }
+          )
+        }, turnStart + durations.anticipation))
+        timers.push(window.setTimeout(() => setTalentSide(null), turnStart + durations.anticipation + FLYING_TEXT_MS))
+        cursor += turnDuration
+        continue
+      }
 
       // Tick de statut (paralysie/gel/peur/confusion/sommeil/brûlure/poison,
       // voir autobattle_resolve_battle) : dé lancé en tout premier s'il y en
@@ -1051,6 +1107,9 @@ export function AutoBattleScreen({
             {skipSide === 'player' && (
               <AutoBattleFloatingText text={skipLabel} animKey={skipKey} className="text-white" />
             )}
+            {talentSide === 'player' && (
+              <AutoBattleFloatingText text={talentLabel} animKey={talentKey} className="text-[#f0c419]" />
+            )}
             {healSide === 'player' && lastHeal?.side === 'player' && (
               <AutoBattleHealEffect amount={lastHeal.amount} animKey={healKey} />
             )}
@@ -1118,6 +1177,9 @@ export function AutoBattleScreen({
             )}
             {skipSide === 'opponent' && (
               <AutoBattleFloatingText text={skipLabel} animKey={skipKey} className="text-white" />
+            )}
+            {talentSide === 'opponent' && (
+              <AutoBattleFloatingText text={talentLabel} animKey={talentKey} className="text-[#f0c419]" />
             )}
             {healSide === 'opponent' && lastHeal?.side === 'opponent' && (
               <AutoBattleHealEffect amount={lastHeal.amount} animKey={healKey} />

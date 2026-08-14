@@ -12,6 +12,8 @@ export interface AutoBattleHistoryEntryData {
   text?: string
   /** Texte découpé autour d'une mention de statut, affichée en gras dans sa couleur (voir getStatusEffectDisplay) */
   statusText?: { before: string; statusLabel: string; statusColor: string; after: string }
+  /** Texte découpé autour d'un nom de TALENT, affiché en gras (voir autobattle_talents) */
+  talentText?: { before: string; talentLabel: string; after: string }
   damage?: number
   heal?: number
   superEffective?: boolean
@@ -73,6 +75,12 @@ export function AutoBattleHistoryLog({ entries, onHide, className = '', isAdmin 
                       {e.statusText.before}
                       <span className="font-bold" style={{ color: e.statusText.statusColor }}>{e.statusText.statusLabel}</span>
                       {e.statusText.after}
+                    </>
+                  ) : e.talentText ? (
+                    <>
+                      {e.talentText.before}
+                      <span className="font-bold">{e.talentText.talentLabel}</span>
+                      {e.talentText.after}
                     </>
                   ) : e.text}
                   {e.damage != null && (

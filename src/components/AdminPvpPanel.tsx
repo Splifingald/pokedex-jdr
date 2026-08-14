@@ -143,6 +143,15 @@ export function AdminPvpPanel() {
               />
               <span>Activer le système de précision (désactivé, toute capacité touche à coup sûr)</span>
             </label>
+            <label className="flex items-center gap-2 text-sm text-ink-muted mt-2">
+              <input
+                type="checkbox"
+                checked={config.talents_enabled}
+                onChange={(e) => updateConfig({ talents_enabled: e.target.checked })}
+                className="w-4 h-4"
+              />
+              <span>Activer les talents d'espèce (désactivés, aucun talent ne se déclenche)</span>
+            </label>
           </div>
         </div>
       </div>

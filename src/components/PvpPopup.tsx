@@ -1,11 +1,12 @@
 import { useMemo, useRef, useState } from 'react'
-import type { Player, PlayerPokemon, Pokemon, Attack, AutoBattleAbilityRule, AutoBattleManualRoundResult, PvpChallenge, PvpStartBattleResult } from '../types'
+import type { Player, PlayerPokemon, Pokemon, Attack, AutoBattleAbilityRule, AutoBattleManualRoundResult, AutoBattleTurn, PvpChallenge, PvpStartBattleResult } from '../types'
 import { supabase } from '../lib/supabase'
 import { usePvpConfig } from '../hooks/usePvpConfig'
 import { usePvpChallenges } from '../hooks/usePvpChallenges'
 import { usePvpChallengeAttempts } from '../hooks/usePvpChallengeAttempts'
 import { useAutoBattleBannedAttacks } from '../hooks/useAutoBattleBannedAttacks'
 import { useAutoBattleAbilityRules } from '../hooks/useAutoBattleAbilityRules'
+import { useAutoBattleTalents } from '../hooks/useAutoBattleTalents'
 import { generateIdempotencyKey, normalizeFirstAttacker } from '../lib/autoBattle'
 import { getHpBreakdown } from '../lib/xpBonuses'
 import { useToast } from '../context/ToastContext'
@@ -71,6 +72,7 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
   const { attemptsByChallenge } = usePvpChallengeAttempts()
   const { bannedNames } = useAutoBattleBannedAttacks()
   const { rules: abilityRules } = useAutoBattleAbilityRules()
+  const { talentsByPokemon } = useAutoBattleTalents()
   const { showToast } = useToast()
 
   const abilityRulesByName = useMemo(() => {
@@ -89,6 +91,8 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
   const [activeChallenge, setActiveChallenge] = useState<PvpChallenge | null>(null)
   const [attackSelectedPokemon, setAttackSelectedPokemon] = useState<PlayerPokemon | null>(null)
   const [firstAttacker, setFirstAttacker] = useState<'player' | 'opponent' | null>(null)
+  // Tours de talent joués à l'ouverture (voir pvp_start_battle).
+  const [startTurns, setStartTurns] = useState<AutoBattleTurn[]>([])
   const [pastChallenges, setPastChallenges] = useState<PvpChallenge[] | null>(null)
   const [pastLoading, setPastLoading] = useState(false)
   const submittingRef = useRef(false)
@@ -199,6 +203,7 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
 
     submittingRef.current = false
     setFirstAttacker(normalizeFirstAttacker(result.first_attacker))
+    setStartTurns(result.turns ?? [])
     setView('attack-coin-toss')
   }
 
@@ -403,6 +408,8 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
               attacksByName={attacksByName}
               bannedAttacks={bannedNames}
               opponentDiscovered={false}
+              // Voir AutoBattlePopup : masqué si la bascule globale JcJ est coupée.
+              talentsByPokemon={config.talents_enabled ? talentsByPokemon : undefined}
               onSelect={(pp) => { setPostSelectedPokemon(pp); setSelectedAbilities([]); setView('post-pick-abilities') }}
               onBack={resetToList}
             />
@@ -448,6 +455,8 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
               bannedAttacks={bannedNames}
               opponentSpecies={attackOpponentSpecies}
               opponentDiscovered
+              // Voir AutoBattlePopup : masqué si la bascule globale JcJ est coupée.
+              talentsByPokemon={config.talents_enabled ? talentsByPokemon : undefined}
               onSelect={(pp) => void handleStartBattle(pp)}
               onBack={resetToList}
             />
@@ -460,17 +469,19 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
           {view === 'attack-battle' && activeChallenge && attackSelectedPokemon && firstAttacker && (
             <ManualBattleScreen
               firstAttacker={firstAttacker}
+              startTurns={startTurns}
               playerPokemon={attackSelectedPokemon}
               playerSpecies={attackSelectedSpecies}
               playerMaxHp={Math.max(1, getHpBreakdown(attackSelectedSpecies, attackSelectedPokemon.xp).total)}
               opponentSpecies={attackOpponentSpecies}
               opponentNom={activeChallenge.pokemon_nom}
               opponentMaxHp={activeChallenge.max_hp}
-              // Métamorph JOUEUR en mode Manuel n'est pas implémenté côté
-              // pvp_resolve_round (limitation volontaire, voir schema.sql) —
-              // vide plutôt que la boucle du défenseur, qui serait acceptée
-              // ici mais rejetée par le serveur (validée contre les VRAIES
-              // capacités apprises de l'attaquant, pas ce pool).
+              // Le talent 'transform' (anciennement Métamorph) n'est pas
+              // implémenté côté pvp_resolve_round (limitation volontaire, voir
+              // schema.sql) : le client doit donc l'ignorer ici aussi, sinon la
+              // grille proposerait un mouvepool copié que le serveur rejetterait
+              // (il valide contre les VRAIES capacités apprises de l'attaquant).
+              playerTransforms={false}
               opponentAbilityPool={[]}
               attacksByName={attacksByName}
               abilityRulesByName={abilityRulesByName}

@@ -7,6 +7,7 @@ const DEFAULTS: PvpConfig = {
   nom: 'Défi PvP',
   icon_url: '',
   precision_enabled: true,
+  talents_enabled: true,
   loadout_max: 4,
   trial_pokemon_nom: '',
   trial_hp: 80,

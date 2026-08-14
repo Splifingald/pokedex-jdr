@@ -83,6 +83,9 @@ export function PvpTrialBattleScreen({
     }
 
     setFirstAttacker(normalizeFirstAttacker(result.first_attacker))
+    // Tours de talent d'ouverture (voir pvp_trial_start) : ils amorcent le
+    // journal, l'écran de combat les anime avant le 1er round.
+    setTurns(result.turns ?? [])
     setStarting(false)
     setView('battle')
   }

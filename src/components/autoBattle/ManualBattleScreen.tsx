@@ -24,6 +24,10 @@ interface Props {
   opponentAbilityPool: string[]
   /** Qui attaque en premier CE combat (tiré au sort par autobattle_start_manual_battle, révélé au joueur via AutoBattleCoinToss AVANT le montage de cet écran, voir AutoBattlePopup) — fixe pour tout le combat, sert uniquement à afficher "(1er)"/"(2ème)" sur l'invite de sélection. */
   firstAttacker: 'player' | 'opponent'
+  /** Tours de talent joués à l'OUVERTURE du combat (voir autobattle_start_manual_battle) : animés avant que la grille de sélection ne devienne cliquable. Tableau vide si aucun talent n'est en jeu. */
+  startTurns: AutoBattleTurn[]
+  /** Le pokémon du joueur porte-t-il le talent 'transform' (anciennement le cas spécial Métamorph) ? Décidé par le parent à partir des talents chargés, pour rester aligné sur le serveur — qui applique la même règle, bascule globale des talents comprise. */
+  playerTransforms: boolean
   attacksByName: Map<string, Attack>
   abilityRulesByName: Map<string, AutoBattleAbilityRule>
   bannedAttacks: Set<string>
@@ -51,11 +55,15 @@ interface Props {
 // autobattle_start_manual_battle décide first_attacker dès le choix du
 // pokémon, plus besoin de le différer ici jusqu'au 1er tour).
 export function ManualBattleScreen({
-  playerPokemon, playerSpecies, playerMaxHp, opponentSpecies, opponentNom, opponentMaxHp, firstAttacker, opponentAbilityPool,
+  playerPokemon, playerSpecies, playerMaxHp, opponentSpecies, opponentNom, opponentMaxHp, firstAttacker, startTurns, playerTransforms, opponentAbilityPool,
   attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, isAdmin, onSubmitRound, onFinished, onDeclareTie,
 }: Props) {
-  const [turns, setTurns] = useState<AutoBattleTurn[]>([])
-  const [busy, setBusy] = useState(false)
+  // Les tours d'ouverture (talents) sont déjà résolus côté serveur au moment du
+  // tirage au sort : ils amorcent le journal, et `busy` démarre à vrai pour que
+  // la grille reste verrouillée le temps de leur animation (relâchée par
+  // handleAnimationCaughtUp, comme après un tour normal).
+  const [turns, setTurns] = useState<AutoBattleTurn[]>(startTurns)
+  const [busy, setBusy] = useState(startTurns.length > 0)
   const [pendingResult, setPendingResult] = useState<AutoBattleManualRoundResult | null>(null)
   const [roundCount, setRoundCount] = useState(0)
 
@@ -64,7 +72,7 @@ export function ManualBattleScreen({
   // (dédupliqué — plusieurs positions peuvent pointer vers la même capacité,
   // voir opponentAbilityPool) — connu dès le montage (playerSpecies vient du
   // roster, pas d'un résultat de tour), pas besoin d'attendre le 1er round.
-  const isPlayerMetamorph = playerSpecies?.nom === 'Métamorph'
+  const isPlayerMetamorph = playerTransforms
   const abilityNoms = useMemo(
     () => isPlayerMetamorph ? [...new Set(opponentAbilityPool)] : playerPokemon.moves,
     [isPlayerMetamorph, opponentAbilityPool, playerPokemon.moves]
