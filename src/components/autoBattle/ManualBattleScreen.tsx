@@ -28,6 +28,8 @@ interface Props {
   startTurns: AutoBattleTurn[]
   /** Le pokémon du joueur porte-t-il le talent 'transform' (anciennement le cas spécial Métamorph) ? Décidé par le parent à partir des talents chargés, pour rester aligné sur le serveur — qui applique la même règle, bascule globale des talents comprise. */
   playerTransforms: boolean
+  /** Idem pour l'adversaire du niveau — sert au sprite copié affiché dès l'ouverture. */
+  opponentTransforms: boolean
   attacksByName: Map<string, Attack>
   abilityRulesByName: Map<string, AutoBattleAbilityRule>
   bannedAttacks: Set<string>
@@ -55,7 +57,7 @@ interface Props {
 // autobattle_start_manual_battle décide first_attacker dès le choix du
 // pokémon, plus besoin de le différer ici jusqu'au 1er tour).
 export function ManualBattleScreen({
-  playerPokemon, playerSpecies, playerMaxHp, opponentSpecies, opponentNom, opponentMaxHp, firstAttacker, startTurns, playerTransforms, opponentAbilityPool,
+  playerPokemon, playerSpecies, playerMaxHp, opponentSpecies, opponentNom, opponentMaxHp, firstAttacker, startTurns, playerTransforms, opponentTransforms, opponentAbilityPool,
   attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, isAdmin, onSubmitRound, onFinished, onDeclareTie,
 }: Props) {
   // Les tours d'ouverture (talents) sont déjà résolus côté serveur au moment du
@@ -73,6 +75,15 @@ export function ManualBattleScreen({
   // voir opponentAbilityPool) — connu dès le montage (playerSpecies vient du
   // roster, pas d'un résultat de tour), pas besoin d'attendre le 1er round.
   const isPlayerMetamorph = playerTransforms
+  // Sprite copié par le talent 'transform', dérivé LOCALEMENT : le serveur ne le
+  // renvoie qu'avec le résultat d'un round, ce qui laissait le vrai sprite du
+  // transformé à l'écran pendant toute l'ouverture (animations de talent puis
+  // attente de la 1ère sélection de capacité). Même règle que côté serveur, à
+  // partir des deux espèces déjà connues ici.
+  const startPlayerImageOverride = playerTransforms ? opponentSpecies?.image_miniature : undefined
+  const startOpponentImageOverride = opponentTransforms
+    ? (startPlayerImageOverride ?? playerSpecies?.image_miniature)
+    : undefined
   const abilityNoms = useMemo(
     () => isPlayerMetamorph ? [...new Set(opponentAbilityPool)] : playerPokemon.moves,
     [isPlayerMetamorph, opponentAbilityPool, playerPokemon.moves]
@@ -172,12 +183,12 @@ export function ManualBattleScreen({
       playerSpecies={playerSpecies}
       playerMaxHp={playerMaxHp}
       playerAbilityNom=""
-      playerImageOverride={pendingResult?.player_image_override ?? undefined}
+      playerImageOverride={pendingResult?.player_image_override ?? startPlayerImageOverride ?? undefined}
       opponentSpecies={opponentSpecies}
       opponentMaxHp={opponentMaxHp}
       opponentNom={opponentNom}
       opponentAbilityNom=""
-      opponentImageOverride={pendingResult?.opponent_image_override ?? undefined}
+      opponentImageOverride={pendingResult?.opponent_image_override ?? startOpponentImageOverride ?? undefined}
       turns={turns}
       playerTypeBonus={pendingResult?.player_type_bonus ?? false}
       opponentTypeBonus={pendingResult?.opponent_type_bonus ?? false}

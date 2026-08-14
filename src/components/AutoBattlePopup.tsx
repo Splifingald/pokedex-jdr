@@ -686,6 +686,11 @@ export function AutoBattlePopup({
                 config.talents_enabled
                 && (talentsByPokemon.get(selectedPokemon.pokemon_nom) ?? []).some((t) => t.kind === 'transform')
               }
+              opponentTransforms={
+                config.talents_enabled
+                && !!activeLevel
+                && (talentsByPokemon.get(activeLevel.opponent_pokemon_nom) ?? []).some((t) => t.kind === 'transform')
+              }
               playerPokemon={selectedPokemon}
               playerSpecies={activeSpecies}
               playerMaxHp={Math.max(1, getHpBreakdown(activeSpecies, selectedPokemon.xp).total)}

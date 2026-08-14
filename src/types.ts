@@ -1172,6 +1172,8 @@ export type AutoBattleTalentKind =
   | 'heal_below_hp'
   /** Copie l'adversaire (sprite, type, super efficace, dégâts de base, movepool) — anciennement le cas spécial « Métamorph », codé en dur sur le nom d'espèce. Sans effet en PvP. */
   | 'transform'
+  /** « Somnolent » : endormi, il lui faut un 6 exact au dé pour se réveiller (au lieu de 4, 5 ou 6). */
+  | 'heavy_sleeper'
 
 export type AutoBattleTalentStat = 'damage' | 'precision'
 export type AutoBattleTalentValueType = 'flat' | 'percent_max_hp' | 'range'
@@ -1314,6 +1316,8 @@ export interface AutoBattleTurn {
   talent_animation?: BattleAnimationId | null
   talent_detail?: string
   talent_absorbed?: number
+  /** Statut infligé à l'ADVERSAIRE du porteur par un talent 'inflict_status' — un tour de talent n'étant pas un tour d'attaque, il ne passe pas par status_applied, mais le badge doit quand même apparaître. */
+  talent_inflicted_status?: AutoBattleStatusEffect
   // Décoration CLIENT UNIQUEMENT (jamais renvoyée par le serveur) — voir
   // ManualBattleScreen : en Combat Manuel la capacité change à chaque tour,
   // contrairement au Combat Auto où elle est fixe (playerAbilityNom/

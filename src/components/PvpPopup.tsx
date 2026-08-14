@@ -482,6 +482,7 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
               // grille proposerait un mouvepool copié que le serveur rejetterait
               // (il valide contre les VRAIES capacités apprises de l'attaquant).
               playerTransforms={false}
+              opponentTransforms={false}
               opponentAbilityPool={[]}
               attacksByName={attacksByName}
               abilityRulesByName={abilityRulesByName}

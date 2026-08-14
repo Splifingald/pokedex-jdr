@@ -403,6 +403,27 @@ export function AutoBattleScreen({
     // exécution).
     if (scheduledCountRef.current >= turns.length) return
     const timers: number[] = []
+    // Sauvegarde de TOUT ce que cet effet s'apprête à écrire dans des refs :
+    // si son nettoyage survient avant que le moindre timer n'ait pu s'exécuter,
+    // il faut pouvoir revenir en arrière (voir `flushed` et le cleanup).
+    const refsAtStart = {
+      scheduledCount: scheduledCountRef.current,
+      streak: streakRef.current,
+      prevStreakAttacker: prevStreakAttackerRef.current,
+      battleStart: battleStartRef.current,
+      playerShieldActive: playerShieldActiveRef.current,
+      opponentShieldActive: opponentShieldActiveRef.current,
+      playerShieldSeenOpponentTurn: playerShieldSeenOpponentTurnRef.current,
+      opponentShieldSeenPlayerTurn: opponentShieldSeenPlayerTurnRef.current,
+      playerReleasing: playerReleasingRef.current,
+      opponentReleasing: opponentReleasingRef.current,
+    }
+    // Passe à vrai dès que la boucle d'évènements a pu tourner, donc dès que ce
+    // lot de tours a commencé à s'animer pour de bon. StrictMode (dev) exécute
+    // l'effet, le nettoie SYNCHRONEMENT puis le ré-exécute : dans ce cas
+    // `flushed` est encore faux au nettoyage.
+    let flushed = false
+    timers.push(window.setTimeout(() => { flushed = true }, 0))
     // TOUJOURS à 0 en début d'exécution, contrairement à streak/prevStreak-
     // Attacker/shields ci-dessous : window.setTimeout(fn, délai) est relatif
     // au moment où il est programmé ("maintenant"), pas à un instant fixe
@@ -628,6 +649,15 @@ export function AutoBattleScreen({
             setHealSide(attackerSide)
             setLastHeal({ side: attackerSide, amount: turn.heal })
             setHealKey((k) => k + 1)
+            // N'importe quel soin guérit le poison (voir status_effect 'poison').
+            if (attackerSide === 'player') setPlayerStatus((s) => (s === 'poison' ? null : s))
+            else setOpponentStatus((s) => (s === 'poison' ? null : s))
+          }
+          // Statut infligé par ce talent : il vise l'ADVERSAIRE du porteur (un
+          // tour de talent n'est pas un tour d'attaque, d'où le champ dédié).
+          if (turn.talent_inflicted_status) {
+            if (attackerSide === 'player') setOpponentStatus(turn.talent_inflicted_status)
+            else setPlayerStatus(turn.talent_inflicted_status)
           }
           pushHistory(
             attackerSide,
@@ -733,6 +763,9 @@ export function AutoBattleScreen({
             setHealSide(attackerSide)
             setLastHeal({ side: attackerSide, amount: healAmount })
             setHealKey((k) => k + 1)
+            // N'importe quel soin guérit le poison, le soin passif compris.
+            if (attackerSide === 'player') setPlayerStatus((s) => (s === 'poison' ? null : s))
+            else setOpponentStatus((s) => (s === 'poison' ? null : s))
           }
           pushHistory(attackerSide, 'récupère des PV grâce à son soin passif', { heal: turn.heal })
         }, turnStart + durations.anticipation))
@@ -1030,7 +1063,27 @@ export function AutoBattleScreen({
       // connue) — voir onContinue.
       if (hideContinueButton) onContinue()
     }, cursor + 200))
-    return () => timers.forEach(clearTimeout)
+    return () => {
+      timers.forEach(clearTimeout)
+      // Nettoyage AVANT toute animation : ce lot de tours n'a rien montré et
+      // ses timers viennent d'être annulés. Il faut donc le rendre "non
+      // programmé", sinon la garde en tête d'effet le croit déjà joué et plus
+      // rien ne se passe — combat figé, grille de capacités verrouillée.
+      // Se produit systématiquement en dev (StrictMode ré-exécute l'effet), et
+      // uniquement quand `turns` est déjà non vide au montage : c'est le cas
+      // depuis que les tours de talent d'ouverture amorcent le journal.
+      if (flushed) return
+      scheduledCountRef.current = refsAtStart.scheduledCount
+      streakRef.current = refsAtStart.streak
+      prevStreakAttackerRef.current = refsAtStart.prevStreakAttacker
+      battleStartRef.current = refsAtStart.battleStart
+      playerShieldActiveRef.current = refsAtStart.playerShieldActive
+      opponentShieldActiveRef.current = refsAtStart.opponentShieldActive
+      playerShieldSeenOpponentTurnRef.current = refsAtStart.playerShieldSeenOpponentTurn
+      opponentShieldSeenPlayerTurnRef.current = refsAtStart.opponentShieldSeenPlayerTurn
+      playerReleasingRef.current = refsAtStart.playerReleasing
+      opponentReleasingRef.current = refsAtStart.opponentReleasing
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ne doit redémarrer que quand fighting passe à true ou que de nouveaux tours arrivent (Combat Manuel) ; les autres props (playerAbilityNom, isAdmin, etc.) sont volontairement lues via closure, jamais suivies en dépendance
   }, [fighting, turns])
 

@@ -267,6 +267,7 @@ export const TALENT_KIND_LABEL: Record<AutoBattleTalentKind, string> = {
   invulnerable_until_hit: 'Invulnérable jusqu’à son premier coup',
   heal_below_hp: 'Soin sous un seuil de PV',
   transform: 'Transformation (copie l’adversaire)',
+  heavy_sleeper: 'Somnolent (réveil sur un 6)',
 }
 
 export const TALENT_TRIGGER_LABEL: Record<AutoBattleTalentTrigger, string> = {
@@ -345,6 +346,8 @@ export function describeTalent(talent: AutoBattleTalent): string {
     }
     case 'transform':
       return 'Copie l’apparence, le type et les capacités de son adversaire (jamais ses PV) — sans effet en PvP'
+    case 'heavy_sleeper':
+      return 'Endormi, il lui faut un 6 exact au dé pour se réveiller (au lieu de 4, 5 ou 6)'
   }
 }
 
