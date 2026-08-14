@@ -11,7 +11,7 @@ import { generateIdempotencyKey, normalizeFirstAttacker } from '../lib/autoBattl
 import { getHpBreakdown } from '../lib/xpBonuses'
 import { useToast } from '../context/ToastContext'
 import { AutoBattlePokemonPicker } from './autoBattle/AutoBattlePokemonPicker'
-import { AutoBattleCoinToss } from './autoBattle/AutoBattleCoinToss'
+import { AutoBattleCoinToss, type CoinTossOpponent } from './autoBattle/AutoBattleCoinToss'
 import { ManualBattleScreen } from './autoBattle/ManualBattleScreen'
 import { PvpAbilityLoadoutPicker } from './PvpAbilityLoadoutPicker'
 import { PvpChallengeBanner } from './PvpChallengeBanner'
@@ -265,6 +265,18 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
   const attackOpponentSpecies = activeChallenge ? pokemonByName.get(activeChallenge.pokemon_nom) : undefined
   const attackSelectedSpecies = attackSelectedPokemon ? pokemonByName.get(attackSelectedPokemon.pokemon_nom) : undefined
 
+  // Face adverse de la pièce du tirage au sort : en JcJ c'est toujours le
+  // joueur qui défend le défi — on retombe sur la miniature de son pokémon
+  // s'il n'a pas d'avatar (voir AutoBattleCoinToss), et sur "VS" si même le
+  // sprite manque.
+  const attackDefender = activeChallenge ? playersById.get(activeChallenge.defender_player_id) : undefined
+  const coinTossOpponent: CoinTossOpponent | null =
+    attackDefender?.image_url
+      ? { imageUrl: attackDefender.image_url, name: attackDefender.name, color: attackDefender.color, fit: 'cover' }
+      : attackOpponentSpecies?.image_miniature
+        ? { imageUrl: attackOpponentSpecies.image_miniature, name: attackOpponentSpecies.nom, fit: 'contain' }
+        : null
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 sm:p-4 safe-overlay"
@@ -463,7 +475,7 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
           )}
 
           {view === 'attack-coin-toss' && firstAttacker && (
-            <AutoBattleCoinToss player={player} firstAttacker={firstAttacker} onDone={() => setView('attack-battle')} />
+            <AutoBattleCoinToss player={player} opponent={coinTossOpponent} firstAttacker={firstAttacker} onDone={() => setView('attack-battle')} />
           )}
 
           {view === 'attack-battle' && activeChallenge && attackSelectedPokemon && firstAttacker && (

@@ -903,6 +903,11 @@ export interface AutoBattleVariant {
   banner_url: string
   sort_order: number
   game_mode: AutoBattleGameMode
+  // PNJ affiché sur la face adverse du tirage au sort d'ouverture (voir
+  // AutoBattleCoinToss) — cosmétique uniquement, sans effet sur le combat.
+  // null (ou id d'un joueur supprimé) : on affiche la miniature de l'espèce
+  // affrontée à la place.
+  npc_player_id: number | null
   created_at: string
 }
 
@@ -1216,6 +1221,8 @@ export interface AutoBattleTalent {
   self_status: AutoBattleTalentStatusCondition | null
   /** Bonus CUMULATIF : multiplié par le nombre de coups DIRECTS encaissés — la brûlure et le poison ne comptent pas. */
   require_damage_taken: boolean
+  /** Plafond de déclenchements d'un bonus cumulatif (null = illimité) : au-delà, les coups encaissés n'augmentent plus le bonus. */
+  max_uses: number | null
   trigger: AutoBattleTalentTrigger | null
   dice_value: number | null
   created_at: string

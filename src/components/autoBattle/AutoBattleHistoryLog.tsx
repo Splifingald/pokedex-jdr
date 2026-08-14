@@ -1,5 +1,4 @@
 import { PIXEL_BORDER_SM } from '../../lib/panelStyles'
-import { BUTTON_STYLE } from '../../lib/buttonStyles'
 
 export interface AutoBattleHistoryEntryData {
   id: number
@@ -34,7 +33,6 @@ function formatElapsed(ms: number): string {
 
 interface Props {
   entries: AutoBattleHistoryEntryData[]
-  onHide?: () => void
   className?: string
   isAdmin?: boolean
 }
@@ -42,15 +40,11 @@ interface Props {
 // Historique local du combat (jamais persisté en base, voir AutoBattleScreen)
 // — construit en direct pendant la relecture des tours, entrées les plus
 // récentes en tête, toujours affiché sous l'arène (mobile ET desktop).
-export function AutoBattleHistoryLog({ entries, onHide, className = '', isAdmin = false }: Props) {
+// Ni titre ni bouton "Masquer" : le journal parle de lui-même et gagne la
+// place ainsi libérée (il remonte d'autant sous l'arène).
+export function AutoBattleHistoryLog({ entries, className = '', isAdmin = false }: Props) {
   return (
     <div className={`flex flex-col gap-2 min-h-0 ${className}`}>
-      <div className="flex items-center justify-between shrink-0">
-        <p className="text-ink-muted-2 text-xs font-bold">Historique du combat</p>
-        {onHide && (
-          <button onClick={onHide} className={`text-xs px-2 py-0.5 rounded ${BUTTON_STYLE.gray}`}>Masquer</button>
-        )}
-      </div>
       <div className="flex flex-col gap-1.5 overflow-y-auto min-h-0 max-h-48">
         {entries.length === 0 ? (
           <p className="text-ink-muted-2 text-xs italic">Le combat commence…</p>

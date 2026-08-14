@@ -279,7 +279,6 @@ export function AutoBattleScreen({
   // l'horodatage de chaque entrée reflète le moment réel où l'évènement est
   // révélé à l'écran plutôt qu'un timestamp serveur inexistant ici.
   const [historyEntries, setHistoryEntries] = useState<AutoBattleHistoryEntryData[]>([])
-  const [historyOpen, setHistoryOpen] = useState(true)
   const historyIdRef = useRef(0)
   // Distance réelle (px) entre le centre des deux sprites : elle dépend de la
   // largeur du popup (~175px sur mobile, davantage dès `sm:`), et c'est elle
@@ -1268,23 +1267,14 @@ export function AutoBattleScreen({
           >
             Continuer
           </button>
-          {!historyOpen && (
-            <button
-              onClick={() => setHistoryOpen(true)}
-              className={`px-4 py-2.5 rounded-lg text-sm font-bold ${BUTTON_STYLE.gray}`}
-            >
-              Voir l'historique
-            </button>
-          )}
         </div>
       )}
 
       {midSlot}
 
-      {fighting && historyOpen && (
+      {fighting && (
         <AutoBattleHistoryLog
           entries={historyEntries}
-          onHide={() => setHistoryOpen(false)}
           isAdmin={isAdmin}
         />
       )}

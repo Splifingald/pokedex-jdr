@@ -589,6 +589,7 @@ export function HomeTab({ player, players, isAdmin, pokemonByName, discoveredPok
       {showAutoBattle && player && (
         <AutoBattlePopup
           player={player}
+          players={players}
           playerItems={playerItems}
           roster={roster}
           pokemonByName={pokemonByName}

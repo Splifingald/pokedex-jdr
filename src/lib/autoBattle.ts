@@ -290,7 +290,11 @@ export function describeTalent(talent: AutoBattleTalent): string {
       const stat = talent.stat === 'precision' ? 'précision' : 'dégâts'
       const parts = [`${formatSigned(talent.amount ?? 0)} ${stat}`]
       if (talent.type_filter && talent.type_filter.length > 0) parts.push(`capacités ${talent.type_filter.join(', ')}`)
-      if (talent.require_damage_taken) parts.push('par coup direct encaissé')
+      if (talent.require_damage_taken) {
+        parts.push(talent.max_uses != null
+          ? `par coup direct encaissé (max ${talent.max_uses})`
+          : 'par coup direct encaissé')
+      }
       if (talent.hp_condition === 'below') parts.push(`PV ≤ ${talent.hp_percent} %`)
       if (talent.hp_condition === 'above') parts.push(`PV ≥ ${talent.hp_percent} %`)
       if (talent.opponent_status) {

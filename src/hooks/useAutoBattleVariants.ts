@@ -335,6 +335,8 @@ export function useAutoBattleVariants() {
           enabled: false,
           icon_url: source.icon_url,
           banner_url: source.banner_url,
+          game_mode: source.game_mode,
+          npc_player_id: source.npc_player_id,
           sort_order: nextSortOrder,
         })
         .select()

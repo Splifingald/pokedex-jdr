@@ -56,6 +56,7 @@ const BLANK: Omit<AutoBattleTalent, 'id' | 'pokemon_nom' | 'nom' | 'kind' | 'ani
   require_damage_taken: false,
   trigger: null,
   dice_value: null,
+  max_uses: null,
 }
 
 /** Valeurs minimales acceptées par les contraintes, pour chaque kind. */
@@ -243,11 +244,38 @@ function TalentRow({ talent, attackTypes, highlighted, rowRef, onUpdate, onRemov
             <input
               type="checkbox"
               checked={talent.require_damage_taken}
-              onChange={(e) => patch({ require_damage_taken: e.target.checked })}
+              // Le plafond n'a de sens que pour un bonus cumulatif : on le
+              // remet à null en décochant (groupe de champs cohérent).
+              onChange={(e) => patch({ require_damage_taken: e.target.checked, max_uses: e.target.checked ? talent.max_uses : null })}
               className="w-4 h-4"
             />
             <span className="text-ink-muted-2 text-xs">Cumulatif : le bonus s’ajoute à chaque coup direct encaissé (brûlure et poison exclus)</span>
           </label>
+          {talent.require_damage_taken && (
+            <div className="flex items-center gap-2 flex-wrap pl-6">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={talent.max_uses != null}
+                  onChange={(e) => patch({ max_uses: e.target.checked ? (talent.max_uses ?? 3) : null })}
+                  className="w-4 h-4"
+                />
+                <span className="text-ink-muted-2 text-xs">Limiter le nombre de déclenchements</span>
+              </label>
+              {talent.max_uses != null && (
+                <>
+                  <NumberInput
+                    min={1}
+                    value={talent.max_uses}
+                    fallback={3}
+                    onCommit={(v) => patch({ max_uses: Math.max(1, v) })}
+                    className={NUM_CLASS_SM}
+                  />
+                  <span className="text-ink-muted-2 text-xs">fois maximum</span>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 

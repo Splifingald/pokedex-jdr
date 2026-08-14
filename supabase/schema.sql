@@ -2436,6 +2436,13 @@ ALTER TABLE autobattle_variants ADD COLUMN IF NOT EXISTS game_mode text NOT NULL
 ALTER TABLE autobattle_variants DROP CONSTRAINT IF EXISTS autobattle_variants_game_mode_check;
 ALTER TABLE autobattle_variants ADD CONSTRAINT autobattle_variants_game_mode_check
   CHECK (game_mode IN ('auto', 'manual'));
+-- PNJ "visage" du parcours (players.id, typiquement un PNJ mais rien ne
+-- l'impose) : purement cosmétique, sert à donner un adversaire incarné au
+-- tirage au sort d'ouverture (voir AutoBattleCoinToss) au lieu d'un simple
+-- "VS". NULL = aucun PNJ, le client retombe alors sur la miniature de
+-- l'espèce affrontée. Pas de FK vers players (convention du schéma) : un
+-- joueur supprimé laisse un id orphelin, que le client traite comme NULL.
+ALTER TABLE autobattle_variants ADD COLUMN IF NOT EXISTS npc_player_id bigint;
 
 -- Un niveau = un combat prédéfini dans une variante, joué séquentiellement.
 -- opponent_pokemon_nom / opponent_ability_nom référencent pokemon.nom /
@@ -3301,6 +3308,12 @@ ALTER TABLE autobattle_talents ADD COLUMN IF NOT EXISTS self_status text;
 ALTER TABLE autobattle_talents ADD COLUMN IF NOT EXISTS require_damage_taken boolean NOT NULL DEFAULT false;
 ALTER TABLE autobattle_talents ADD COLUMN IF NOT EXISTS trigger text;
 ALTER TABLE autobattle_talents ADD COLUMN IF NOT EXISTS dice_value integer;
+-- Nombre maximum de déclenchements d'un bonus CUMULATIF (require_damage_taken) :
+-- NULL = illimité. Au-delà, les coups encaissés n'augmentent plus le bonus.
+ALTER TABLE autobattle_talents ADD COLUMN IF NOT EXISTS max_uses integer;
+ALTER TABLE autobattle_talents DROP CONSTRAINT IF EXISTS autobattle_talents_max_uses_check;
+ALTER TABLE autobattle_talents ADD CONSTRAINT autobattle_talents_max_uses_check
+  CHECK (max_uses IS NULL OR max_uses >= 1);
 
 ALTER TABLE autobattle_talents DROP CONSTRAINT IF EXISTS autobattle_talents_kind_check;
 ALTER TABLE autobattle_talents ADD CONSTRAINT autobattle_talents_kind_check
@@ -3717,10 +3730,12 @@ CREATE OR REPLACE FUNCTION autobattle_talent_stat_bonus(
 RETURNS integer
 LANGUAGE sql IMMUTABLE
 AS $$
+  -- Bonus cumulatif : ×  nombre de coups encaissés, plafonné à max_uses.
   SELECT COALESCE(SUM(
     (t ->> 'amount')::integer
     * (CASE WHEN COALESCE((t ->> 'require_damage_taken')::boolean, false)
-            THEN autobattle_talent_hits(p_state) ELSE 1 END)
+            THEN LEAST(autobattle_talent_hits(p_state), COALESCE((t ->> 'max_uses')::integer, autobattle_talent_hits(p_state)))
+            ELSE 1 END)
   ), 0)::integer
   FROM jsonb_array_elements(COALESCE(p_talents, '[]'::jsonb)) t
   WHERE (t ->> 'stat') = p_stat
@@ -3789,7 +3804,10 @@ DECLARE
   v_t       jsonb;
 BEGIN
   FOR v_t IN SELECT * FROM jsonb_array_elements(COALESCE(p_talents, '[]'::jsonb)) LOOP
-    IF autobattle_talent_stat_active(v_t, p_ability_type, p_hp, p_max_hp, p_opp_status, p_self_status, autobattle_talent_hits(v_state))
+    -- Les bonus CUMULATIFS s'annoncent eux-mêmes à chaque coup encaissé (voir
+    -- autobattle_talent_defend) : les exclure ici évite une annonce en double.
+    IF NOT COALESCE((v_t ->> 'require_damage_taken')::boolean, false)
+       AND autobattle_talent_stat_active(v_t, p_ability_type, p_hp, p_max_hp, p_opp_status, p_self_status, autobattle_talent_hits(v_state))
        AND NOT autobattle_talent_has(v_state, v_t, 'shown') THEN
       v_turns := v_turns || jsonb_build_array(autobattle_talent_turn(p_turn_no, p_side, p_hp, v_t, NULL));
       v_state := autobattle_talent_mark(v_state, v_t, 'shown');
@@ -3889,6 +3907,26 @@ BEGIN
 
   IF v_damage > 0 THEN
     v_state := jsonb_set(v_state, '{hits}', to_jsonb(autobattle_talent_hits(v_state) + 1));
+    -- Bonus cumulatifs : ils augmentent À CE COUP PRÉCIS, donc ils s'annoncent
+    -- (animation + ligne d'historique) à CHAQUE fois, pas seulement la première
+    -- — tant que le plafond max_uses n'est pas atteint.
+    FOR v_t IN SELECT * FROM jsonb_array_elements(COALESCE(p_talents, '[]'::jsonb)) LOOP
+      IF (v_t ->> 'kind') = 'stat_boost'
+         AND COALESCE((v_t ->> 'require_damage_taken')::boolean, false)
+         AND autobattle_talent_hits(v_state) <= COALESCE((v_t ->> 'max_uses')::integer, autobattle_talent_hits(v_state))
+      THEN
+        v_turns := v_turns || jsonb_build_array(autobattle_talent_turn(
+          p_turn_no, p_side, p_hp, v_t,
+          jsonb_build_object(
+            'talent_stack', autobattle_talent_hits(v_state),
+            -- Détail explicite : le gain de CE coup, et le total accumulé.
+            'talent_detail',
+              (CASE WHEN (v_t ->> 'amount')::integer >= 0 THEN '+' ELSE '' END) || (v_t ->> 'amount')
+              || (CASE WHEN (v_t ->> 'stat') = 'precision' THEN ' précision' ELSE ' dégâts' END)
+              || ' (total ' || ((v_t ->> 'amount')::integer * autobattle_talent_hits(v_state))::text || ')')));
+        v_state := autobattle_talent_mark(v_state, v_t, 'shown');
+      END IF;
+    END LOOP;
   END IF;
 
   -- Le poison est guéri par N'IMPORTE QUEL soin (voir status_effect 'poison') —
@@ -3916,6 +3954,7 @@ DECLARE
   v_state  jsonb := COALESCE(p_state, autobattle_talent_state_init());
   v_turns  jsonb := '[]'::jsonb;
   v_hp     integer := p_hp;
+  v_hp_before_heal integer;
   v_heal   integer;
   v_status text := p_status;
   v_t      jsonb;
@@ -3939,6 +3978,7 @@ BEGIN
       ORDER BY (t ->> 'id')::bigint LIMIT 1;
     IF v_t IS NOT NULL THEN
       v_heal := autobattle_talent_value(v_t, p_max_hp);
+      v_hp_before_heal := v_hp;
       v_hp := LEAST(GREATEST(1, COALESCE(p_max_hp, 1)), v_hp + v_heal);
       v_state := autobattle_talent_mark(autobattle_talent_mark(v_state, v_t, 'used'), v_t, 'shown');
       v_turns := v_turns || jsonb_build_array(autobattle_talent_turn(p_turn_no, p_side, v_hp, v_t, jsonb_build_object('heal', v_heal)));
@@ -3949,7 +3989,13 @@ BEGIN
     END IF;
   END IF;
 
-  RETURN jsonb_build_object('hp', v_hp, 'state', v_state, 'turns', v_turns, 'status', v_status);
+  -- hp_before_heal : PV juste après les dégâts (et l'éventuel 'endure_ko'),
+  -- AVANT le soin de seuil. L'entrée de tour affiche cette valeur pour que la
+  -- chute soit visible ; le tour de talent qui suit remonte les PV, ce qui rend
+  -- le soin lisible au lieu de l'escamoter dans le même instant.
+  RETURN jsonb_build_object(
+    'hp', v_hp, 'hp_before_heal', COALESCE(v_hp_before_heal, v_hp),
+    'state', v_state, 'turns', v_turns, 'status', v_status);
 END;
 $$;
 
@@ -4318,6 +4364,7 @@ DECLARE
   v_talent_pending jsonb;
   v_talent_heal integer := 0;
   v_talent_inflict text;
+  v_hp_shown integer := 0;
   v_tick_damage integer := 0;
   v_talent_dice_bonus integer := 0;
   v_talent_dice_turns jsonb := '[]'::jsonb;
@@ -4607,6 +4654,7 @@ BEGIN
         -- sous le seuil de 'heal_below_hp' — évalué AVANT de figer le drapeau 'ko'.
         v_talent_res := autobattle_talent_survive(p_player_talents, v_player.talent_state, 'player', v_player.hp, v_player.max_hp, v_turn_no, v_player.status);
         v_player.hp := (v_talent_res ->> 'hp')::integer;
+        v_hp_shown := (v_talent_res ->> 'hp_before_heal')::integer;
         v_player.talent_state := v_talent_res -> 'state';
         -- Un soin de talent guérit le poison, comme tout autre soin.
         v_player.status := v_talent_res ->> 'status';
@@ -4614,7 +4662,7 @@ BEGIN
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
           'turn', v_turn_no, 'attacker', 'player', 'damage', v_tick_damage, 'skipped', false,
           'status_tick', true, 'status', 'burn', 'status_roll', v_status_roll, 'status_cured', v_status_cured,
-          'attacker_hp_after', GREATEST(0, v_player.hp), 'defender_hp_after', GREATEST(0, v_opponent.hp),
+          'attacker_hp_after', GREATEST(0, v_hp_shown), 'defender_hp_after', GREATEST(0, v_opponent.hp),
           'ko', v_player.hp <= 0
         )) || v_talent_pending;
         IF v_status_cured THEN v_player.status := NULL; END IF;
@@ -4630,6 +4678,7 @@ BEGIN
         -- sous le seuil de 'heal_below_hp' — évalué AVANT de figer le drapeau 'ko'.
         v_talent_res := autobattle_talent_survive(p_opponent_talents, v_opponent.talent_state, 'opponent', v_opponent.hp, v_opponent.max_hp, v_turn_no, v_opponent.status);
         v_opponent.hp := (v_talent_res ->> 'hp')::integer;
+        v_hp_shown := (v_talent_res ->> 'hp_before_heal')::integer;
         v_opponent.talent_state := v_talent_res -> 'state';
         -- Un soin de talent guérit le poison, comme tout autre soin.
         v_opponent.status := v_talent_res ->> 'status';
@@ -4637,7 +4686,7 @@ BEGIN
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
           'turn', v_turn_no, 'attacker', 'opponent', 'damage', v_tick_damage, 'skipped', false,
           'status_tick', true, 'status', 'burn', 'status_roll', v_status_roll, 'status_cured', v_status_cured,
-          'attacker_hp_after', GREATEST(0, v_opponent.hp), 'defender_hp_after', GREATEST(0, v_player.hp),
+          'attacker_hp_after', GREATEST(0, v_hp_shown), 'defender_hp_after', GREATEST(0, v_player.hp),
           'ko', v_opponent.hp <= 0
         )) || v_talent_pending;
         IF v_status_cured THEN v_opponent.status := NULL; END IF;
@@ -4652,6 +4701,7 @@ BEGIN
         -- sous le seuil de 'heal_below_hp' — évalué AVANT de figer le drapeau 'ko'.
         v_talent_res := autobattle_talent_survive(p_player_talents, v_player.talent_state, 'player', v_player.hp, v_player.max_hp, v_turn_no, v_player.status);
         v_player.hp := (v_talent_res ->> 'hp')::integer;
+        v_hp_shown := (v_talent_res ->> 'hp_before_heal')::integer;
         v_player.talent_state := v_talent_res -> 'state';
         -- Un soin de talent guérit le poison, comme tout autre soin.
         v_player.status := v_talent_res ->> 'status';
@@ -4659,7 +4709,7 @@ BEGIN
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
           'turn', v_turn_no, 'attacker', 'player', 'damage', v_tick_damage, 'skipped', false,
           'status_tick', true, 'status', 'poison', 'status_cured', false,
-          'attacker_hp_after', GREATEST(0, v_player.hp), 'defender_hp_after', GREATEST(0, v_opponent.hp),
+          'attacker_hp_after', GREATEST(0, v_hp_shown), 'defender_hp_after', GREATEST(0, v_opponent.hp),
           'ko', v_player.hp <= 0
         )) || v_talent_pending;
         IF v_player.hp <= 0 THEN v_outcome := 'lose'; EXIT; END IF;
@@ -4672,6 +4722,7 @@ BEGIN
         -- sous le seuil de 'heal_below_hp' — évalué AVANT de figer le drapeau 'ko'.
         v_talent_res := autobattle_talent_survive(p_opponent_talents, v_opponent.talent_state, 'opponent', v_opponent.hp, v_opponent.max_hp, v_turn_no, v_opponent.status);
         v_opponent.hp := (v_talent_res ->> 'hp')::integer;
+        v_hp_shown := (v_talent_res ->> 'hp_before_heal')::integer;
         v_opponent.talent_state := v_talent_res -> 'state';
         -- Un soin de talent guérit le poison, comme tout autre soin.
         v_opponent.status := v_talent_res ->> 'status';
@@ -4679,7 +4730,7 @@ BEGIN
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
           'turn', v_turn_no, 'attacker', 'opponent', 'damage', v_tick_damage, 'skipped', false,
           'status_tick', true, 'status', 'poison', 'status_cured', false,
-          'attacker_hp_after', GREATEST(0, v_opponent.hp), 'defender_hp_after', GREATEST(0, v_player.hp),
+          'attacker_hp_after', GREATEST(0, v_hp_shown), 'defender_hp_after', GREATEST(0, v_player.hp),
           'ko', v_opponent.hp <= 0
         )) || v_talent_pending;
         IF v_opponent.hp <= 0 THEN v_outcome := 'win'; EXIT; END IF;
@@ -5125,6 +5176,7 @@ BEGIN
           -- de tour, qui fige le drapeau 'ko' et defender_hp_after.
           v_talent_res := autobattle_talent_survive(p_opponent_talents, v_opponent.talent_state, 'opponent', v_opponent.hp, v_opponent.max_hp, v_turn_no, v_opponent.status);
           v_opponent.hp := (v_talent_res ->> 'hp')::integer;
+          v_hp_shown := (v_talent_res ->> 'hp_before_heal')::integer;
           v_opponent.talent_state := v_talent_res -> 'state';
           -- Un soin de talent guérit le poison, comme tout autre soin.
           v_opponent.status := v_talent_res ->> 'status';
@@ -5150,7 +5202,7 @@ BEGIN
           v_turn_entry := jsonb_build_object(
             'turn', v_turn_no, 'attacker', 'player', 'damage', v_hit_damage, 'damage_before_dice', p_player_ability.base_damage,
             'damage_species_xp', p_player_ability.damage_species_xp, 'damage_dice', v_hit_dice,
-            'defender_hp_after', GREATEST(0, v_opponent.hp), 'ko', v_opponent.hp <= 0,
+            'defender_hp_after', GREATEST(0, v_hp_shown), 'ko', v_opponent.hp <= 0,
             'precision_mod_amount', v_precision_mod_total
           );
           IF v_percent_hp_damage_applied THEN
@@ -5285,6 +5337,7 @@ BEGIN
               -- Le contre-coup peut tuer son auteur : mêmes talents de survie.
               v_talent_res := autobattle_talent_survive(p_player_talents, v_player.talent_state, 'player', v_player.hp, v_player.max_hp, v_turn_no, v_player.status);
               v_player.hp := (v_talent_res ->> 'hp')::integer;
+              v_hp_shown := (v_talent_res ->> 'hp_before_heal')::integer;
               v_player.talent_state := v_talent_res -> 'state';
               -- Un soin de talent guérit le poison, comme tout autre soin.
               v_player.status := v_talent_res ->> 'status';
@@ -5459,6 +5512,7 @@ BEGIN
           -- de tour, qui fige le drapeau 'ko' et defender_hp_after.
           v_talent_res := autobattle_talent_survive(p_player_talents, v_player.talent_state, 'player', v_player.hp, v_player.max_hp, v_turn_no, v_player.status);
           v_player.hp := (v_talent_res ->> 'hp')::integer;
+          v_hp_shown := (v_talent_res ->> 'hp_before_heal')::integer;
           v_player.talent_state := v_talent_res -> 'state';
           -- Un soin de talent guérit le poison, comme tout autre soin.
           v_player.status := v_talent_res ->> 'status';
@@ -5481,7 +5535,7 @@ BEGIN
           v_turn_entry := jsonb_build_object(
             'turn', v_turn_no, 'attacker', 'opponent', 'damage', v_hit_damage, 'damage_before_dice', p_opponent_ability.base_damage,
             'damage_species_xp', p_opponent_ability.damage_species_xp, 'damage_dice', v_hit_dice,
-            'defender_hp_after', GREATEST(0, v_player.hp), 'ko', v_player.hp <= 0,
+            'defender_hp_after', GREATEST(0, v_hp_shown), 'ko', v_player.hp <= 0,
             'precision_mod_amount', v_precision_mod_total
           );
           IF v_percent_hp_damage_applied THEN
@@ -5599,6 +5653,7 @@ BEGIN
               -- Le contre-coup peut tuer son auteur : mêmes talents de survie.
               v_talent_res := autobattle_talent_survive(p_opponent_talents, v_opponent.talent_state, 'opponent', v_opponent.hp, v_opponent.max_hp, v_turn_no, v_opponent.status);
               v_opponent.hp := (v_talent_res ->> 'hp')::integer;
+              v_hp_shown := (v_talent_res ->> 'hp_before_heal')::integer;
               v_opponent.talent_state := v_talent_res -> 'state';
               -- Un soin de talent guérit le poison, comme tout autre soin.
               v_opponent.status := v_talent_res ->> 'status';
@@ -5899,6 +5954,7 @@ DECLARE
   v_talent_heal                    integer := 0;
   v_talent_inflict                 text;
   v_talent_side                    text;
+  v_hp_shown                       integer := 0;
   v_tick_damage                    integer := 0;
   v_talent_dice_bonus              integer := 0;
   v_talent_dice_turns              jsonb := '[]'::jsonb;
@@ -6512,6 +6568,7 @@ BEGIN
         -- sous le seuil de 'heal_below_hp' — évalué AVANT de figer le drapeau 'ko'.
         v_talent_res := autobattle_talent_survive(v_player_talents, v_player_talent_state, 'player', v_player_hp, v_player_max_hp, v_turn_no, v_player_status);
         v_player_hp := (v_talent_res ->> 'hp')::integer;
+        v_hp_shown := (v_talent_res ->> 'hp_before_heal')::integer;
         v_player_talent_state := v_talent_res -> 'state';
         -- Un soin de talent guérit le poison, comme tout autre soin.
         v_player_status := v_talent_res ->> 'status';
@@ -6519,7 +6576,7 @@ BEGIN
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
           'turn', v_turn_no, 'attacker', 'player', 'damage', v_tick_damage, 'skipped', false,
           'status_tick', true, 'status', 'burn', 'status_roll', v_status_roll, 'status_cured', v_status_cured,
-          'attacker_hp_after', GREATEST(0, v_player_hp), 'defender_hp_after', GREATEST(0, v_opponent_hp),
+          'attacker_hp_after', GREATEST(0, v_hp_shown), 'defender_hp_after', GREATEST(0, v_opponent_hp),
           'ko', v_player_hp <= 0
         )) || v_talent_pending;
         IF v_status_cured THEN v_player_status := NULL; END IF;
@@ -6536,6 +6593,7 @@ BEGIN
         -- sous le seuil de 'heal_below_hp' — évalué AVANT de figer le drapeau 'ko'.
         v_talent_res := autobattle_talent_survive(v_opponent_talents, v_opponent_talent_state, 'opponent', v_opponent_hp, v_level.opponent_hp, v_turn_no, v_opponent_status);
         v_opponent_hp := (v_talent_res ->> 'hp')::integer;
+        v_hp_shown := (v_talent_res ->> 'hp_before_heal')::integer;
         v_opponent_talent_state := v_talent_res -> 'state';
         -- Un soin de talent guérit le poison, comme tout autre soin.
         v_opponent_status := v_talent_res ->> 'status';
@@ -6543,7 +6601,7 @@ BEGIN
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
           'turn', v_turn_no, 'attacker', 'opponent', 'damage', v_tick_damage, 'skipped', false,
           'status_tick', true, 'status', 'burn', 'status_roll', v_status_roll, 'status_cured', v_status_cured,
-          'attacker_hp_after', GREATEST(0, v_opponent_hp), 'defender_hp_after', GREATEST(0, v_player_hp),
+          'attacker_hp_after', GREATEST(0, v_hp_shown), 'defender_hp_after', GREATEST(0, v_player_hp),
           'ko', v_opponent_hp <= 0
         )) || v_talent_pending;
         IF v_status_cured THEN v_opponent_status := NULL; END IF;
@@ -6559,6 +6617,7 @@ BEGIN
         -- sous le seuil de 'heal_below_hp' — évalué AVANT de figer le drapeau 'ko'.
         v_talent_res := autobattle_talent_survive(v_player_talents, v_player_talent_state, 'player', v_player_hp, v_player_max_hp, v_turn_no, v_player_status);
         v_player_hp := (v_talent_res ->> 'hp')::integer;
+        v_hp_shown := (v_talent_res ->> 'hp_before_heal')::integer;
         v_player_talent_state := v_talent_res -> 'state';
         -- Un soin de talent guérit le poison, comme tout autre soin.
         v_player_status := v_talent_res ->> 'status';
@@ -6566,7 +6625,7 @@ BEGIN
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
           'turn', v_turn_no, 'attacker', 'player', 'damage', v_tick_damage, 'skipped', false,
           'status_tick', true, 'status', 'poison', 'status_cured', false,
-          'attacker_hp_after', GREATEST(0, v_player_hp), 'defender_hp_after', GREATEST(0, v_opponent_hp),
+          'attacker_hp_after', GREATEST(0, v_hp_shown), 'defender_hp_after', GREATEST(0, v_opponent_hp),
           'ko', v_player_hp <= 0
         )) || v_talent_pending;
         IF v_player_hp <= 0 THEN v_outcome := 'lose'; EXIT; END IF;
@@ -6580,6 +6639,7 @@ BEGIN
         -- sous le seuil de 'heal_below_hp' — évalué AVANT de figer le drapeau 'ko'.
         v_talent_res := autobattle_talent_survive(v_opponent_talents, v_opponent_talent_state, 'opponent', v_opponent_hp, v_level.opponent_hp, v_turn_no, v_opponent_status);
         v_opponent_hp := (v_talent_res ->> 'hp')::integer;
+        v_hp_shown := (v_talent_res ->> 'hp_before_heal')::integer;
         v_opponent_talent_state := v_talent_res -> 'state';
         -- Un soin de talent guérit le poison, comme tout autre soin.
         v_opponent_status := v_talent_res ->> 'status';
@@ -6587,7 +6647,7 @@ BEGIN
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
           'turn', v_turn_no, 'attacker', 'opponent', 'damage', v_tick_damage, 'skipped', false,
           'status_tick', true, 'status', 'poison', 'status_cured', false,
-          'attacker_hp_after', GREATEST(0, v_opponent_hp), 'defender_hp_after', GREATEST(0, v_player_hp),
+          'attacker_hp_after', GREATEST(0, v_hp_shown), 'defender_hp_after', GREATEST(0, v_player_hp),
           'ko', v_opponent_hp <= 0
         )) || v_talent_pending;
         IF v_opponent_hp <= 0 THEN v_outcome := 'win'; EXIT; END IF;
@@ -7056,6 +7116,7 @@ BEGIN
           -- de tour, qui fige le drapeau 'ko' et defender_hp_after.
           v_talent_res := autobattle_talent_survive(v_opponent_talents, v_opponent_talent_state, 'opponent', v_opponent_hp, v_level.opponent_hp, v_turn_no, v_opponent_status);
           v_opponent_hp := (v_talent_res ->> 'hp')::integer;
+          v_hp_shown := (v_talent_res ->> 'hp_before_heal')::integer;
           v_opponent_talent_state := v_talent_res -> 'state';
           -- Un soin de talent guérit le poison, comme tout autre soin.
           v_opponent_status := v_talent_res ->> 'status';
@@ -7080,7 +7141,7 @@ BEGIN
           v_turn_entry := jsonb_build_object(
             'turn', v_turn_no, 'attacker', 'player', 'damage', v_hit_damage, 'damage_before_dice', v_player_damage,
             'damage_species_xp', v_player_damage_species_xp, 'damage_dice', v_hit_dice,
-            'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', v_opponent_hp <= 0,
+            'defender_hp_after', GREATEST(0, v_hp_shown), 'ko', v_opponent_hp <= 0,
             'precision_mod_amount', v_precision_mod_total
           );
           IF v_percent_hp_damage_applied THEN
@@ -7245,6 +7306,7 @@ BEGIN
               -- Le contre-coup peut tuer son auteur : mêmes talents de survie.
               v_talent_res := autobattle_talent_survive(v_player_talents, v_player_talent_state, 'player', v_player_hp, v_player_max_hp, v_turn_no, v_player_status);
               v_player_hp := (v_talent_res ->> 'hp')::integer;
+              v_hp_shown := (v_talent_res ->> 'hp_before_heal')::integer;
               v_player_talent_state := v_talent_res -> 'state';
               -- Un soin de talent guérit le poison, comme tout autre soin.
               v_player_status := v_talent_res ->> 'status';
@@ -7424,6 +7486,7 @@ BEGIN
           -- de tour, qui fige le drapeau 'ko' et defender_hp_after.
           v_talent_res := autobattle_talent_survive(v_player_talents, v_player_talent_state, 'player', v_player_hp, v_player_max_hp, v_turn_no, v_player_status);
           v_player_hp := (v_talent_res ->> 'hp')::integer;
+          v_hp_shown := (v_talent_res ->> 'hp_before_heal')::integer;
           v_player_talent_state := v_talent_res -> 'state';
           -- Un soin de talent guérit le poison, comme tout autre soin.
           v_player_status := v_talent_res ->> 'status';
@@ -7445,7 +7508,7 @@ BEGIN
           v_turn_entry := jsonb_build_object(
             'turn', v_turn_no, 'attacker', 'opponent', 'damage', v_hit_damage, 'damage_before_dice', v_opponent_damage,
             'damage_species_xp', v_opponent_damage_species_xp, 'damage_dice', v_hit_dice,
-            'defender_hp_after', GREATEST(0, v_player_hp), 'ko', v_player_hp <= 0,
+            'defender_hp_after', GREATEST(0, v_hp_shown), 'ko', v_player_hp <= 0,
             'precision_mod_amount', v_precision_mod_total
           );
           IF v_percent_hp_damage_applied THEN
@@ -7565,6 +7628,7 @@ BEGIN
               -- Le contre-coup peut tuer son auteur : mêmes talents de survie.
               v_talent_res := autobattle_talent_survive(v_opponent_talents, v_opponent_talent_state, 'opponent', v_opponent_hp, v_level.opponent_hp, v_turn_no, v_opponent_status);
               v_opponent_hp := (v_talent_res ->> 'hp')::integer;
+              v_hp_shown := (v_talent_res ->> 'hp_before_heal')::integer;
               v_opponent_talent_state := v_talent_res -> 'state';
               -- Un soin de talent guérit le poison, comme tout autre soin.
               v_opponent_status := v_talent_res ->> 'status';

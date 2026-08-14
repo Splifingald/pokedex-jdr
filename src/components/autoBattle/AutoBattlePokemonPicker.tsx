@@ -5,7 +5,7 @@ import { getEligiblePlayerPokemon, describeTalent } from '../../lib/autoBattle'
 import { getSuperEfficace } from '../../lib/pokemonFacts'
 import { getHpBreakdown, getDamageBreakdown } from '../../lib/xpBonuses'
 import { normalizeSearch } from '../../lib/normalizeSearch'
-import { PANEL } from '../../lib/panelStyles'
+import { PANEL, PIXEL_BORDER_SM } from '../../lib/panelStyles'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 import { STAT_ICON } from '../../lib/icons'
 import { PixelIcon } from '../icons/PixelIcon'
@@ -50,6 +50,18 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
   const [sortKey, setSortKey] = useState<SortKey>('default')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<PlayerPokemon | null>(null)
+  // Description de talent ouverte (un seul à la fois). `above` est décidé à
+  // l'ouverture d'après la place restante sous la pastille, pour que le panneau
+  // ne sorte pas de l'écran sur les dernières lignes de la liste.
+  const [openTalent, setOpenTalent] = useState<{ key: string; above: boolean } | null>(null)
+
+  const toggleTalentInfo = (key: string, anchor: HTMLElement) => {
+    setOpenTalent((prev) => {
+      if (prev?.key === key) return null
+      const rect = anchor.getBoundingClientRect()
+      return { key, above: window.innerHeight - rect.bottom < 140 }
+    })
+  }
 
   const eligible = useMemo(
     () => getEligiblePlayerPokemon(roster, attacksByName, bannedAttacks),
@@ -138,7 +150,18 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
             const superEffective = isSuperEffective(pp)
             const damage = getDamageBreakdown(species, pp.xp).total
             const hp = getHpBreakdown(species, pp.xp).total
-            const talents = talentsByPokemon?.get(pp.pokemon_nom) ?? []
+            // Talents regroupés par NOM : une espèce peut en cumuler plusieurs
+            // sous le même libellé (trois bonus conditionnels « Colère », par
+            // exemple) — une seule pastille alors, dont le panneau liste toutes
+            // les descriptions.
+            const talentGroups = [...(talentsByPokemon?.get(pp.pokemon_nom) ?? [])
+              .reduce((map, t) => {
+                const label = t.nom || 'Talent'
+                const list = map.get(label)
+                if (list) list.push(t)
+                else map.set(label, [t])
+                return map
+              }, new Map<string, AutoBattleTalent[]>())]
             const wins = pp.battles_won ?? 0
             return (
               <button
@@ -175,20 +198,48 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
                       droite. L'icône remplace le nom du talent — la place est
                       comptée, et seul l'EFFET est utile pour choisir. */}
                   <div className="flex items-center justify-between gap-2">
-                    {/* Le résumé tient sur une ligne le plus souvent — l'icône y
-                        est alors parfaitement centrée (items-center) — et peut
-                        courir sur 2 lignes avant d'être coupé. */}
-                    <span className="flex items-center gap-1 flex-1 min-w-0">
-                      {talents.length > 0 && (
-                        <>
-                          <span className="shrink-0">
-                            <PixelIcon src={STAT_ICON.talent} size={14} colored />
-                          </span>
-                          <span className="text-ink-muted-2 text-xs min-w-0 line-clamp-2 leading-snug">
-                            {talents.map(describeTalent).join(' · ')}
-                          </span>
-                        </>
+                    {/* Seulement le NOM du talent, dans une pastille : la
+                        description s'ouvre au clic, accolée à la pastille (au-
+                        dessus ou en dessous selon la place disponible). Des
+                        <span role="button"> plutôt que des <button> : toute la
+                        carte est déjà un <button>, imbriquer serait invalide. */}
+                    <span className="flex items-center gap-1 flex-1 min-w-0 flex-wrap">
+                      {talentGroups.length > 0 && (
+                        <span className="shrink-0 flex items-center">
+                          <PixelIcon src={STAT_ICON.talent} size={14} colored />
+                        </span>
                       )}
+                      {talentGroups.map(([label, group]) => {
+                        const key = `${pp.id}:${label}`
+                        return (
+                          <span key={key} className="relative inline-flex">
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => { e.stopPropagation(); toggleTalentInfo(key, e.currentTarget) }}
+                              onKeyDown={(e) => {
+                                if (e.key !== 'Enter' && e.key !== ' ') return
+                                e.preventDefault(); e.stopPropagation(); toggleTalentInfo(key, e.currentTarget)
+                              }}
+                              className={`px-1.5 py-0.5 rounded text-xs font-bold cursor-pointer ${PIXEL_BORDER_SM} ${
+                                openTalent?.key === key ? 'bg-[#f0e08f]' : 'bg-cream'
+                              } text-ink`}
+                            >
+                              {label}
+                            </span>
+                            {openTalent?.key === key && (
+                              <span
+                                onClick={(e) => e.stopPropagation()}
+                                className={`absolute left-0 z-20 w-64 max-w-[70vw] p-2 rounded bg-white text-ink text-xs leading-snug font-normal normal-case flex flex-col gap-1 ${PIXEL_BORDER_SM} ${
+                                  openTalent.above ? 'bottom-full mb-1' : 'top-full mt-1'
+                                }`}
+                              >
+                                {group.map((t) => <span key={t.id}>{describeTalent(t)}</span>)}
+                              </span>
+                            )}
+                          </span>
+                        )
+                      })}
                     </span>
                     <span className="flex items-center gap-1.5 shrink-0">
                       {superEffective && (
@@ -210,7 +261,12 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
       )}
 
       {requireLaunch && selected && (
-        <AutoBattleLaunchBar label={ownedPokemonName(selected)} disabled={noTicket} onLaunch={() => onSelect(selected)} />
+        <AutoBattleLaunchBar
+          label={ownedPokemonName(selected)}
+          iconSrc={pokemonByName.get(selected.pokemon_nom)?.image_miniature}
+          disabled={noTicket}
+          onLaunch={() => onSelect(selected)}
+        />
       )}
     </div>
   )

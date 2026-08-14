@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import type { AutoBattleVariant, AutoBattleLevel, AutoBattleLevelReward, AutoBattleRewardType, AutoBattleGameMode, Pokemon, PokemonEvolution, Attack, Item } from '../types'
 import { useAutoBattleVariants } from '../hooks/useAutoBattleVariants'
 import { useAutoBattleBannedAttacks } from '../hooks/useAutoBattleBannedAttacks'
+import { usePlayers } from '../hooks/usePlayers'
 import { usePokemon } from '../hooks/usePokemon'
 import { useAttacks } from '../hooks/useAttacks'
 import { useItems } from '../hooks/useItems'
@@ -10,6 +11,7 @@ import { getStatusEffectDisplay } from '../lib/autoBattle'
 import { getAttaquesWithPreEvolutions } from '../lib/pokemonFacts'
 import { NumberInput } from './NumberInput'
 import { PokemonSearchInput } from './PokemonSearchInput'
+import { PlayerSearchInput } from './PlayerSearchInput'
 import { MoveSearchInput } from './MoveSearchInput'
 import { ItemSearchInput } from './ItemSearchInput'
 import { TypeBadge } from './TypeBadge'
@@ -478,7 +480,11 @@ export function AdminAutoBattleVariantsPanel() {
   // Évolutions : servent à lister les capacités apprenables d'un opposant en
   // incluant celles de ses pré-évolutions, comme la fiche Pokémon.
   const { byPokemonNom: evolutionsByPokemonNom } = usePokemonEvolutions()
+  // Joueurs/PNJ : servent uniquement au PNJ "visage" de la variante (face
+  // adverse du tirage au sort d'ouverture, voir AutoBattleCoinToss).
+  const { players } = usePlayers()
   const pokemonByName = useMemo(() => new Map(pokemon.map((p) => [p.nom, p])), [pokemon])
+  const playersById = useMemo(() => new Map(players.map((p) => [p.id, p])), [players])
   const [selected, setSelected] = useState<number | null>(null)
   const [newVariantName, setNewVariantName] = useState('')
 
@@ -653,6 +659,55 @@ export function AdminAutoBattleVariantsPanel() {
                             <option value="auto">Auto (une capacité choisie avant le combat)</option>
                             <option value="manual">Manuel (une capacité choisie à chaque tour)</option>
                           </select>
+                        </div>
+                        {/* PNJ "visage" du parcours : purement cosmétique — il
+                            n'apparaît QUE sur la face adverse de la pièce du
+                            tirage au sort d'ouverture (voir AutoBattleCoinToss),
+                            à la place du "VS". Sans PNJ, cette face montre la
+                            miniature de l'espèce affrontée au niveau en cours. */}
+                        <div>
+                          <label className="text-ink-muted-2 text-sm block mb-1">
+                            PNJ adverse (optionnel) — affiché au tirage au sort
+                          </label>
+                          {(() => {
+                            const npc = selectedVariant.npc_player_id != null
+                              ? playersById.get(selectedVariant.npc_player_id)
+                              : undefined
+                            if (!npc) {
+                              return (
+                                <>
+                                  <PlayerSearchInput
+                                    options={players}
+                                    onSelect={(p) => updateVariant(selectedVariant.id, { npc_player_id: p.id })}
+                                    placeholder="Rechercher un PNJ…"
+                                  />
+                                  <p className="text-ink-muted-2 text-xs italic mt-1">
+                                    Sans PNJ, la pièce affiche la miniature du pokémon affronté.
+                                  </p>
+                                </>
+                              )
+                            }
+                            return (
+                              <div className={`flex items-center gap-2 p-2 rounded ${PIXEL_BORDER_SM} bg-white`}>
+                                <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 border-2" style={{ borderColor: npc.color }}>
+                                  {npc.image_url ? (
+                                    <img src={npc.image_url} alt="" className="w-full h-full object-cover" />
+                                  ) : (
+                                    <div className="w-full h-full" style={{ backgroundColor: npc.color }} />
+                                  )}
+                                </div>
+                                <span className="text-ink text-sm truncate flex-1">{npc.name}</span>
+                                {npc.is_npc && <span className="text-purple-800 text-[10px] font-bold shrink-0">PNJ</span>}
+                                <button
+                                  onClick={() => updateVariant(selectedVariant.id, { npc_player_id: null })}
+                                  title="Retirer le PNJ"
+                                  className={`text-xs px-2 py-1 rounded shrink-0 ${BUTTON_STYLE.gray}`}
+                                >
+                                  <CloseIcon className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )
+                          })()}
                         </div>
                       </div>
 

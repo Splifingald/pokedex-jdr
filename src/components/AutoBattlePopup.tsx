@@ -19,7 +19,7 @@ import { GameBanner } from './CasinoGameCard'
 import { AutoBattleVariantBanner } from './autoBattle/AutoBattleVariantBanner'
 import { AutoBattlePokemonPicker } from './autoBattle/AutoBattlePokemonPicker'
 import { AutoBattleAbilityPicker } from './autoBattle/AutoBattleAbilityPicker'
-import { AutoBattleCoinToss } from './autoBattle/AutoBattleCoinToss'
+import { AutoBattleCoinToss, type CoinTossOpponent } from './autoBattle/AutoBattleCoinToss'
 import { AutoBattleScreen } from './autoBattle/AutoBattleScreen'
 import { ManualBattleScreen } from './autoBattle/ManualBattleScreen'
 import { AutoBattleRewardPopup } from './autoBattle/AutoBattleRewardPopup'
@@ -52,6 +52,9 @@ const STATUS_MESSAGE: Record<string, string> = {
 
 interface Props {
   player: Player
+  /** Tous les joueurs/PNJ — sert uniquement à résoudre le PNJ d'une variante
+   *  (autobattle_variants.npc_player_id) affiché au tirage au sort. */
+  players: Player[]
   playerItems: ReturnType<typeof usePlayerItems>
   roster: PlayerPokemon[]
   pokemonByName: Map<string, Pokemon>
@@ -65,7 +68,7 @@ interface Props {
 }
 
 export function AutoBattlePopup({
-  player, playerItems, roster, pokemonByName, attacksByName, itemsByName, evolutionsByPokemonNom,
+  player, players, playerItems, roster, pokemonByName, attacksByName, itemsByName, evolutionsByPokemonNom,
   pokedollarImageUrl, onRequestPokemonDetail, onClose, isAdmin,
 }: Props) {
   const { config } = useAutoBattleConfig()
@@ -510,6 +513,25 @@ export function AutoBattlePopup({
   // AutoBattleAbilityPicker, affiché AVANT que le combat ne soit lancé.
   const activeLevelOpponentSpecies = activeLevel ? pokemonByName.get(activeLevel.opponent_pokemon_nom) : undefined
 
+  // Face adverse de la pièce du tirage au sort (voir AutoBattleCoinToss) :
+  // l'avatar du PNJ rattaché à la variante s'il y en a un
+  // (autobattle_variants.npc_player_id, purement cosmétique), sinon la
+  // miniature de l'espèce affrontée — et "VS" en dernier recours si aucune
+  // image n'est disponible. Le PNJ peut avoir été supprimé entre-temps (pas de
+  // FK côté base) : playersById renvoie alors undefined et on retombe
+  // naturellement sur le pokémon.
+  const variantNpc = activeVariant?.npc_player_id != null
+    ? players.find((p) => p.id === activeVariant.npc_player_id)
+    : undefined
+  const coinTossOpponentFor = (species: Pokemon | undefined, spriteOverride?: string | null): CoinTossOpponent | null => {
+    if (variantNpc?.image_url) {
+      return { imageUrl: variantNpc.image_url, name: variantNpc.name, color: variantNpc.color, fit: 'cover' }
+    }
+    const sprite = spriteOverride ?? species?.image_miniature
+    if (!sprite) return null
+    return { imageUrl: sprite, name: species?.nom ?? 'Adversaire', fit: 'contain' }
+  }
+
   // Variantes déjà terminées reléguées en bas de liste (ordre stable sinon).
   const sortedEnabledVariants = [...variants.filter((v) => v.enabled)].sort((a, b) => {
     const aDone = progressByVariant.get(a.id)?.variant_completed ?? false
@@ -671,6 +693,7 @@ export function AutoBattlePopup({
           {view === 'manual-coin-toss' && manualFirstAttacker && (
             <AutoBattleCoinToss
               player={player}
+              opponent={coinTossOpponentFor(activeLevelOpponentSpecies)}
               firstAttacker={manualFirstAttacker}
               onDone={() => setView('manual-battle')}
             />
@@ -733,6 +756,9 @@ export function AutoBattlePopup({
           {view === 'coin-toss' && battleResult?.coin_toss_first && (
             <AutoBattleCoinToss
               player={player}
+              // Cas Métamorph : le sprite adverse peut être remplacé pour ce
+              // combat (opponent_image_override), la pièce suit.
+              opponent={coinTossOpponentFor(opponentSpecies, battleResult.opponent_image_override)}
               firstAttacker={battleResult.coin_toss_first}
               onDone={() => setView('battle')}
             />
