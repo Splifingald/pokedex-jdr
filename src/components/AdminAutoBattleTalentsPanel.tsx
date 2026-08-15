@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AutoBattleStatusEffect, AutoBattleTalent, AutoBattleTalentHpCondition, AutoBattleTalentKind,
   AutoBattleTalentStat, AutoBattleTalentStatusCondition, AutoBattleTalentTrigger, AutoBattleTalentValueType,
-  Pokemon,
+  AutoBattleWeather, Pokemon,
 } from '../types'
 import { useAutoBattleTalents } from '../hooks/useAutoBattleTalents'
+import { useAutoBattleWeathers } from '../hooks/useAutoBattleWeathers'
 import { useAttacks } from '../hooks/useAttacks'
 import { usePokemon } from '../hooks/usePokemon'
 import { PokemonSearchInput } from './PokemonSearchInput'
@@ -57,6 +58,9 @@ const BLANK: Omit<AutoBattleTalent, 'id' | 'pokemon_nom' | 'nom' | 'kind' | 'ani
   trigger: null,
   dice_value: null,
   max_uses: null,
+  weather_id: null,
+  weather_condition: null,
+  weather_condition_id: null,
 }
 
 /** Valeurs minimales acceptées par les contraintes, pour chaque kind. */
@@ -72,6 +76,10 @@ function defaultsFor(kind: AutoBattleTalentKind): Partial<AutoBattleTalent> {
     case 'type_damage_to_heal': return { type_filter: [] }
     case 'dice_bonus_damage': return { dice_value: 1, amount: 5 }
     case 'heal_below_hp': return { hp_percent: 50, value_type: 'flat', amount: 10 }
+    // weather_id reste null : c'est à l'admin de choisir la météo, et la
+    // contrainte autobattle_talents_set_weather_fields ne l'exige pas (voir
+    // schema.sql — une météo supprimée doit pouvoir vider la colonne).
+    case 'set_weather': return { percent: 100, trigger: 'battle_start' }
     default: return {}
   }
 }
@@ -79,13 +87,16 @@ function defaultsFor(kind: AutoBattleTalentKind): Partial<AutoBattleTalent> {
 interface RowProps {
   talent: AutoBattleTalent
   attackTypes: string[]
+  weathers: AutoBattleWeather[]
+  /** Noms des météos par id — le talent ne stocke qu'un id (voir describeTalent). */
+  weatherNames: Map<number, string>
   highlighted: boolean
   rowRef: (el: HTMLDivElement | null) => void
   onUpdate: (id: number, patch: Partial<Omit<AutoBattleTalent, 'id' | 'created_at'>>) => void
   onRemove: (id: number) => void
 }
 
-function TalentRow({ talent, attackTypes, highlighted, rowRef, onUpdate, onRemove }: RowProps) {
+function TalentRow({ talent, attackTypes, weathers, weatherNames, highlighted, rowRef, onUpdate, onRemove }: RowProps) {
   const patch = (p: Partial<Omit<AutoBattleTalent, 'id' | 'created_at'>>) => onUpdate(talent.id, p)
 
   const handleKindChange = (kind: AutoBattleTalentKind) => {
@@ -134,6 +145,31 @@ function TalentRow({ talent, attackTypes, highlighted, rowRef, onUpdate, onRemov
         })}
       </div>
     </div>
+  )
+
+  // Condition « météo en cours » d'un bonus de stat : un seul select porte les
+  // quatre cas (aucune condition / n'importe laquelle / aucune météo / une météo
+  // précise), et écrit toujours un groupe cohérent weather_condition +
+  // weather_condition_id.
+  const weatherCondSelect = () => (
+    <label className="flex items-center gap-2 flex-wrap">
+      <span className="text-ink-muted-2 text-xs">Météo</span>
+      <select
+        value={talent.weather_condition === 'this' ? `w${talent.weather_condition_id ?? ''}` : (talent.weather_condition ?? '')}
+        onChange={(e) => {
+          const v = e.target.value
+          if (v === '') patch({ weather_condition: null, weather_condition_id: null })
+          else if (v === 'any' || v === 'none') patch({ weather_condition: v, weather_condition_id: null })
+          else patch({ weather_condition: 'this', weather_condition_id: Number(v.slice(1)) })
+        }}
+        className={SELECT_CLASS}
+      >
+        <option value="">Aucune condition</option>
+        <option value="any">N'importe quelle météo</option>
+        <option value="none">Aucune météo active</option>
+        {weathers.map((w) => <option key={w.id} value={`w${w.id}`}>{w.nom}</option>)}
+      </select>
+    </label>
   )
 
   const statusChips = () => (
@@ -240,6 +276,7 @@ function TalentRow({ talent, attackTypes, highlighted, rowRef, onUpdate, onRemov
           </div>
           {statusCondSelect('opponent_status', 'Statut de l’adversaire')}
           {statusCondSelect('self_status', 'Son propre statut')}
+          {weatherCondSelect()}
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -323,6 +360,48 @@ function TalentRow({ talent, attackTypes, highlighted, rowRef, onUpdate, onRemov
         </div>
       )}
 
+      {talent.kind === 'set_weather' && (
+        <div className="flex flex-col gap-2">
+          {weathers.length === 0 ? (
+            <p className="text-ink-muted-2 text-xs italic">
+              Aucune météo n’existe encore — crée-la dans l’onglet 🌦️ Météo.
+            </p>
+          ) : (
+            <div className="flex items-center gap-2 flex-wrap">
+              <select
+                value={talent.weather_id ?? ''}
+                onChange={(e) => patch({ weather_id: e.target.value === '' ? null : Number(e.target.value) })}
+                className={SELECT_CLASS}
+              >
+                <option value="">Choisir une météo…</option>
+                {weathers.map((w) => <option key={w.id} value={w.id}>{w.nom}</option>)}
+              </select>
+              <NumberInput
+                min={1}
+                value={talent.percent ?? 100}
+                fallback={100}
+                onCommit={(v) => patch({ percent: Math.max(1, Math.min(100, v)) })}
+                className={NUM_CLASS_SM}
+              />
+              <span className="text-ink-muted-2 text-xs">% de chances</span>
+            </div>
+          )}
+          <select
+            value={talent.trigger ?? 'battle_start'}
+            onChange={(e) => {
+              const trigger = e.target.value as AutoBattleTalentTrigger
+              patch({ trigger, type_filter: trigger === 'on_ability_type' ? (talent.type_filter ?? []) : null })
+            }}
+            className={SELECT_CLASS}
+          >
+            {(Object.keys(TALENT_TRIGGER_LABEL) as AutoBattleTalentTrigger[]).map((t) => (
+              <option key={t} value={t}>{TALENT_TRIGGER_LABEL[t]}</option>
+            ))}
+          </select>
+          {talent.trigger === 'on_ability_type' && typeChips('Tous les types de capacité')}
+        </div>
+      )}
+
       {talent.kind === 'status_immunity' && statusChips()}
 
       {(talent.kind === 'type_immunity' || talent.kind === 'type_damage_to_heal') && typeChips('Aucun type — talent sans effet')}
@@ -387,13 +466,14 @@ function TalentRow({ talent, attackTypes, highlighted, rowRef, onUpdate, onRemov
         </div>
       )}
 
-      <p className="text-ink-muted-2 text-xs italic">{describeTalent(talent)}</p>
+      <p className="text-ink-muted-2 text-xs italic">{describeTalent(talent, weatherNames)}</p>
     </div>
   )
 }
 
 export function AdminAutoBattleTalentsPanel() {
   const { talents, talentsByPokemon, loading, addTalent, updateTalent, removeTalent } = useAutoBattleTalents()
+  const { weathers, weatherNames, loading: weathersLoading } = useAutoBattleWeathers()
   const { attacks, loading: attacksLoading } = useAttacks()
   const { pokemon, loading: pokemonLoading } = usePokemon()
 
@@ -404,6 +484,11 @@ export function AdminAutoBattleTalentsPanel() {
   const attackTypes = useMemo(
     () => [...new Set(attacks.map((a) => a.type).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr')),
     [attacks]
+  )
+
+  const sortedWeathers = useMemo(
+    () => [...weathers].sort((a, b) => a.nom.localeCompare(b.nom, 'fr')),
+    [weathers]
   )
 
   // Espèces dépliées (repliées par défaut) : une espèce repliée tient sur une
@@ -490,7 +575,7 @@ export function AdminAutoBattleTalentsPanel() {
     return () => window.clearTimeout(timeout)
   }, [justFoundNom, sortedSpecies])
 
-  if (loading || attacksLoading || pokemonLoading) {
+  if (loading || attacksLoading || pokemonLoading || weathersLoading) {
     return (
       <div className="bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] w-full p-6">
         <p className="text-ink-muted-2 text-sm">Chargement…</p>
@@ -540,7 +625,7 @@ export function AdminAutoBattleTalentsPanel() {
             const isOpen = expanded.has(nom)
             // Résumé de la vue repliée : le même texte que sous chaque carte,
             // enchaîné quand l'espèce cumule plusieurs talents.
-            const recap = list.map(describeTalent).join(' · ')
+            const recap = list.map((t) => describeTalent(t, weatherNames)).join(' · ')
             return (
               <div
                 key={nom}
@@ -575,6 +660,8 @@ export function AdminAutoBattleTalentsPanel() {
                         key={t.id}
                         talent={t}
                         attackTypes={attackTypes}
+                        weathers={sortedWeathers}
+                        weatherNames={weatherNames}
                         highlighted={justAddedId === t.id}
                         rowRef={setRowRef}
                         onUpdate={updateTalent}

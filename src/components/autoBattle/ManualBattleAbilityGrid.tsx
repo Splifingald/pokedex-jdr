@@ -1,5 +1,5 @@
-import type { Pokemon, Attack, AutoBattleAbilityRule } from '../../types'
-import { getStatusEffectDisplay, describeAbilityRule } from '../../lib/autoBattle'
+import type { Pokemon, Attack, AutoBattleAbilityRule, AutoBattleWeatherEffect } from '../../types'
+import { getStatusEffectDisplay, describeAbilityRule, weatherAffectsAbility } from '../../lib/autoBattle'
 import { getSuperEfficace } from '../../lib/pokemonFacts'
 import { TypeBadge } from '../TypeBadge'
 import { PixelIcon } from '../icons/PixelIcon'
@@ -19,6 +19,12 @@ interface Props {
   abilityRulesByName: Map<string, AutoBattleAbilityRule>
   bannedAttacks: Set<string>
   precisionEnabled: boolean
+  /** Emoji de la météo en cours (voir autobattle_weathers.icon) — null si aucune météo n'est levée. */
+  weatherIcon?: string | null
+  /** Nom de la météo en cours, pour l'infobulle de la pastille. */
+  weatherNom?: string | null
+  /** Effets de la météo en cours — décident quelles capacités portent la pastille (voir weatherAffectsAbility). */
+  weatherEffects?: AutoBattleWeatherEffect[]
   disabled: boolean
   onSelect: (ability: Attack) => void
 }
@@ -28,7 +34,7 @@ interface Props {
 // le combat — pas un écran de sélection séparé comme AutoBattleAbilityPicker
 // en mode Auto). `disabled` = un tour est en cours de résolution/animation
 // (attend le prochain round_no), la grille reste visible mais non cliquable.
-export function ManualBattleAbilityGrid({ abilityNoms, playerSpecies, opponentSpecies, attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, disabled, onSelect }: Props) {
+export function ManualBattleAbilityGrid({ abilityNoms, playerSpecies, opponentSpecies, attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, weatherIcon, weatherNom, weatherEffects, disabled, onSelect }: Props) {
   const { showToast } = useToast()
   const abilities = abilityNoms
     .map((nom) => attacksByName.get(nom))
@@ -44,6 +50,10 @@ export function ManualBattleAbilityGrid({ abilityNoms, playerSpecies, opponentSp
         const effectLines = describeAbilityRule(rule, a)
         const superEffective = isSuperEffectiveSpecies && playerSpecies != null
           && a.type.toLowerCase().trim() === playerSpecies.type.toLowerCase().trim()
+        // Météo : la pastille ne s'affiche que si CETTE capacité est concernée
+        // (voir weatherAffectsAbility) — un buff des attaques Eau la pose sur
+        // toutes les capacités Eau offensives, et sur elles seules.
+        const weatherAffects = !ineligible && weatherAffectsAbility(weatherEffects, a, precisionEnabled)
         return (
           <button
             key={a.nom}
@@ -70,6 +80,19 @@ export function ManualBattleAbilityGrid({ abilityNoms, playerSpecies, opponentSp
               {!ineligible && superEffective && (
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white bg-[#d9761e] whitespace-nowrap shrink-0">
                   Super Efficace
+                </span>
+              )}
+              {/* Pastille météo en DERNIER de la ligne : elle se pose donc en
+                  haut à droite de la carte, après le badge Super Efficace, sans
+                  jamais le recouvrir — dans le flux plutôt qu'en absolu, la
+                  ligne étant flex-wrap, les deux se replacent proprement quand
+                  la place manque. */}
+              {weatherAffects && (
+                <span
+                  className="text-sm leading-none shrink-0"
+                  title={weatherNom ? `Capacité influencée par : ${weatherNom}` : 'Capacité influencée par la météo'}
+                >
+                  {weatherIcon || '🌦️'}
                 </span>
               )}
             </div>

@@ -152,6 +152,15 @@ export function AdminPvpPanel() {
               />
               <span>Activer les talents d'espèce (désactivés, aucun talent ne se déclenche)</span>
             </label>
+            <label className="flex items-center gap-2 text-sm text-ink-muted mt-2">
+              <input
+                type="checkbox"
+                checked={config.weather_enabled}
+                onChange={(e) => updateConfig({ weather_enabled: e.target.checked })}
+                className="w-4 h-4"
+              />
+              <span>Activer la météo (désactivée, aucune météo ne se lève ni ne s'applique)</span>
+            </label>
           </div>
         </div>
       </div>

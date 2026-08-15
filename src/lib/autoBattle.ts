@@ -1,8 +1,11 @@
 import type {
   Attack, Item, PlayerPokemon, AutoBattleLevelReward, AutoBattleStatusEffect, AutoBattleAbilityRule,
   AutoBattleTalent, AutoBattleTalentKind, AutoBattleTalentTrigger,
+  AutoBattleWeatherEffect, AutoBattleWeatherEffectKind, AutoBattleWeatherTargetScope,
+  AutoBattleWeatherCondition, AutoBattleTurn,
 } from '../types'
 import { getStatusInfo, type StatusId } from './status'
+import { isAbsolutePrecision } from './precisionColor'
 
 // Libellés propres à Combat Auto (alignés sur les libellés du CSV des
 // attaques), mais couleur et icône RÉUTILISÉES du système de statut déjà
@@ -146,9 +149,16 @@ export function generateIdempotencyKey(): string {
 // précision/statut déjà montrés séparément ailleurs. turn_effect (rythme des
 // tours) pleinement actif dans les deux modes (voir autobattle_resolve_battle
 // et autobattle_resolve_manual_round) — inclus ci-dessous.
-export function describeAbilityRule(rule: AutoBattleAbilityRule | undefined, ability: Attack): string[] {
+// `weatherNames` : noms des météos par id (la règle ne stocke qu'un id) — absent,
+// les lignes météo restent correctes mais parlent d'« une météo ».
+export function describeAbilityRule(
+  rule: AutoBattleAbilityRule | undefined,
+  ability: Attack,
+  weatherNames?: Map<number, string>,
+): string[] {
   if (!rule) return []
   const lines: string[] = []
+  const weatherNom = (id: number | null) => (id != null ? weatherNames?.get(id) ?? null : null)
   if (rule.turn_effect === 'skip') {
     lines.push('Passe son tour un coup sur deux')
   } else if (rule.turn_effect === 'play_twice') {
@@ -209,7 +219,9 @@ export function describeAbilityRule(rule: AutoBattleAbilityRule | undefined, abi
     const duration = rule.stat_mod_duration_type === 'battle_end' ? "jusqu'à la fin du combat" : `pendant ${rule.stat_mod_duration_turns} tours`
     const usesSuffix = rule.stat_mod_max_uses ? ` (max ${rule.stat_mod_max_uses}×)` : ''
     const typeSuffix = rule.stat_mod_type_filter ? ` — capacités ${rule.stat_mod_type_filter} uniquement` : ''
-    lines.push(`${verb} les ${statLabel} ${targetLabel} de ${amount} ${duration}${usesSuffix}${typeSuffix}`)
+    const weatherCond = describeWeatherCondition(rule.stat_mod_weather_condition, weatherNom(rule.stat_mod_weather_id))
+    const weatherSuffix = weatherCond ? ` — ${weatherCond}` : ''
+    lines.push(`${verb} les ${statLabel} ${targetLabel} de ${amount} ${duration}${usesSuffix}${typeSuffix}${weatherSuffix}`)
   }
   if (rule.percent_hp_damage_percent) {
     lines.push(`Inflige ${rule.percent_hp_damage_percent}% des PV restants de la cible (remplace les dégâts habituels)`)
@@ -242,6 +254,9 @@ export function describeAbilityRule(rule: AutoBattleAbilityRule | undefined, abi
   if (rule.invulnerable_next_turn) {
     lines.push('Rend invulnérable au prochain tour adverse')
   }
+  if (rule.weather_id != null) {
+    lines.push(`${rule.weather_chance ?? 0} % de déclencher ${weatherNom(rule.weather_id) ?? 'une météo'} en touchant`)
+  }
   if (ability.status_effect && rule.status_reversed) {
     lines.push('Le statut affecte son utilisateur, pas l\'adversaire')
   }
@@ -268,6 +283,35 @@ export const TALENT_KIND_LABEL: Record<AutoBattleTalentKind, string> = {
   heal_below_hp: 'Soin sous un seuil de PV',
   transform: 'Transformation (copie l’adversaire)',
   heavy_sleeper: 'Somnolent (réveil sur un 6)',
+  set_weather: 'Déclenche une météo',
+  cancel_talents: 'Annule tous les talents du combat',
+}
+
+// ── Météo (effets de terrain) ───────────────────────────────────────────────
+
+export const WEATHER_EFFECT_KIND_LABEL: Record<AutoBattleWeatherEffectKind, string> = {
+  stat_mod: 'Bonus / malus de statistique',
+  inflict_status: 'Inflige un statut chaque tour',
+  damage: 'Inflige des dégâts chaque tour',
+}
+
+export const WEATHER_TARGET_SCOPE_LABEL: Record<AutoBattleWeatherTargetScope, string> = {
+  pokemon_type: 'du type du pokémon',
+  ability_type: 'du type de la capacité jouée',
+}
+
+// Libellé d'une condition « météo en cours », partagé par les talents et les
+// capacités. `nom` = celui de la météo visée quand la condition vaut 'this'.
+export function describeWeatherCondition(
+  condition: AutoBattleWeatherCondition | null,
+  nom: string | null | undefined,
+): string | null {
+  switch (condition) {
+    case 'any': return 'par n’importe quelle météo'
+    case 'none': return 'hors météo'
+    case 'this': return `par ${nom ?? 'une météo supprimée'}`
+    default: return null
+  }
 }
 
 export const TALENT_TRIGGER_LABEL: Record<AutoBattleTalentTrigger, string> = {
@@ -284,7 +328,10 @@ const listOrAll = (list: string[] | null) => (list && list.length > 0 ? list.joi
 // Résumé lisible d'un talent, pour l'UI admin. Volontairement aligné sur
 // autobattle_talent_detail (SQL), qui produit la phrase affichée en combat —
 // les deux doivent rester cohérents.
-export function describeTalent(talent: AutoBattleTalent): string {
+// `weatherNames` : noms des météos par id (le talent ne stocke qu'un id). Absent
+// = la phrase reste correcte, elle nomme juste « une météo » à la place.
+export function describeTalent(talent: AutoBattleTalent, weatherNames?: Map<number, string>): string {
+  const weatherNom = (id: number | null) => (id != null ? weatherNames?.get(id) ?? null : null)
   switch (talent.kind) {
     case 'stat_boost': {
       const stat = talent.stat === 'precision' ? 'précision' : 'dégâts'
@@ -307,6 +354,8 @@ export function describeTalent(talent: AutoBattleTalent): string {
           ? 'lui-même affecté par un statut'
           : `lui-même sous ${STATUS_EFFECT_LABEL[talent.self_status].toLowerCase()}`)
       }
+      const weather = describeWeatherCondition(talent.weather_condition, weatherNom(talent.weather_condition_id))
+      if (weather) parts.push(weather)
       return parts.join(' — ')
     }
     case 'absorb_first_damage':
@@ -352,6 +401,103 @@ export function describeTalent(talent: AutoBattleTalent): string {
       return 'Copie l’apparence, le type et les capacités de son adversaire (jamais ses PV) — sans effet en PvP'
     case 'heavy_sleeper':
       return 'Endormi, il lui faut un 6 exact au dé pour se réveiller (au lieu de 4, 5 ou 6)'
+    case 'set_weather': {
+      const nom = weatherNom(talent.weather_id)
+      const trigger = talent.trigger ? TALENT_TRIGGER_LABEL[talent.trigger].toLowerCase() : ''
+      const types = talent.trigger === 'on_ability_type' ? ` (${listOrAll(talent.type_filter)})` : ''
+      if (!nom) return 'Aucune météo sélectionnée — ce talent ne fait rien'
+      return `${talent.percent ?? 0} % de déclencher ${nom} — ${trigger}${types}`
+    }
+    case 'cancel_talents':
+      return 'Annule tous les talents du combat, des deux côtés — le sien compris'
+  }
+}
+
+/**
+ * Filtre de types d'un effet météo, mis en toutes lettres — renvoie la fin de
+ * phrase complète (« … pokémon de » + ce qui suit) :
+ *   • liste vide            → « tous types »
+ *   • tous les types cochés → « tous types »
+ *   • majorité cochée       → « tous types sauf Sol, Roche »
+ *   • sinon                 → « type Feu, Glace »
+ * La forme négative dès que les types cochés sont PLUS NOMBREUX que les autres :
+ * une tempête de sable se configure en cochant 16 types sur 18, et « tous types
+ * sauf Sol, Roche » est la seule formulation lisible.
+ * `allTypes` = univers des types (celui des pastilles de l'UI admin) ; absent,
+ * on se rabat sur la liste positive.
+ * Pendant SQL : autobattle_weather_type_list, à garder aligné.
+ */
+function weatherTypeList(list: string[] | null, allTypes?: string[]): string {
+  const selected = list ?? []
+  if (selected.length === 0) return 'tous types'
+  if (!allTypes || allTypes.length === 0) return `type ${selected.join(', ')}`
+  const norm = (t: string) => t.trim().toLowerCase()
+  const missing = allTypes.filter((t) => !selected.some((s) => norm(s) === norm(t)))
+  if (missing.length === 0) return 'tous types'
+  if (selected.length > missing.length) return `tous types sauf ${missing.join(', ')}`
+  return `type ${selected.join(', ')}`
+}
+
+/**
+ * Météo active à un instant donné du journal : la DERNIÈRE levée (`weather_set`)
+ * l'emporte, puisqu'une météo en remplace toujours une autre et qu'aucune ne
+ * s'éteint d'elle-même. Renvoie null tant qu'aucune ne s'est levée.
+ *
+ * Sert aux écrans qui ont les tours sous la main mais ne rejouent pas
+ * l'animation (ManualBattleScreen, pour la grille de capacités) —
+ * AutoBattleScreen, lui, suit la météo au fil de la relecture animée, ce qui
+ * peut la faire apparaître une fraction de seconde plus tard à l'écran.
+ */
+export function getActiveWeather(turns: AutoBattleTurn[]): AutoBattleTurn | null {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    if (turns[i].weather_set) return turns[i]
+  }
+  return null
+}
+
+/**
+ * Cette capacité est-elle concernée par la météo en cours ? Seuls les effets
+ * 'stat_mod' ciblant le type de la CAPACITÉ comptent : ceux qui ciblent le type
+ * du POKÉMON (comme les dégâts et statuts de terrain) ne disent rien de la
+ * capacité choisie.
+ *
+ * Un buff de dégâts ne concerne que les capacités OFFENSIVES, et un buff de
+ * précision que celles qui peuvent rater — annoncer une pastille sur une
+ * capacité de soutien à précision absolue serait un mensonge.
+ */
+export function weatherAffectsAbility(
+  effects: AutoBattleWeatherEffect[] | undefined,
+  ability: Attack,
+  precisionEnabled: boolean,
+): boolean {
+  if (!effects || effects.length === 0) return false
+  const abilityType = ability.type.trim().toLowerCase()
+  return effects.some((e) => {
+    if (e.kind !== 'stat_mod' || e.target_scope !== 'ability_type') return false
+    // Liste d'INCLUSION : vide = tous les types (voir weatherTypeList).
+    const filter = e.type_filter ?? []
+    if (filter.length > 0 && !filter.some((t) => t.trim().toLowerCase() === abilityType)) return false
+    if (e.stat === 'damage') return ability.deals_damage
+    if (e.stat === 'precision') return precisionEnabled && !isAbsolutePrecision(ability.precision)
+    return false
+  })
+}
+
+// Résumé lisible d'un effet de météo, pour l'UI admin (voir describeTalent :
+// même rôle, même style de phrase). `allTypes` : voir weatherTypeList.
+export function describeWeatherEffect(effect: AutoBattleWeatherEffect, allTypes?: string[]): string {
+  switch (effect.kind) {
+    case 'stat_mod': {
+      const stat = effect.stat === 'precision' ? 'précision' : 'dégâts'
+      const scope = effect.target_scope === 'ability_type' ? 'capacités' : 'pokémon'
+      return `${formatSigned(effect.amount ?? 0)} ${stat} — ${scope} de ${weatherTypeList(effect.type_filter, allTypes)}`
+    }
+    case 'inflict_status': {
+      const label = effect.status ? STATUS_EFFECT_LABEL[effect.status].toLowerCase() : 'un statut'
+      return `${effect.percent ?? 0} % par tour d’infliger ${label} — pokémon de ${weatherTypeList(effect.type_filter, allTypes)}`
+    }
+    case 'damage':
+      return `${effect.percent ?? 0} % par tour d’infliger ${effect.damage_amount ?? 0} dégâts — pokémon de ${weatherTypeList(effect.type_filter, allTypes)}`
   }
 }
 

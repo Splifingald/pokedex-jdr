@@ -5,6 +5,7 @@ import { ManualBattleAbilityGrid } from './ManualBattleAbilityGrid'
 import { PixelIcon } from '../icons/PixelIcon'
 import { AUTOBATTLE_TICKET_ICON } from '../../lib/icons'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
+import { getActiveWeather } from '../../lib/autoBattle'
 
 // Nombre de rounds complets (chacun résout jusqu'à 2 flips, un tour de
 // chaque camp — voir autobattle_resolve_manual_round) sans le moindre PV
@@ -93,6 +94,14 @@ export function ManualBattleScreen({
   // Métamorph — jamais les siens propres dans ce cas (voir autobattle_
   // resolve_manual_round, même règle côté serveur pour le calcul réel).
   const effectivePlayerSpecies = isPlayerMetamorph ? opponentSpecies : playerSpecies
+
+  // Météo en cours, pour marquer les capacités concernées dans la grille (voir
+  // weatherAffectsAbility). Dérivée des tours plutôt que remontée par
+  // AutoBattleScreen : c'est la même donnée, sans callback à faire redescendre.
+  // Conséquence assumée : la pastille apparaît sur les capacités dès que le
+  // serveur a répondu, donc éventuellement avant que l'animation n'ait annoncé
+  // la météo — la grille est de toute façon grisée pendant ce temps-là.
+  const activeWeather = useMemo(() => getActiveWeather(turns), [turns])
 
   // Une seule capacité réellement jouable (soit le pokémon n'en connaît
   // qu'une, soit toutes les autres sont bannies, voir autobattle_banned_
@@ -220,6 +229,9 @@ export function ManualBattleScreen({
             abilityRulesByName={abilityRulesByName}
             bannedAttacks={bannedAttacks}
             precisionEnabled={precisionEnabled}
+            weatherIcon={activeWeather?.weather_icon ?? null}
+            weatherNom={activeWeather?.weather_nom ?? null}
+            weatherEffects={activeWeather?.weather_effects}
             disabled={busy || !!autoPlayAbility || !!forcedAbility}
             onSelect={(ability) => void handleSelect(ability)}
           />

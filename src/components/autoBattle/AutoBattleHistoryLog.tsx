@@ -13,6 +13,14 @@ export interface AutoBattleHistoryEntryData {
   statusText?: { before: string; statusLabel: string; statusColor: string; after: string }
   /** Texte découpé autour d'un nom de TALENT, affiché en gras (voir autobattle_talents) */
   talentText?: { before: string; talentLabel: string; after: string }
+  /** Texte découpé autour d'un nom de MÉTÉO, affiché en gras (voir autobattle_weathers) */
+  weatherText?: { before: string; weatherLabel: string; after: string }
+  /**
+   * Événement de TERRAIN, qui n'appartient à aucun camp (la météo qui se lève) :
+   * ni icône ni nom de pokémon, et liseré neutre. `side` reste renseigné — il
+   * sert seulement à savoir de quel côté l'animation a été jouée.
+   */
+  neutral?: boolean
   damage?: number
   heal?: number
   superEffective?: boolean
@@ -42,28 +50,32 @@ interface Props {
 // récentes en tête, toujours affiché sous l'arène (mobile ET desktop).
 // Ni titre ni bouton "Masquer" : le journal parle de lui-même et gagne la
 // place ainsi libérée (il remonte d'autant sous l'arène).
+// Pas de zone de défilement propre non plus : la popup de combat scrolle déjà,
+// le journal se contente de s'allonger dedans (plus récent en tête).
 export function AutoBattleHistoryLog({ entries, className = '', isAdmin = false }: Props) {
   return (
-    <div className={`flex flex-col gap-2 min-h-0 ${className}`}>
-      <div className="flex flex-col gap-1.5 overflow-y-auto min-h-0 max-h-48">
+    <div className={`flex flex-col gap-2 ${className}`}>
+      <div className="flex flex-col gap-1.5">
         {entries.length === 0 ? (
           <p className="text-ink-muted-2 text-xs italic">Le combat commence…</p>
         ) : (
           entries.map((e) => (
             <div
               key={e.id}
-              className={`flex items-start gap-2 p-1.5 rounded ${PIXEL_BORDER_SM} bg-white shrink-0 border-l-4 ${e.side === 'opponent' ? 'border-l-hp-red' : 'border-l-xp-blue'}`}
+              className={`flex items-start gap-2 p-1.5 rounded ${PIXEL_BORDER_SM} bg-white shrink-0 border-l-4 ${e.neutral ? 'border-l-ink/40' : e.side === 'opponent' ? 'border-l-hp-red' : 'border-l-xp-blue'}`}
             >
-              <div className="w-5 h-5 shrink-0 flex items-center justify-center mt-0.5">
-                {e.iconSrc ? (
-                  <img src={e.iconSrc} alt="" className="pixelated w-full h-full object-contain" />
-                ) : (
-                  <span className="text-ink-muted-2 text-sm">?</span>
-                )}
-              </div>
+              {!e.neutral && (
+                <div className="w-5 h-5 shrink-0 flex items-center justify-center mt-0.5">
+                  {e.iconSrc ? (
+                    <img src={e.iconSrc} alt="" className="pixelated w-full h-full object-contain" />
+                  ) : (
+                    <span className="text-ink-muted-2 text-sm">?</span>
+                  )}
+                </div>
+              )}
               <div className="flex-1 min-w-0">
                 <p className="text-ink text-xs leading-snug">
-                  <span className="font-bold">{e.pokemonName}</span>{' '}
+                  {!e.neutral && <><span className="font-bold">{e.pokemonName}</span>{' '}</>}
                   {e.statusText ? (
                     <>
                       {e.statusText.before}
@@ -75,6 +87,12 @@ export function AutoBattleHistoryLog({ entries, className = '', isAdmin = false 
                       {e.talentText.before}
                       <span className="font-bold">{e.talentText.talentLabel}</span>
                       {e.talentText.after}
+                    </>
+                  ) : e.weatherText ? (
+                    <>
+                      {e.weatherText.before}
+                      <span className="font-bold">{e.weatherText.weatherLabel}</span>
+                      {e.weatherText.after}
                     </>
                   ) : e.text}
                   {e.damage != null && (

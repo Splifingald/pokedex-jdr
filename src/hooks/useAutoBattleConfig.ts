@@ -14,6 +14,7 @@ const DEFAULTS: AutoBattleConfig = {
   icon_url: '',
   precision_enabled: true,
   talents_enabled: true,
+  weather_enabled: true,
   mode_icon_auto_url: '',
   mode_icon_manual_url: '',
 }

@@ -1,212 +1,32 @@
--- Migration temporaire — À COLLER TEL QUEL dans le SQL Editor Supabase.
--- (Fichier de travail régénéré à chaque tâche, voir CLAUDE.md.)
---
--- Objet : NOUVEAU TALENT « ANNULE TOUS LES TALENTS » (kind 'cancel_talents').
---
--- Ce que fait ce talent : dès qu'un des deux pokémon du combat le porte, PLUS
--- AUCUN talent ne s'applique — ni ceux de l'adversaire, ni les autres talents
--- de son propre porteur. Le combat se déroule exactement comme si la bascule
--- globale « Talents » (autobattle_config / pvp_config.talents_enabled) était
--- éteinte, mais pour ce combat-là seulement.
---
--- Quand il s'applique : AVANT TOUT LE RESTE. Les fonctions de combat résolvent
--- les talents des deux camps comme toute première étape (avant la copie du
--- talent 'transform', avant la priorité d'initiative, avant l'annonce
--- d'ouverture, avant le premier tour) ; le filtre est posé à cet endroit précis,
--- donc aucune phase ultérieure ne voit jamais un talent annulé.
---
--- Seule exception volontaire : le talent annulateur LUI-MÊME reste dans la
--- liste de son porteur et s'annonce au tour 0 (animation + ligne d'historique).
--- Sans cette annonce, le joueur n'aurait aucune explication de l'absence de
--- tous les autres talents. Il est inerte partout ailleurs — aucun helper de
--- phase ne réagit à ce kind.
---
--- Configuration : Admin → Mini-Jeux → Talents, type « Annule tous les talents ».
--- Aucun champ à remplir (comme « Immunité au contre-coup »).
---
--- Contenu du script :
---   1. la contrainte CHECK des kinds accepte 'cancel_talents' ;
---   2. deux nouveaux helpers, autobattle_talents_effective (le filtre) et
---      autobattle_talents_vs (résolution d'un camp FACE À l'autre, qui remplace
---      autobattle_talents_for dans tous les moteurs) ;
---   3. autobattle_talent_detail / autobattle_talent_open : libellé et annonce
---      au tour 0 du nouveau kind ;
---   4. les 7 fonctions de combat rejouées à l'identique, à ceci près qu'elles
---      appellent désormais autobattle_talents_vs au lieu de
---      autobattle_talents_for (Combat Auto, Combat Manuel démarrage + round,
---      PvP démarrage + round, essai PvP démarrage + round).
---
--- AUCUNE donnée touchée, AUCUNE colonne ajoutée : une contrainte CHECK
--- remplacée et des CREATE OR REPLACE FUNCTION. Intégralement rejouable.
---
--- PRÉREQUIS : les migrations précédentes (météo, puis correctif
--- auto_cure_first_status à l'entrée en combat) doivent déjà avoir été
--- appliquées — les fonctions rejouées ici en contiennent le code.
 -- ============================================================
-
--- 1. Le nouveau kind est accepté par la table ────────────────────────────────
-ALTER TABLE autobattle_talents DROP CONSTRAINT IF EXISTS autobattle_talents_kind_check;
-ALTER TABLE autobattle_talents ADD CONSTRAINT autobattle_talents_kind_check
-  CHECK (kind IN (
-    'stat_boost', 'absorb_first_damage', 'endure_ko',
-    'poison_damage_boost', 'burn_damage_boost', 'priority', 'inflict_status',
-    'status_immunity', 'type_immunity', 'type_damage_to_heal', 'no_recoil',
-    'dice_bonus_damage', 'auto_cure_first_status', 'invulnerable_until_hit',
-    'heal_below_hp', 'transform', 'heavy_sleeper', 'set_weather',
-    'cancel_talents'));
-
--- 2. à 4. Fonctions — extraites VERBATIM de supabase/schema.sql ──────────────
-
--- Talent 'cancel_talents' : ANNULE TOUS LES TALENTS DU COMBAT, dans les deux
--- camps — celui de son porteur compris. Il ne se contente pas de neutraliser
--- l'adversaire : dès qu'un des deux pokémon l'a, le combat entier se joue comme
--- si le système de talents était éteint (même résultat que la bascule globale
--- autobattle_config/pvp_config.talents_enabled, mais pour ce combat-là).
+-- Correctif : le talent « guérit aussitôt le premier statut subi »
+-- (auto_cure_first_status) était ignoré à l'entrée en combat.
 --
--- Il s'applique AVANT TOUT LE RESTE : la résolution des talents est la toute
--- première chose que font les fonctions de combat (avant la copie 'transform',
--- avant la priorité d'initiative, avant l'annonce d'ouverture), donc filtrer
--- ici suffit à ce qu'aucune autre phase ne voie jamais un talent annulé.
+-- Un talent 'inflict_status' déclenché par le trigger « à l'entrée en combat »
+-- (battle_start) appliquait son statut à la cible SANS passer par
+-- autobattle_talent_status_guard : seule l'immunité ('status_immunity',
+-- vérifiée dans autobattle_talent_act) était respectée, pas la guérison
+-- automatique du premier statut. Les triggers « à chaque tour » et « sur
+-- capacité d'un type » appellent déjà cette garde, eux.
 --
--- Le talent annulateur lui-même est CONSERVÉ dans la liste de son porteur, pour
--- deux raisons : il doit rester annonçable au tour 0 (sinon le joueur ne
--- comprend pas pourquoi plus rien ne se déclenche), et il doit continuer
--- d'annuler quand c'est le camp d'en face qui l'interroge. Aucun helper de
--- phase ne réagit à ce kind : il est inerte partout ailleurs.
-CREATE OR REPLACE FUNCTION autobattle_talents_effective(p_self jsonb, p_opp jsonb)
-RETURNS jsonb
-LANGUAGE sql IMMUTABLE
-AS $$
-  SELECT CASE
-    WHEN EXISTS (
-      SELECT 1
-      FROM jsonb_array_elements(COALESCE(p_self, '[]'::jsonb) || COALESCE(p_opp, '[]'::jsonb)) t
-      WHERE (t ->> 'kind') = 'cancel_talents')
-    THEN COALESCE((
-      SELECT jsonb_agg(t)
-      FROM jsonb_array_elements(COALESCE(p_self, '[]'::jsonb)) t
-      WHERE (t ->> 'kind') = 'cancel_talents'), '[]'::jsonb)
-    ELSE COALESCE(p_self, '[]'::jsonb)
-  END
-$$;
-
-GRANT EXECUTE ON FUNCTION autobattle_talents_effective(jsonb, jsonb) TO anon, authenticated;
-
-
--- Raccourci utilisé par TOUS les points d'entrée de combat à la place de
--- autobattle_talents_for : « les talents de p_self_nom face à p_opp_nom », donc
--- déjà passés au filtre d'annulation. Appeler _for directement dans un moteur
--- serait un contournement de 'cancel_talents'.
-CREATE OR REPLACE FUNCTION autobattle_talents_vs(p_self_nom text, p_opp_nom text, p_enabled boolean DEFAULT true)
-RETURNS jsonb
-LANGUAGE sql STABLE
-AS $$
-  SELECT autobattle_talents_effective(
-    autobattle_talents_for(p_self_nom, p_enabled),
-    autobattle_talents_for(p_opp_nom, p_enabled))
-$$;
-
-GRANT EXECUTE ON FUNCTION autobattle_talents_vs(text, text, boolean) TO anon, authenticated;
-
-
--- Résumé lisible du déclenchement, affiché tel quel dans l'historique de combat
--- (le client n'a pas à reconstruire la phrase, voir AutoBattleTurn.talent_detail).
-CREATE OR REPLACE FUNCTION autobattle_talent_detail(p_talent jsonb)
-RETURNS text
-LANGUAGE sql IMMUTABLE
-AS $$
-  SELECT CASE (p_talent ->> 'kind')
-    WHEN 'absorb_first_damage' THEN 'absorbe les premiers dégâts reçus'
-    WHEN 'endure_ko' THEN 'encaisse le coup fatal et reste à 1 PV'
-    WHEN 'poison_damage_boost' THEN 'les dégâts de poison sont augmentés de ' || COALESCE(p_talent ->> 'amount', '0')
-    WHEN 'burn_damage_boost' THEN 'les dégâts de brûlure sont augmentés de ' || COALESCE(p_talent ->> 'amount', '0')
-    WHEN 'priority' THEN 'priorité d''initiative ' || COALESCE(p_talent ->> 'amount', '0')
-    WHEN 'inflict_status' THEN 'peut infliger un statut à l''adversaire (' || COALESCE(p_talent ->> 'percent', '0') || ' %)'
-    WHEN 'status_immunity' THEN 'insensible à certains statuts'
-    WHEN 'type_immunity' THEN 'insensible aux dégâts de ce type'
-    WHEN 'type_damage_to_heal' THEN 'les dégâts de ce type le soignent'
-    WHEN 'no_recoil' THEN 'ne subit aucun contre-coup'
-    WHEN 'dice_bonus_damage' THEN 'dé à ' || COALESCE(p_talent ->> 'dice_value', '?') || ' : +' || COALESCE(p_talent ->> 'amount', '0') || ' dégâts'
-    WHEN 'auto_cure_first_status' THEN 'guérit aussitôt le premier statut subi'
-    WHEN 'invulnerable_until_hit' THEN 'invulnérable tant qu''il n''a pas porté un coup'
-    WHEN 'heal_below_hp' THEN 'récupère des PV en passant sous ' || COALESCE(p_talent ->> 'hp_percent', '0') || ' % de ses PV'
-    WHEN 'transform' THEN 'prend l''apparence et les capacités de son adversaire'
-    WHEN 'heavy_sleeper' THEN 'ne se réveille que sur un 6'
-    WHEN 'cancel_talents' THEN 'annule tous les talents du combat, des deux côtés'
-    -- weather_nom est injecté par autobattle_talents_for (jointure), la colonne
-    -- weather_id seule ne dirait rien au joueur.
-    WHEN 'set_weather' THEN 'déclenche ' || COALESCE(NULLIF(trim(COALESCE(p_talent ->> 'weather_nom', '')), ''), 'une météo')
-      || ' (' || COALESCE(p_talent ->> 'percent', '0') || ' %)'
-    WHEN 'stat_boost' THEN
-      (CASE WHEN COALESCE((p_talent ->> 'amount')::integer, 0) >= 0 THEN '+' ELSE '' END)
-      || COALESCE(p_talent ->> 'amount', '0')
-      || (CASE WHEN (p_talent ->> 'stat') = 'precision' THEN ' précision' ELSE ' dégâts' END)
-      || COALESCE(
-           (SELECT ' (' || string_agg(f, ', ') || ')'
-            FROM jsonb_array_elements_text(
-              CASE WHEN jsonb_typeof(p_talent -> 'type_filter') = 'array' THEN p_talent -> 'type_filter' ELSE '[]'::jsonb END
-            ) f),
-           '')
-      || (CASE WHEN COALESCE((p_talent ->> 'require_damage_taken')::boolean, false) THEN ' par coup encaissé' ELSE '' END)
-      || (CASE
-            WHEN (p_talent ->> 'hp_condition') = 'below' THEN ' quand les PV sont ≤ ' || (p_talent ->> 'hp_percent') || ' %'
-            WHEN (p_talent ->> 'hp_condition') = 'above' THEN ' quand les PV sont ≥ ' || (p_talent ->> 'hp_percent') || ' %'
-            ELSE '' END)
-      || (CASE WHEN (p_talent ->> 'opponent_status') IS NOT NULL THEN ' quand l''adversaire est affecté par un statut' ELSE '' END)
-      || (CASE WHEN (p_talent ->> 'self_status') IS NOT NULL THEN ' quand il est lui-même affecté par un statut' ELSE '' END)
-      || (CASE (p_talent ->> 'weather_condition')
-            WHEN 'any'  THEN ' par temps changé'
-            WHEN 'none' THEN ' par temps calme'
-            WHEN 'this' THEN ' selon la météo en cours'
-            ELSE '' END)
-    ELSE ''
-  END
-$$;
-
-GRANT EXECUTE ON FUNCTION autobattle_talent_detail(jsonb) TO anon, authenticated;
-
-
--- ── Phase 1 : ouverture du combat ────────────────────────────────────────────
--- Annonce (animation + ligne d'historique, tour 0) tous les talents PERMANENTS,
--- c'est-à-dire ceux qui agissent sans condition dès le premier tour. Les talents
--- conditionnels ou ponctuels s'annoncent au moment où ils se déclenchent.
-CREATE OR REPLACE FUNCTION autobattle_talent_open(p_talents jsonb, p_side text, p_hp integer)
-RETURNS jsonb
-LANGUAGE plpgsql
-AS $$
-DECLARE
-  v_state jsonb := autobattle_talent_state_init();
-  v_turns jsonb := '[]'::jsonb;
-  v_t     jsonb;
-BEGIN
-  FOR v_t IN SELECT * FROM jsonb_array_elements(COALESCE(p_talents, '[]'::jsonb)) LOOP
-    -- 'cancel_talents' est le seul talent encore présent dans la liste quand
-    -- l'annulation est active (voir autobattle_talents_effective) : il DOIT
-    -- s'annoncer, c'est la seule explication donnée au joueur de l'absence de
-    -- tout autre talent pendant le combat.
-    IF (v_t ->> 'kind') IN ('poison_damage_boost', 'burn_damage_boost', 'status_immunity',
-                            'type_immunity', 'type_damage_to_heal', 'no_recoil', 'invulnerable_until_hit',
-                            'transform', 'heavy_sleeper', 'cancel_talents')
-       OR ((v_t ->> 'kind') = 'priority' AND COALESCE((v_t ->> 'amount')::integer, 0) <> 0)
-       OR ((v_t ->> 'kind') = 'stat_boost'
-           AND (v_t ->> 'hp_condition') IS NULL
-           AND (v_t ->> 'opponent_status') IS NULL
-           AND (v_t ->> 'self_status') IS NULL
-           -- Un bonus conditionné à la météo n'est pas permanent : il s'annonce
-           -- quand la météo le rend actif (autobattle_talent_act).
-           AND (v_t ->> 'weather_condition') IS NULL
-           AND NOT COALESCE((v_t ->> 'require_damage_taken')::boolean, false))
-    THEN
-      v_turns := v_turns || jsonb_build_array(autobattle_talent_turn(0, p_side, p_hp, v_t, NULL));
-      v_state := autobattle_talent_mark(v_state, v_t, 'shown');
-    END IF;
-  END LOOP;
-  RETURN jsonb_build_object('turns', v_turns, 'state', v_state);
-END;
-$$;
-
-GRANT EXECUTE ON FUNCTION autobattle_talent_open(jsonb, text, integer) TO anon, authenticated;
-
+-- Conséquence visible : le tour de talent porte 'talent_inflicted_status'
+-- (émis avant que la garde ne se prononce), donc le badge de statut
+-- s'allumait à côté du nom du pokémon alors que le porteur du talent ne
+-- subissait rien — et comme aucun statut n'était réellement posé, aucun tick
+-- ne venait jamais l'éteindre : le badge restait affiché jusqu'à la fin du
+-- combat.
+--
+-- Les 4 fonctions ci-dessous (Combat Auto, Combat Manuel, PvP, essai PvP)
+-- appellent désormais la garde sur la cible, et ne posent le statut que si
+-- elle ne l'a pas bloqué.
+--
+-- AUCUNE modification de schéma : ni table, ni type, ni colonne — uniquement
+-- des CREATE OR REPLACE FUNCTION, rejouables sans risque.
+--
+-- NB : autobattle_resolve_round_core n'est pas repris ici — sa seule
+-- modification dans schema.sql est un commentaire, son comportement est
+-- inchangé.
+-- ============================================================
 
 -- Résout un combat Combat Auto de bout en bout, de façon atomique et
 -- autoritaire côté serveur (rien n'est fait confiance côté client hormis les
@@ -264,14 +84,6 @@ DECLARE
   v_heal_dice           integer;
   v_precision_enabled   boolean;
   v_talents_enabled     boolean;
-  -- Météo (voir autobattle_weathers) : bascule globale, météo en cours pour tout
-  -- le combat, retour du dernier helper de phase, et numéro du tour où le
-  -- dernier tick a eu lieu.
-  v_weather_enabled     boolean;
-  v_weather             jsonb;
-  v_weather_res         jsonb;
-  v_weather_side        text;
-  v_weather_last_tick_round integer;
   v_hit_chance          integer;
   v_missed              boolean;
   v_block_remaining     integer;
@@ -433,16 +245,6 @@ DECLARE
   v_opponent_heal_dot_until_awake  boolean := false;
   v_player_ignore_status_block     text;
   v_opponent_ignore_status_block   text;
-  -- Météo déclenchée par la capacité, et condition « météo en cours » de son
-  -- modificateur de stat (voir autobattle_ability_rules.weather_id).
-  v_player_weather_id              bigint;
-  v_opponent_weather_id            bigint;
-  v_player_weather_chance          integer;
-  v_opponent_weather_chance        integer;
-  v_player_stat_mod_weather_condition   text;
-  v_opponent_stat_mod_weather_condition text;
-  v_player_stat_mod_weather_id     bigint;
-  v_opponent_stat_mod_weather_id   bigint;
   v_player_double_turn_pending     boolean := false;
   v_opponent_double_turn_pending   boolean := false;
   v_ignore_block                   boolean;
@@ -589,17 +391,10 @@ BEGIN
   -- amont de tout le reste, parce que le talent 'transform' conditionne la
   -- copie de l'adversaire juste en dessous. Résolus sur l'espèce PROPRE de
   -- chaque camp : un transformé copie visuel/type/dégâts, jamais le talent.
-  -- _vs et non _for : le talent 'cancel_talents' d'un camp vide les deux listes
-  -- (voir autobattle_talents_effective), y compris avant la copie 'transform'.
   SELECT talents_enabled INTO v_talents_enabled FROM autobattle_config WHERE id = 1;
   v_talents_enabled := COALESCE(v_talents_enabled, true);
-  v_player_talents := autobattle_talents_vs(v_pp.pokemon_nom, v_level.opponent_pokemon_nom, v_talents_enabled);
-  v_opponent_talents := autobattle_talents_vs(v_level.opponent_pokemon_nom, v_pp.pokemon_nom, v_talents_enabled);
-  -- Bascule globale de la météo (voir autobattle_config.weather_enabled). Aucun
-  -- combat ne DÉMARRE avec une météo : elle ne peut être levée que par un talent
-  -- ou une capacité, et rien n'est conservé d'un combat à l'autre.
-  SELECT weather_enabled INTO v_weather_enabled FROM autobattle_config WHERE id = 1;
-  v_weather_enabled := COALESCE(v_weather_enabled, true);
+  v_player_talents := autobattle_talents_for(v_pp.pokemon_nom, v_talents_enabled);
+  v_opponent_talents := autobattle_talents_for(v_level.opponent_pokemon_nom, v_talents_enabled);
 
   -- Talent 'transform' (anciennement le cas spécial « Métamorph ») : copie le
   -- visuel/les dégâts/la capacité/le type de l'ADVERSAIRE pour tout le combat,
@@ -691,8 +486,7 @@ BEGIN
          heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
          stat_mod_type_filter, prevention_duration_turns,
          keep_going_turns, keep_going_until_fail, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
-         heal_dot_until_awake, ignore_status_block,
-         weather_id, weather_chance, stat_mod_weather_condition, stat_mod_weather_id
+         heal_dot_until_awake, ignore_status_block
     INTO v_player_heal_type, v_player_heal_amount, v_player_heal_percent, v_player_turn_effect, v_player_repeat_max, v_player_status_reversed,
          v_player_recoil_type, v_player_recoil_min, v_player_recoil_max, v_player_recoil_percent, v_player_invuln_grant,
          v_player_bonus_type, v_player_bonus_multiplier, v_player_bonus_flat, v_player_bonus_min, v_player_bonus_max,
@@ -702,9 +496,7 @@ BEGIN
          v_player_heal_dot_config_amount, v_player_heal_dot_config_turns, v_player_heal_dot_config_type, v_player_heal_dot_config_percent, v_player_cancel_heal_duration, v_player_percent_hp_damage_percent,
          v_player_stat_mod_type_filter, v_player_prevention_duration,
          v_player_keep_going_turns, v_player_keep_going_until_fail, v_player_keep_going_bonus_type, v_player_keep_going_bonus_flat, v_player_keep_going_bonus_percent,
-         v_player_heal_dot_config_until_awake, v_player_ignore_status_block,
-         v_player_weather_id, v_player_weather_chance,
-         v_player_stat_mod_weather_condition, v_player_stat_mod_weather_id
+         v_player_heal_dot_config_until_awake, v_player_ignore_status_block
     FROM autobattle_ability_rules WHERE attack_nom = v_effective_ability_nom;
   v_player_status_reversed := COALESCE(v_player_status_reversed, false);
   v_player_invuln_grant := COALESCE(v_player_invuln_grant, false);
@@ -720,8 +512,7 @@ BEGIN
          heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
          stat_mod_type_filter, prevention_duration_turns,
          keep_going_turns, keep_going_until_fail, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
-         heal_dot_until_awake, ignore_status_block,
-         weather_id, weather_chance, stat_mod_weather_condition, stat_mod_weather_id
+         heal_dot_until_awake, ignore_status_block
     INTO v_opponent_heal_type, v_opponent_heal_amount, v_opponent_heal_percent, v_opponent_turn_effect, v_opponent_repeat_max, v_opponent_status_reversed,
          v_opponent_recoil_type, v_opponent_recoil_min, v_opponent_recoil_max, v_opponent_recoil_percent, v_opponent_invuln_grant,
          v_opponent_bonus_type, v_opponent_bonus_multiplier, v_opponent_bonus_flat, v_opponent_bonus_min, v_opponent_bonus_max,
@@ -731,9 +522,7 @@ BEGIN
          v_opponent_heal_dot_config_amount, v_opponent_heal_dot_config_turns, v_opponent_heal_dot_config_type, v_opponent_heal_dot_config_percent, v_opponent_cancel_heal_duration, v_opponent_percent_hp_damage_percent,
          v_opponent_stat_mod_type_filter, v_opponent_prevention_duration,
          v_opponent_keep_going_turns, v_opponent_keep_going_until_fail, v_opponent_keep_going_bonus_type, v_opponent_keep_going_bonus_flat, v_opponent_keep_going_bonus_percent,
-         v_opponent_heal_dot_config_until_awake, v_opponent_ignore_status_block,
-         v_opponent_weather_id, v_opponent_weather_chance,
-         v_opponent_stat_mod_weather_condition, v_opponent_stat_mod_weather_id
+         v_opponent_heal_dot_config_until_awake, v_opponent_ignore_status_block
     FROM autobattle_ability_rules WHERE attack_nom = v_effective_opponent_ability_nom;
   v_opponent_status_reversed := COALESCE(v_opponent_status_reversed, false);
   v_opponent_invuln_grant := COALESCE(v_opponent_invuln_grant, false);
@@ -800,15 +589,9 @@ BEGIN
   FOREACH v_talent_side IN ARRAY (CASE WHEN v_coin_player_first THEN ARRAY['player', 'opponent'] ELSE ARRAY['opponent', 'player'] END) LOOP
     IF v_talent_side = 'player' THEN
       v_talent_res := autobattle_talent_act(v_player_talents, v_player_talent_state, 'player', 'battle_start', v_ability.type,
-        v_player_hp, v_player_max_hp, v_opponent_status, v_player_status, v_opponent_talents, 0, v_weather);
+        v_player_hp, v_player_max_hp, v_opponent_status, v_player_status, v_opponent_talents, 0);
       v_player_talent_state := v_talent_res -> 'state';
       v_turns := v_turns || (v_talent_res -> 'turns');
-      -- Météo levée « à l'entrée en combat » : elle est donc déjà en place au
-      -- tout premier tour, tick compris. Le dernier talent à passer son jet
-      -- l'emporte (une météo en remplace toujours une autre).
-      v_weather_res := autobattle_weather_set((v_talent_res ->> 'set_weather')::bigint, v_weather_enabled, v_weather, 'player', v_player_hp, 0);
-      v_weather := autobattle_weather_norm(v_weather_res -> 'weather');
-      v_turns := v_turns || (v_weather_res -> 'turns');
       v_talent_inflict := v_talent_res ->> 'inflict_status';
       IF v_talent_inflict IS NOT NULL THEN
         v_talent_res := autobattle_talent_status_guard(v_opponent_talents, v_opponent_talent_state, 'opponent', v_talent_inflict, v_opponent_hp, 0);
@@ -820,13 +603,9 @@ BEGIN
       END IF;
     ELSE
       v_talent_res := autobattle_talent_act(v_opponent_talents, v_opponent_talent_state, 'opponent', 'battle_start', v_opponent_ability.type,
-        v_opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status, v_player_talents, 0, v_weather);
+        v_opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status, v_player_talents, 0);
       v_opponent_talent_state := v_talent_res -> 'state';
       v_turns := v_turns || (v_talent_res -> 'turns');
-      -- Voir le même commentaire côté joueur.
-      v_weather_res := autobattle_weather_set((v_talent_res ->> 'set_weather')::bigint, v_weather_enabled, v_weather, 'opponent', v_opponent_hp, 0);
-      v_weather := autobattle_weather_norm(v_weather_res -> 'weather');
-      v_turns := v_turns || (v_weather_res -> 'turns');
       v_talent_inflict := v_talent_res ->> 'inflict_status';
       IF v_talent_inflict IS NOT NULL THEN
         v_talent_res := autobattle_talent_status_guard(v_player_talents, v_player_talent_state, 'player', v_talent_inflict, v_player_hp, 0);
@@ -861,41 +640,6 @@ BEGIN
     -- qu'elles voient déjà la valeur à jour de ce tour.
     IF v_block_remaining IS NULL THEN
       v_round_no := v_round_no + 1;
-    END IF;
-
-    -- ── Météo : tout premier événement du tour ────────────────────────────
-    -- Un TOUR DE COMBAT vaut DEUX activations ici (chaque camp joue la sienne,
-    -- et v_round_no avance à chacune — c'est le même « ×2 » que les durées de
-    -- modificateurs plus bas). La météo, elle, ne tique qu'une fois par tour de
-    -- combat, pour les DEUX pokémon : d'où le compteur v_weather_last_tick_
-    -- round plutôt qu'un simple test sur v_block_remaining. Insensible aux
-    -- rafales (v_round_no n'y bouge pas) comme aux tours passés.
-    -- L'ordre entre les deux camps suit celui du tour en cours.
-    IF v_weather IS NOT NULL AND v_block_remaining IS NULL
-       AND (v_weather_last_tick_round IS NULL OR v_round_no >= v_weather_last_tick_round + 2) THEN
-      v_weather_last_tick_round := v_round_no;
-      FOREACH v_weather_side IN ARRAY (CASE WHEN v_attacker = 'player' THEN ARRAY['player', 'opponent'] ELSE ARRAY['opponent', 'player'] END) LOOP
-        IF v_weather_side = 'player' THEN
-          v_weather_res := autobattle_weather_tick(
-            v_weather, 'player', CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END,
-            v_player_hp, v_player_max_hp, v_player_status, v_player_talents, v_player_talent_state, v_turn_no);
-          v_player_hp := (v_weather_res ->> 'hp')::integer;
-          v_player_status := v_weather_res ->> 'status';
-          v_player_talent_state := v_weather_res -> 'state';
-          v_turns := v_turns || (v_weather_res -> 'turns');
-        ELSE
-          v_weather_res := autobattle_weather_tick(
-            v_weather, 'opponent', CASE WHEN v_is_opponent_metamorph THEN v_player_species.type ELSE v_opponent_species.type END,
-            v_opponent_hp, v_level.opponent_hp, v_opponent_status, v_opponent_talents, v_opponent_talent_state, v_turn_no);
-          v_opponent_hp := (v_weather_res ->> 'hp')::integer;
-          v_opponent_status := v_weather_res ->> 'status';
-          v_opponent_talent_state := v_weather_res -> 'state';
-          v_turns := v_turns || (v_weather_res -> 'turns');
-        END IF;
-      END LOOP;
-      -- La météo peut tuer avant que le tour n'ait commencé.
-      IF v_player_hp <= 0 THEN v_outcome := 'lose'; EXIT; END IF;
-      IF v_opponent_hp <= 0 THEN v_outcome := 'win'; EXIT; END IF;
     END IF;
 
     -- Le bouclier d'invulnérabilité dure jusqu'au DÉBUT du prochain tour de
@@ -1516,14 +1260,9 @@ BEGIN
       -- tentative d'infliger un statut ('inflict_status', déclencheur « à chaque
       -- tour »). Les passifs permanents sont annoncés en tête de combat.
       v_talent_res := autobattle_talent_act(v_player_talents, v_player_talent_state, 'player', 'each_turn', v_ability.type,
-        v_player_hp, v_player_max_hp, v_opponent_status, v_player_status, v_opponent_talents, v_turn_no, v_weather);
+        v_player_hp, v_player_max_hp, v_opponent_status, v_player_status, v_opponent_talents, v_turn_no);
       v_player_talent_state := v_talent_res -> 'state';
       v_turns := v_turns || (v_talent_res -> 'turns');
-      -- Météo levée en cours de tour : le tick de ce tour est déjà passé, elle
-      -- ne s'appliquera donc qu'au tour suivant.
-      v_weather_res := autobattle_weather_set((v_talent_res ->> 'set_weather')::bigint, v_weather_enabled, v_weather, 'player', v_player_hp, v_turn_no);
-      v_weather := autobattle_weather_norm(v_weather_res -> 'weather');
-      v_turns := v_turns || (v_weather_res -> 'turns');
       v_talent_inflict := v_talent_res ->> 'inflict_status';
       -- Statut infligé par un talent : la cible peut encore le neutraliser
       -- ('status_immunity' est déjà pris en compte, 'auto_cure_first_status' non).
@@ -1568,10 +1307,7 @@ BEGIN
         END IF;
       ELSE
         v_precision_mod_total := autobattle_mod_total(v_player_precision_mods, v_round_no, v_ability.type)
-          + autobattle_talent_stat_bonus(v_player_talents, v_player_talent_state, 'precision', v_ability.type, v_player_hp, v_player_max_hp, v_opponent_status, v_player_status, v_weather)
-          -- Buff/debuff de terrain, compté dans le même total (donc visible
-          -- dans 'precision_mod_amount' côté client).
-          + autobattle_weather_stat_bonus(v_weather, CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END, v_ability.type, 'precision');
+          + autobattle_talent_stat_bonus(v_player_talents, v_player_talent_state, 'precision', v_ability.type, v_player_hp, v_player_max_hp, v_opponent_status, v_player_status);
         v_missed := (NOT v_player_never_miss) AND
           random() >= ((CASE WHEN v_precision_enabled THEN GREATEST(0, COALESCE(v_ability.precision, 10) - v_status_precision_penalty + v_precision_mod_total) ELSE 10 END * 10) / 100.0);
 
@@ -1603,8 +1339,7 @@ BEGIN
           -- autobattle_ability_rules.stat_mod_type_filter) ne correspond pas
           -- au type de la capacité jouée.
           v_damage_mod_applied := autobattle_mod_total(v_player_damage_mods, v_round_no, v_ability.type)
-            + autobattle_talent_stat_bonus(v_player_talents, v_player_talent_state, 'damage', v_ability.type, v_player_hp, v_player_max_hp, v_opponent_status, v_player_status, v_weather)
-            + autobattle_weather_stat_bonus(v_weather, CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END, v_ability.type, 'damage');
+            + autobattle_talent_stat_bonus(v_player_talents, v_player_talent_state, 'damage', v_ability.type, v_player_hp, v_player_max_hp, v_opponent_status, v_player_status);
           -- Bouclier Prévention de la cible : annule les dégâts ADDITIONNELS
           -- dus au bonus super efficace (la composante espèce+XP est comptée
           -- une fois au lieu de deux), le reste du coup est inchangé.
@@ -1678,12 +1413,9 @@ BEGIN
           -- un tick de brûlure/poison, qui ne passent pas par ici.
           IF v_hit_damage > 0 THEN
             v_talent_res := autobattle_talent_act(v_player_talents, v_player_talent_state, 'player', 'on_ability_type', v_ability.type,
-              v_player_hp, v_player_max_hp, v_opponent_status, v_player_status, v_opponent_talents, v_turn_no, v_weather);
+              v_player_hp, v_player_max_hp, v_opponent_status, v_player_status, v_opponent_talents, v_turn_no);
             v_player_talent_state := v_talent_res -> 'state';
             v_turns := v_turns || (v_talent_res -> 'turns');
-            v_weather_res := autobattle_weather_set((v_talent_res ->> 'set_weather')::bigint, v_weather_enabled, v_weather, 'player', v_player_hp, v_turn_no);
-            v_weather := autobattle_weather_norm(v_weather_res -> 'weather');
-            v_turns := v_turns || (v_weather_res -> 'turns');
             v_talent_inflict := v_talent_res ->> 'inflict_status';
             IF v_talent_inflict IS NOT NULL THEN
               v_talent_res := autobattle_talent_status_guard(v_opponent_talents, v_opponent_talent_state, 'opponent', v_talent_inflict, v_opponent_hp, v_turn_no);
@@ -1798,21 +1530,12 @@ BEGIN
               v_turn_entry := v_turn_entry || jsonb_build_object('status_applied', v_ability.status_effect, 'status_applied_reversed', v_player_status_reversed);
             END IF;
           END IF;
-          -- Météo levée par la capacité (façon Danse Pluie) : au même moment que
-          -- l'infliction de statut, donc seulement sur un coup qui a touché.
-          IF v_player_weather_id IS NOT NULL AND random() * 100 < COALESCE(v_player_weather_chance, 0) THEN
-            v_weather_res := autobattle_weather_set(v_player_weather_id, v_weather_enabled, v_weather, 'player', v_player_hp, v_turn_no);
-            v_weather := autobattle_weather_norm(v_weather_res -> 'weather');
-            v_talent_pending := COALESCE(v_talent_pending, '[]'::jsonb) || (v_weather_res -> 'turns');
-          END IF;
           -- Modificateur de stat (voir autobattle_ability_rules.stat_mod_*) :
           -- appliqué (ou réappliqué, écrasant l'ancien montant+durée) sur ce
           -- coup réussi, tant que la limite d'usages n'est pas atteinte —
           -- un usage ne compte que s'il s'applique réellement (jamais sur un
           -- raté, déjà exclu puisqu'on est dans la branche "coup réussi").
-          -- Peut être conditionné à la météo en cours (stat_mod_weather_*).
-          IF v_player_stat_mod_target IS NOT NULL
-             AND autobattle_weather_cond(v_player_stat_mod_weather_condition, v_player_stat_mod_weather_id, v_weather) THEN
+          IF v_player_stat_mod_target IS NOT NULL THEN
             IF v_player_stat_mod_max_uses IS NULL OR v_player_stat_mod_uses_used < v_player_stat_mod_max_uses THEN
               v_stat_mod_amount := CASE
                 WHEN v_player_stat_mod_value_type = 'flat' THEN COALESCE(v_player_stat_mod_flat, 0)
@@ -1941,13 +1664,9 @@ BEGIN
       -- tentative d'infliger un statut ('inflict_status', déclencheur « à chaque
       -- tour »). Les passifs permanents sont annoncés en tête de combat.
       v_talent_res := autobattle_talent_act(v_opponent_talents, v_opponent_talent_state, 'opponent', 'each_turn', v_opponent_ability.type,
-        v_opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status, v_player_talents, v_turn_no, v_weather);
+        v_opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status, v_player_talents, v_turn_no);
       v_opponent_talent_state := v_talent_res -> 'state';
       v_turns := v_turns || (v_talent_res -> 'turns');
-      -- Voir le même commentaire côté joueur plus haut.
-      v_weather_res := autobattle_weather_set((v_talent_res ->> 'set_weather')::bigint, v_weather_enabled, v_weather, 'opponent', v_opponent_hp, v_turn_no);
-      v_weather := autobattle_weather_norm(v_weather_res -> 'weather');
-      v_turns := v_turns || (v_weather_res -> 'turns');
       v_talent_inflict := v_talent_res ->> 'inflict_status';
       -- Statut infligé par un talent : la cible peut encore le neutraliser
       -- ('status_immunity' est déjà pris en compte, 'auto_cure_first_status' non).
@@ -1984,8 +1703,7 @@ BEGIN
         END IF;
       ELSE
         v_precision_mod_total := autobattle_mod_total(v_opponent_precision_mods, v_round_no, v_opponent_ability.type)
-          + autobattle_talent_stat_bonus(v_opponent_talents, v_opponent_talent_state, 'precision', v_opponent_ability.type, v_opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status, v_weather)
-          + autobattle_weather_stat_bonus(v_weather, CASE WHEN v_is_opponent_metamorph THEN v_player_species.type ELSE v_opponent_species.type END, v_opponent_ability.type, 'precision');
+          + autobattle_talent_stat_bonus(v_opponent_talents, v_opponent_talent_state, 'precision', v_opponent_ability.type, v_opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status);
         v_missed := (NOT v_opponent_never_miss) AND
           random() >= ((CASE WHEN v_precision_enabled THEN GREATEST(0, COALESCE(v_opponent_ability.precision, 10) - v_status_precision_penalty + v_precision_mod_total) ELSE 10 END * 10) / 100.0);
 
@@ -2009,8 +1727,7 @@ BEGIN
           -- de dégâts, système % PV / bonus conditionnels ignorés aussi.
           -- Voir les mêmes commentaires côté joueur plus haut.
           v_damage_mod_applied := autobattle_mod_total(v_opponent_damage_mods, v_round_no, v_opponent_ability.type)
-            + autobattle_talent_stat_bonus(v_opponent_talents, v_opponent_talent_state, 'damage', v_opponent_ability.type, v_opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status, v_weather)
-            + autobattle_weather_stat_bonus(v_weather, CASE WHEN v_is_opponent_metamorph THEN v_player_species.type ELSE v_opponent_species.type END, v_opponent_ability.type, 'damage');
+            + autobattle_talent_stat_bonus(v_opponent_talents, v_opponent_talent_state, 'damage', v_opponent_ability.type, v_opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status);
           v_prevention_blocked := v_opponent_type_bonus
             AND v_player_prevention_expires IS NOT NULL AND v_round_no <= v_player_prevention_expires;
           v_keep_going_bonus := 0;
@@ -2069,12 +1786,9 @@ BEGIN
           -- un tick de brûlure/poison, qui ne passent pas par ici.
           IF v_hit_damage > 0 THEN
             v_talent_res := autobattle_talent_act(v_opponent_talents, v_opponent_talent_state, 'opponent', 'on_ability_type', v_opponent_ability.type,
-              v_opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status, v_player_talents, v_turn_no, v_weather);
+              v_opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status, v_player_talents, v_turn_no);
             v_opponent_talent_state := v_talent_res -> 'state';
             v_turns := v_turns || (v_talent_res -> 'turns');
-            v_weather_res := autobattle_weather_set((v_talent_res ->> 'set_weather')::bigint, v_weather_enabled, v_weather, 'opponent', v_opponent_hp, v_turn_no);
-            v_weather := autobattle_weather_norm(v_weather_res -> 'weather');
-            v_turns := v_turns || (v_weather_res -> 'turns');
             v_talent_inflict := v_talent_res ->> 'inflict_status';
             IF v_talent_inflict IS NOT NULL THEN
               v_talent_res := autobattle_talent_status_guard(v_player_talents, v_player_talent_state, 'player', v_talent_inflict, v_player_hp, v_turn_no);
@@ -2176,14 +1890,7 @@ BEGIN
               v_turn_entry := v_turn_entry || jsonb_build_object('status_applied', v_opponent_ability.status_effect, 'status_applied_reversed', v_opponent_status_reversed);
             END IF;
           END IF;
-          -- Voir les mêmes commentaires côté joueur plus haut.
-          IF v_opponent_weather_id IS NOT NULL AND random() * 100 < COALESCE(v_opponent_weather_chance, 0) THEN
-            v_weather_res := autobattle_weather_set(v_opponent_weather_id, v_weather_enabled, v_weather, 'opponent', v_opponent_hp, v_turn_no);
-            v_weather := autobattle_weather_norm(v_weather_res -> 'weather');
-            v_talent_pending := COALESCE(v_talent_pending, '[]'::jsonb) || (v_weather_res -> 'turns');
-          END IF;
-          IF v_opponent_stat_mod_target IS NOT NULL
-             AND autobattle_weather_cond(v_opponent_stat_mod_weather_condition, v_opponent_stat_mod_weather_id, v_weather) THEN
+          IF v_opponent_stat_mod_target IS NOT NULL THEN
             IF v_opponent_stat_mod_max_uses IS NULL OR v_opponent_stat_mod_uses_used < v_opponent_stat_mod_max_uses THEN
               v_stat_mod_amount := CASE
                 WHEN v_opponent_stat_mod_value_type = 'flat' THEN COALESCE(v_opponent_stat_mod_flat, 0)
@@ -2365,7 +2072,6 @@ $$;
 
 GRANT EXECUTE ON FUNCTION autobattle_resolve_battle(bigint, bigint, bigint, text, uuid) TO anon, authenticated;
 
-
 -- Démarre un combat en mode Manuel (variant.game_mode = 'manual') : crée la
 -- ligne autobattle_manual_battles et tire au sort first_attacker AVANT que
 -- le joueur choisisse sa 1ère capacité — permet au client d'afficher le
@@ -2415,11 +2121,6 @@ DECLARE
   v_talent_inflict      text;
   v_side                text;
   v_talents_enabled     boolean;
-  -- Météo (voir autobattle_weathers) : un talent 'set_weather' déclenché « à
-  -- l'entrée en combat » la pose dès ici, et elle est persistée sur la ligne.
-  v_weather_enabled     boolean;
-  v_weather             jsonb;
-  v_weather_res         jsonb;
 BEGIN
   SELECT * INTO v_level FROM autobattle_levels WHERE id = p_level_id;
   IF v_level IS NULL THEN
@@ -2484,16 +2185,11 @@ BEGIN
   END IF;
 
   v_player_max_hp := COALESCE(v_player_species.pv_base, 0) + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'PV');
-  -- Bascule globale des talents (voir autobattle_config.talents_enabled), puis
-  -- filtre 'cancel_talents' (voir autobattle_talents_effective) : appliqué avant
-  -- la priorité d'initiative et l'annonce d'ouverture juste en dessous.
+  -- Bascule globale des talents (voir autobattle_config.talents_enabled).
   SELECT talents_enabled INTO v_talents_enabled FROM autobattle_config WHERE id = 1;
   v_talents_enabled := COALESCE(v_talents_enabled, true);
-  v_player_talents := autobattle_talents_vs(v_pp.pokemon_nom, v_level.opponent_pokemon_nom, v_talents_enabled);
-  v_opponent_talents := autobattle_talents_vs(v_level.opponent_pokemon_nom, v_pp.pokemon_nom, v_talents_enabled);
-  -- Bascule globale de la météo (voir autobattle_config.weather_enabled).
-  SELECT weather_enabled INTO v_weather_enabled FROM autobattle_config WHERE id = 1;
-  v_weather_enabled := COALESCE(v_weather_enabled, true);
+  v_player_talents := autobattle_talents_for(v_pp.pokemon_nom, v_talents_enabled);
+  v_opponent_talents := autobattle_talents_for(v_level.opponent_pokemon_nom, v_talents_enabled);
 
   v_first_attacker := CASE WHEN random() < 0.5 THEN 'player' ELSE 'opponent' END;
   -- Talent 'priority' : remplace le tirage au sort (voir autobattle_resolve_battle).
@@ -2517,14 +2213,9 @@ BEGIN
   FOREACH v_side IN ARRAY (CASE WHEN v_first_attacker = 'player' THEN ARRAY['player', 'opponent'] ELSE ARRAY['opponent', 'player'] END) LOOP
     IF v_side = 'player' THEN
       v_talent_res := autobattle_talent_act(v_player_talents, v_player_talent_state, 'player', 'battle_start', NULL,
-        GREATEST(1, v_player_max_hp), GREATEST(1, v_player_max_hp), v_opponent_status, v_player_status, v_opponent_talents, 0, v_weather);
+        GREATEST(1, v_player_max_hp), GREATEST(1, v_player_max_hp), v_opponent_status, v_player_status, v_opponent_talents, 0);
       v_player_talent_state := v_talent_res -> 'state';
       v_start_turns := v_start_turns || (v_talent_res -> 'turns');
-      -- Météo levée « à l'entrée en combat » : persistée sur la ligne de combat,
-      -- le 1er round la verra donc dès son tick d'ouverture.
-      v_weather_res := autobattle_weather_set((v_talent_res ->> 'set_weather')::bigint, v_weather_enabled, v_weather, 'player', GREATEST(1, v_player_max_hp), 0);
-      v_weather := autobattle_weather_norm(v_weather_res -> 'weather');
-      v_start_turns := v_start_turns || (v_weather_res -> 'turns');
       v_talent_inflict := v_talent_res ->> 'inflict_status';
       IF v_talent_inflict IS NOT NULL THEN
         v_talent_res := autobattle_talent_status_guard(v_opponent_talents, v_opponent_talent_state, 'opponent', v_talent_inflict, v_level.opponent_hp, 0);
@@ -2536,13 +2227,9 @@ BEGIN
       END IF;
     ELSE
       v_talent_res := autobattle_talent_act(v_opponent_talents, v_opponent_talent_state, 'opponent', 'battle_start', NULL,
-        v_level.opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status, v_player_talents, 0, v_weather);
+        v_level.opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status, v_player_talents, 0);
       v_opponent_talent_state := v_talent_res -> 'state';
       v_start_turns := v_start_turns || (v_talent_res -> 'turns');
-      -- Voir le même commentaire côté joueur.
-      v_weather_res := autobattle_weather_set((v_talent_res ->> 'set_weather')::bigint, v_weather_enabled, v_weather, 'opponent', v_level.opponent_hp, 0);
-      v_weather := autobattle_weather_norm(v_weather_res -> 'weather');
-      v_start_turns := v_start_turns || (v_weather_res -> 'turns');
       v_talent_inflict := v_talent_res ->> 'inflict_status';
       IF v_talent_inflict IS NOT NULL THEN
         v_talent_res := autobattle_talent_status_guard(v_player_talents, v_player_talent_state, 'player', v_talent_inflict, GREATEST(1, v_player_max_hp), 0);
@@ -2563,13 +2250,11 @@ BEGIN
   INSERT INTO autobattle_manual_battles (
     player_id, level_id, variant_id, player_pokemon_id, first_attacker, turn_no,
     player_hp, player_max_hp, opponent_hp, last_idempotency_key, last_result,
-    turn_log, player_talent_state, opponent_talent_state, player_status, opponent_status,
-    weather_id
+    turn_log, player_talent_state, opponent_talent_state, player_status, opponent_status
   ) VALUES (
     p_player_id, p_level_id, v_variant.id, p_player_pokemon_id, v_first_attacker, 0,
     GREATEST(1, v_player_max_hp), GREATEST(1, v_player_max_hp), v_level.opponent_hp, p_idempotency_key, v_result,
-    v_start_turns, v_player_talent_state, v_opponent_talent_state, v_player_status, v_opponent_status,
-    autobattle_weather_id(v_weather)
+    v_start_turns, v_player_talent_state, v_opponent_talent_state, v_player_status, v_opponent_status
   );
 
   RETURN v_result;
@@ -2577,1000 +2262,6 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION autobattle_start_manual_battle(bigint, bigint, bigint, uuid) TO anon, authenticated;
-
-
-CREATE OR REPLACE FUNCTION autobattle_resolve_manual_round(
-  p_player_id bigint,
-  p_level_id bigint,
-  p_player_pokemon_id bigint,
-  p_ability_nom text,
-  p_idempotency_key uuid
-)
-RETURNS jsonb
-LANGUAGE plpgsql
-AS $$
-DECLARE
-  v_level               record;
-  v_variant             record;
-  v_progress            record;
-  v_pp                  record;
-  v_player_species      record;
-  v_ability             record;
-  v_opponent_species    record;
-  v_opponent_ability    record;
-  v_row                 autobattle_manual_battles%ROWTYPE;
-  v_precision_enabled   boolean;
-  v_talents_enabled     boolean;
-  v_weather_enabled     boolean;
-  v_player_max_hp       integer;
-  v_player_hp           integer;
-  v_opponent_hp         integer;
-  v_player_type_bonus   boolean;
-  v_opponent_type_bonus boolean;
-  v_player_damage       integer;
-  v_opponent_damage     integer;
-  v_player_damage_original   integer;
-  v_opponent_damage_original integer;
-  v_player_damage_species_xp   integer;
-  v_opponent_damage_species_xp integer;
-  v_turn_no             integer;
-  -- Voir le même commentaire dans autobattle_resolve_battle : n'avance qu'à
-  -- chaque VRAI changement de tour, jamais au milieu d'une rafale. Persisté
-  -- entre les appels RPC (voir autobattle_manual_battles.round_no), comme
-  -- turn_no.
-  v_round_no            integer;
-  v_first_attacker      text;
-  v_attacker            text;
-  v_flips               integer := 0;
-  v_block_remaining     integer;
-  v_turn_entry          jsonb;
-  v_turns               jsonb := '[]'::jsonb;
-  v_outcome             text;
-  v_hit_dice            integer;
-  v_hit_damage          integer;
-  v_heal_amt            integer;
-  v_heal_dice           integer;
-  v_recoil_amt          integer;
-  v_missed              boolean;
-  v_status_roll         integer;
-  v_status_cured        boolean;
-  v_status_precision_penalty integer := 0;
-  v_bonus_condition_met boolean;
-  v_percent_hp_damage_applied boolean;
-  v_player_status                text;
-  v_opponent_status              text;
-  v_player_never_miss            boolean;
-  v_opponent_never_miss          boolean;
-  -- Piles de modificateurs de stat (voir autobattle_mod_total) : cumulables,
-  -- chaque application gardant sa propre échéance.
-  v_player_damage_mods           jsonb;
-  v_player_precision_mods        jsonb;
-  v_opponent_damage_mods         jsonb;
-  v_opponent_precision_mods      jsonb;
-  v_player_heal_dot_amount    integer;
-  v_player_heal_dot_expires   integer;
-  v_opponent_heal_dot_amount  integer;
-  v_opponent_heal_dot_expires integer;
-  v_player_heal_disabled_expires   integer;
-  v_opponent_heal_disabled_expires integer;
-  v_player_invulnerable       boolean;
-  v_player_invuln_granted_round integer;
-  v_opponent_invulnerable     boolean;
-  v_opponent_invuln_granted_round integer;
-  v_player_invuln_pending_miss   boolean := false;
-  v_opponent_invuln_pending_miss boolean := false;
-  v_player_used_ability       boolean;
-  v_player_took_damage        boolean;
-  v_opponent_used_ability     boolean;
-  v_opponent_took_damage      boolean;
-  v_player_skip_pending       boolean;
-  v_opponent_skip_pending     boolean;
-  v_player_preparing          boolean;
-  v_opponent_preparing        boolean;
-  v_player_preparing_ability_nom   text;
-  v_opponent_preparing_ability_nom text;
-  v_effective_player_ability_nom   text;
-  v_is_metamorph              boolean;
-  v_player_image_override     text;
-  v_is_opponent_metamorph     boolean;
-  v_opponent_ability_sequence text[];
-  v_opponent_ability_cycle_index integer;
-  v_opponent_ability_nom_round   text;
-  v_player_stat_mod_uses         jsonb;
-  v_opponent_stat_mod_uses       jsonb;
-  v_player_stat_mod_key          text;
-  v_opponent_stat_mod_key        text;
-  v_player_stat_mod_uses_used_for_key   integer;
-  v_opponent_stat_mod_uses_used_for_key integer;
-  v_stat_mod_amount    integer;
-  v_stat_mod_expiry    integer;
-  -- Config de la capacité JOUÉE ce tour côté joueur (v_effective_player_
-  -- ability_nom, change à chaque tour sauf préparation en cours) :
-  v_player_turn_effect   text;
-  v_player_repeat_max    integer;
-  v_player_heal_type     text;
-  v_player_heal_amount   integer;
-  v_player_heal_percent  integer;
-  v_player_status_reversed boolean;
-  v_player_recoil_type   text;
-  v_player_recoil_min    integer;
-  v_player_recoil_max    integer;
-  v_player_recoil_percent integer;
-  v_player_invuln_grant  boolean;
-  v_player_bonus_type       text;
-  v_player_bonus_multiplier numeric;
-  v_player_bonus_flat       integer;
-  v_player_bonus_min        integer;
-  v_player_bonus_max        integer;
-  v_player_bonus_condition  text;
-  v_player_bonus_dice_value integer;
-  v_player_bonus_status_filter text;
-  v_player_stat_mod_target       text;
-  v_player_stat_mod_stat         text;
-  v_player_stat_mod_value_type   text;
-  v_player_stat_mod_flat         integer;
-  v_player_stat_mod_min          integer;
-  v_player_stat_mod_max          integer;
-  v_player_stat_mod_percent      integer;
-  v_player_stat_mod_duration_type  text;
-  v_player_stat_mod_duration_turns integer;
-  v_player_stat_mod_max_uses     integer;
-  v_player_heal_dot_config_amount integer;
-  v_player_heal_dot_config_turns  integer;
-  v_player_heal_dot_config_type   text;
-  v_player_heal_dot_config_percent integer;
-  v_player_cancel_heal_duration   integer;
-  v_player_percent_hp_damage_percent integer;
-  v_player_stat_mod_type_filter   text;
-  v_player_prevention_duration    integer;
-  v_player_keep_going_turns       integer;
-  v_player_keep_going_until_fail  boolean;
-  v_player_keep_going_bonus_type  text;
-  v_player_keep_going_bonus_flat  integer;
-  v_player_keep_going_bonus_percent integer;
-  v_player_heal_dot_config_until_awake boolean;
-  v_player_ignore_status_block    text;
-  -- Météo déclenchée par la capacité, et condition « météo en cours » de son
-  -- modificateur de stat (voir autobattle_ability_rules.weather_id).
-  v_player_weather_id             bigint;
-  v_player_weather_chance         integer;
-  v_player_stat_mod_weather_condition text;
-  v_player_stat_mod_weather_id    bigint;
-  -- Config de la capacité JOUÉE ce tour côté adversaire (v_opponent_ability_
-  -- nom_round, change à chaque nouveau tour sauf préparation en cours) :
-  v_opponent_turn_effect   text;
-  v_opponent_repeat_max    integer;
-  v_opponent_heal_type     text;
-  v_opponent_heal_amount   integer;
-  v_opponent_heal_percent  integer;
-  v_opponent_status_reversed boolean;
-  v_opponent_recoil_type   text;
-  v_opponent_recoil_min    integer;
-  v_opponent_recoil_max    integer;
-  v_opponent_recoil_percent integer;
-  v_opponent_invuln_grant  boolean;
-  v_opponent_bonus_type       text;
-  v_opponent_bonus_multiplier numeric;
-  v_opponent_bonus_flat       integer;
-  v_opponent_bonus_min        integer;
-  v_opponent_bonus_max        integer;
-  v_opponent_bonus_condition  text;
-  v_opponent_bonus_dice_value integer;
-  v_opponent_bonus_status_filter text;
-  v_opponent_stat_mod_target       text;
-  v_opponent_stat_mod_stat         text;
-  v_opponent_stat_mod_value_type   text;
-  v_opponent_stat_mod_flat         integer;
-  v_opponent_stat_mod_min          integer;
-  v_opponent_stat_mod_max          integer;
-  v_opponent_stat_mod_percent      integer;
-  v_opponent_stat_mod_duration_type  text;
-  v_opponent_stat_mod_duration_turns integer;
-  v_opponent_stat_mod_max_uses     integer;
-  v_opponent_heal_dot_config_amount integer;
-  v_opponent_heal_dot_config_turns  integer;
-  v_opponent_heal_dot_config_type   text;
-  v_opponent_heal_dot_config_percent integer;
-  v_opponent_cancel_heal_duration   integer;
-  v_opponent_percent_hp_damage_percent integer;
-  v_opponent_stat_mod_type_filter   text;
-  v_opponent_prevention_duration    integer;
-  v_opponent_keep_going_turns       integer;
-  v_opponent_keep_going_until_fail  boolean;
-  v_opponent_keep_going_bonus_type  text;
-  v_opponent_keep_going_bonus_flat  integer;
-  v_opponent_keep_going_bonus_percent integer;
-  v_opponent_heal_dot_config_until_awake boolean;
-  v_opponent_ignore_status_block    text;
-  v_opponent_weather_id             bigint;
-  v_opponent_weather_chance         integer;
-  v_opponent_stat_mod_weather_condition text;
-  v_opponent_stat_mod_weather_id    bigint;
-  -- État persisté des effets ajoutés après coup (miroir des colonnes
-  -- autobattle_manual_battles.*, voir autobattle_combatant_state).
-  v_player_double_turn_pending      boolean;
-  v_opponent_double_turn_pending    boolean;
-  v_player_prevention_expires       integer;
-  v_opponent_prevention_expires     integer;
-  v_player_heal_dot_until_awake     boolean;
-  v_opponent_heal_dot_until_awake   boolean;
-  v_player_keep_going_ability_nom   text;
-  v_opponent_keep_going_ability_nom text;
-  v_player_keep_going_remaining     integer;
-  v_opponent_keep_going_remaining   integer;
-  v_player_keep_going_count         integer;
-  v_opponent_keep_going_count       integer;
-  -- Talents d'espèce (voir autobattle_talents) : la liste est relue à chaque
-  -- round (une modification admin en cours de combat s'applique donc au round
-  -- suivant), l'état "déjà déclenchés" est persisté sur la ligne de combat.
-  v_player_talents                  jsonb;
-  v_opponent_talents                jsonb;
-  v_player_talent_state             jsonb;
-  v_opponent_talent_state           jsonb;
-  -- Capacité imposée au joueur pour le PROCHAIN tour (préparation en cours,
-  -- tour passé imposé, ou chaîne "Continue sur sa lancée") — renvoyée au
-  -- client, qui verrouille alors la grille de sélection dessus.
-  v_player_forced_ability_nom       text;
-  v_rewards             jsonb := '[]'::jsonb;
-  v_reward              record;
-  v_max_level_index     integer;
-  v_variant_completed   boolean := false;
-  v_next_level_index    integer;
-  v_new_xp              integer;
-  v_max_xp              integer;
-  v_result              jsonb;
-  -- Marshalling vers/depuis le moteur de résolution partagé (voir
-  -- autobattle_resolve_round_core, juste après autobattle_ability_burst) :
-  -- remplace l'ancienne boucle inline, réutilisée telle quelle par pvp_resolve_round.
-  v_player_state         autobattle_combatant_state;
-  v_opponent_state       autobattle_combatant_state;
-  v_player_ability_cfg   autobattle_combatant_ability;
-  v_opponent_ability_cfg autobattle_combatant_ability;
-  v_round_result         autobattle_round_result;
-BEGIN
-  SELECT * INTO v_level FROM autobattle_levels WHERE id = p_level_id;
-  IF v_level IS NULL THEN
-    RETURN jsonb_build_object('status', 'not_found');
-  END IF;
-
-  SELECT * INTO v_variant FROM autobattle_variants WHERE id = v_level.variant_id;
-  IF v_variant IS NULL OR v_variant.enabled = false THEN
-    RETURN jsonb_build_object('status', 'variant_disabled');
-  END IF;
-  IF v_variant.game_mode <> 'manual' THEN
-    RETURN jsonb_build_object('status', 'wrong_mode');
-  END IF;
-
-  INSERT INTO autobattle_player_variant_progress (player_id, variant_id)
-  VALUES (p_player_id, v_variant.id)
-  ON CONFLICT (player_id, variant_id) DO NOTHING;
-
-  SELECT * INTO v_progress FROM autobattle_player_variant_progress
-    WHERE player_id = p_player_id AND variant_id = v_variant.id FOR UPDATE;
-
-  IF v_progress.variant_completed THEN
-    RETURN jsonb_build_object('status', 'variant_completed');
-  END IF;
-  IF v_progress.current_level_index <> v_level.level_index THEN
-    RETURN jsonb_build_object('status', 'wrong_level');
-  END IF;
-
-  INSERT INTO autobattle_player_level_state (player_id, level_id)
-  VALUES (p_player_id, p_level_id)
-  ON CONFLICT (player_id, level_id) DO NOTHING;
-
-  PERFORM 1 FROM autobattle_player_level_state
-    WHERE player_id = p_player_id AND level_id = p_level_id FOR UPDATE;
-
-  SELECT * INTO v_pp FROM player_pokemon WHERE id = p_player_pokemon_id AND player_id = p_player_id;
-  IF v_pp IS NULL THEN
-    RETURN jsonb_build_object('status', 'ineligible_pokemon');
-  END IF;
-  IF v_pp.in_daycare THEN
-    RETURN jsonb_build_object('status', 'ineligible_pokemon');
-  END IF;
-
-  SELECT * INTO v_player_species FROM pokemon WHERE nom = v_pp.pokemon_nom;
-  IF v_player_species IS NULL THEN
-    RETURN jsonb_build_object('status', 'ineligible_pokemon');
-  END IF;
-
-  SELECT * INTO v_opponent_species FROM pokemon WHERE nom = v_level.opponent_pokemon_nom;
-  IF v_opponent_species IS NULL OR NOT EXISTS (SELECT 1 FROM attacks WHERE nom = v_level.opponent_ability_nom) THEN
-    RETURN jsonb_build_object('status', 'invalid_level');
-  END IF;
-
-  -- Métamorph JOUEUR : le mouvepool "connu" n'est plus le sien mais
-  -- l'ensemble des capacités CONFIGURÉES sur ce niveau pour l'adversaire
-  -- (jusqu'à 10, voir autobattle_levels.opponent_ability_nom_2..10) — le
-  -- joueur choisit toujours laquelle jouer (contrairement à l'adversaire
-  -- Métamorph, qui pioche au hasard dans le movepool du joueur, voir plus
-  -- bas) : c'est encore SON tour, juste avec un mouvepool copié.
-  --
-  -- Talents résolus ICI, en amont : le talent 'transform' (anciennement le cas
-  -- spécial « Métamorph ») conditionne toute la copie ci-dessous. Résolus sur
-  -- l'espèce PROPRE de chaque camp — un transformé copie visuel/type/dégâts/
-  -- movepool, jamais le talent adverse. _vs et non _for : voir
-  -- autobattle_talents_effective ('cancel_talents' vide les deux listes, donc
-  -- annule aussi la transformation).
-  SELECT talents_enabled INTO v_talents_enabled FROM autobattle_config WHERE id = 1;
-  v_talents_enabled := COALESCE(v_talents_enabled, true);
-  v_player_talents := autobattle_talents_vs(v_pp.pokemon_nom, v_level.opponent_pokemon_nom, v_talents_enabled);
-  v_opponent_talents := autobattle_talents_vs(v_level.opponent_pokemon_nom, v_pp.pokemon_nom, v_talents_enabled);
-  -- Bascule globale de la météo (voir autobattle_config.weather_enabled).
-  SELECT weather_enabled INTO v_weather_enabled FROM autobattle_config WHERE id = 1;
-  v_weather_enabled := COALESCE(v_weather_enabled, true);
-
-  v_is_metamorph := autobattle_talent_has_kind(v_player_talents, 'transform');
-  v_player_image_override := CASE WHEN v_is_metamorph THEN v_opponent_species.image_miniature ELSE NULL END;
-  IF v_is_metamorph THEN
-    v_opponent_ability_sequence := array_remove(ARRAY[
-      v_level.opponent_ability_nom, v_level.opponent_ability_nom_2, v_level.opponent_ability_nom_3,
-      v_level.opponent_ability_nom_4, v_level.opponent_ability_nom_5, v_level.opponent_ability_nom_6,
-      v_level.opponent_ability_nom_7, v_level.opponent_ability_nom_8, v_level.opponent_ability_nom_9,
-      v_level.opponent_ability_nom_10
-    ], NULL);
-    IF NOT (p_ability_nom = ANY(v_opponent_ability_sequence)) THEN
-      RETURN jsonb_build_object('status', 'ineligible_ability');
-    END IF;
-  ELSE
-    IF NOT (p_ability_nom = ANY(v_pp.moves)) THEN
-      RETURN jsonb_build_object('status', 'ineligible_ability');
-    END IF;
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM attacks WHERE nom = p_ability_nom) THEN
-    RETURN jsonb_build_object('status', 'ineligible_ability');
-  END IF;
-  IF EXISTS (SELECT 1 FROM autobattle_banned_attacks WHERE attack_nom = p_ability_nom) THEN
-    RETURN jsonb_build_object('status', 'ineligible_ability');
-  END IF;
-
-  SELECT * INTO v_row FROM autobattle_manual_battles
-    WHERE player_id = p_player_id AND level_id = p_level_id FOR UPDATE;
-
-  -- Rejeu idempotent : même tour redemandé (retry réseau) → même réponse,
-  -- sans re-débiter de ticket ni re-tirer aucun dé. Vérifié EN PREMIER, avant
-  -- toute purge, pour qu'un retry du tout premier tour d'un combat renvoie
-  -- bien le résultat déjà calculé au lieu d'être traité comme une purge.
-  IF v_row.id IS NOT NULL AND v_row.last_idempotency_key = p_idempotency_key THEN
-    RETURN v_row.last_result;
-  END IF;
-
-  -- Une ligne déjà terminée (outcome renseigné : gagné/perdu, puis réessayé)
-  -- pour un NOUVEAU tour est un vestige d'un combat précédent — filet de
-  -- sécurité défensif, ne devrait normalement jamais arriver : le point
-  -- d'entrée normal d'un nouveau combat est désormais autobattle_start_
-  -- manual_battle, qui purge et recrée systématiquement AVANT tout tour joué
-  -- (voir son commentaire — c'est lui qui porte la logique "quitter un
-  -- combat en cours et en relancer un nouveau ne doit jamais reprendre les
-  -- PV/statuts de l'ancien", plus le 1er tour ici).
-  IF v_row.id IS NOT NULL AND v_row.outcome IS NOT NULL THEN
-    DELETE FROM autobattle_manual_battles WHERE id = v_row.id;
-    v_row := NULL;
-  END IF;
-
-  -- La ligne doit déjà exister (créée par autobattle_start_manual_battle,
-  -- qui décide first_attacker ET débite le ticket AVANT le 1er choix de
-  -- capacité — voir son commentaire) : ce tour ne la crée plus lui-même et
-  -- ne touche plus du tout aux tickets.
-  IF v_row.id IS NULL THEN
-    RETURN jsonb_build_object('status', 'not_started');
-  END IF;
-
-  -- État persisté (chargé depuis autobattle_start_manual_battle ou un tour
-  -- précédent) : copié dans les variables de travail.
-  v_player_hp := v_row.player_hp;
-  v_player_max_hp := v_row.player_max_hp;
-  v_opponent_hp := v_row.opponent_hp;
-  v_first_attacker := v_row.first_attacker;
-  v_turn_no := v_row.turn_no;
-  v_round_no := v_row.round_no;
-  v_player_status := v_row.player_status;
-  v_opponent_status := v_row.opponent_status;
-  v_player_damage_mods := v_row.player_damage_mods;
-  v_player_precision_mods := v_row.player_precision_mods;
-  v_opponent_damage_mods := v_row.opponent_damage_mods;
-  v_opponent_precision_mods := v_row.opponent_precision_mods;
-  v_player_heal_dot_amount := v_row.player_heal_dot_amount;
-  v_player_heal_dot_expires := v_row.player_heal_dot_expires;
-  v_opponent_heal_dot_amount := v_row.opponent_heal_dot_amount;
-  v_opponent_heal_dot_expires := v_row.opponent_heal_dot_expires;
-  v_player_heal_disabled_expires := v_row.player_heal_disabled_expires;
-  v_opponent_heal_disabled_expires := v_row.opponent_heal_disabled_expires;
-  v_player_invulnerable := v_row.player_invulnerable;
-  v_player_invuln_granted_round := v_row.player_invuln_granted_round;
-  v_opponent_invulnerable := v_row.opponent_invulnerable;
-  v_opponent_invuln_granted_round := v_row.opponent_invuln_granted_round;
-  v_player_used_ability := v_row.player_used_ability;
-  v_player_took_damage := v_row.player_took_damage;
-  v_opponent_used_ability := v_row.opponent_used_ability;
-  v_opponent_took_damage := v_row.opponent_took_damage;
-  v_player_skip_pending := v_row.player_skip_pending;
-  v_opponent_skip_pending := v_row.opponent_skip_pending;
-  v_player_preparing := v_row.player_preparing;
-  v_opponent_preparing := v_row.opponent_preparing;
-  v_player_preparing_ability_nom := v_row.player_preparing_ability_nom;
-  v_opponent_preparing_ability_nom := v_row.opponent_preparing_ability_nom;
-  v_player_stat_mod_uses := v_row.player_stat_mod_uses;
-  v_opponent_stat_mod_uses := v_row.opponent_stat_mod_uses;
-  v_player_double_turn_pending := v_row.player_double_turn_pending;
-  v_opponent_double_turn_pending := v_row.opponent_double_turn_pending;
-  v_player_prevention_expires := v_row.player_prevention_expires;
-  v_opponent_prevention_expires := v_row.opponent_prevention_expires;
-  v_player_heal_dot_until_awake := v_row.player_heal_dot_until_awake;
-  v_opponent_heal_dot_until_awake := v_row.opponent_heal_dot_until_awake;
-  v_player_keep_going_ability_nom := v_row.player_keep_going_ability_nom;
-  v_opponent_keep_going_ability_nom := v_row.opponent_keep_going_ability_nom;
-  v_player_keep_going_remaining := v_row.player_keep_going_remaining;
-  v_opponent_keep_going_remaining := v_row.opponent_keep_going_remaining;
-  v_player_keep_going_count := v_row.player_keep_going_count;
-  v_opponent_keep_going_count := v_row.opponent_keep_going_count;
-  v_player_talent_state := COALESCE(v_row.player_talent_state, '{}'::jsonb);
-  v_opponent_talent_state := COALESCE(v_row.opponent_talent_state, '{}'::jsonb);
-
-  -- Capacité RÉELLEMENT jouée par le joueur ce tour : celle mémorisée s'il
-  -- est en cours de préparation (prepare_release, voir plus haut), sinon
-  -- celle tout juste choisie (déjà validée ci-dessus).
-  -- Une chaîne "Continue sur sa lancée" en cours (voir autobattle_ability_
-  -- rules.keep_going_turns) verrouille la capacité exactement comme une
-  -- préparation : le choix envoyé par le client est ignoré tant qu'il reste
-  -- des réutilisations forcées (le client, prévenu par player_forced_ability_
-  -- nom au tour précédent, renvoie de toute façon la même).
-  v_effective_player_ability_nom := CASE
-    WHEN v_player_preparing THEN v_player_preparing_ability_nom
-    WHEN v_player_keep_going_ability_nom IS NOT NULL THEN v_player_keep_going_ability_nom
-    ELSE p_ability_nom END;
-  SELECT * INTO v_ability FROM attacks WHERE nom = v_effective_player_ability_nom;
-
-  -- Capacité adverse ce tour : mémorisée si en cours de préparation, sinon
-  -- pigée dans la séquence configurée (autobattle_levels.opponent_ability_
-  -- nom/_2/_3/_4, en boucle — v_opponent_ability_cycle_index avance d'une
-  -- position à chaque NOUVEAU tour adverse) — ou, si l'adversaire est
-  -- Métamorph, tirée uniformément parmi TOUTES les capacités apprises par le
-  -- pokémon du joueur (requirement dédié : copie tout le movepool du joueur
-  -- et l'utilise au hasard, un tirage indépendant par nouveau tour).
-  v_is_opponent_metamorph := autobattle_talent_has_kind(v_opponent_talents, 'transform');
-  IF v_opponent_preparing THEN
-    v_opponent_ability_nom_round := v_opponent_preparing_ability_nom;
-    v_opponent_ability_cycle_index := v_row.opponent_ability_cycle_index;
-  ELSIF v_opponent_keep_going_ability_nom IS NOT NULL THEN
-    -- Chaîne "Continue sur sa lancée" côté adverse : la capacité reste la
-    -- même, la séquence configurée n'avance pas pendant ce temps.
-    v_opponent_ability_nom_round := v_opponent_keep_going_ability_nom;
-    v_opponent_ability_cycle_index := v_row.opponent_ability_cycle_index;
-  ELSIF v_is_opponent_metamorph THEN
-    v_opponent_ability_nom_round := v_pp.moves[1 + floor(random() * array_length(v_pp.moves, 1))::integer];
-    v_opponent_ability_cycle_index := v_row.opponent_ability_cycle_index;
-  ELSE
-    v_opponent_ability_sequence := array_remove(ARRAY[
-      v_level.opponent_ability_nom, v_level.opponent_ability_nom_2, v_level.opponent_ability_nom_3,
-      v_level.opponent_ability_nom_4, v_level.opponent_ability_nom_5, v_level.opponent_ability_nom_6,
-      v_level.opponent_ability_nom_7, v_level.opponent_ability_nom_8, v_level.opponent_ability_nom_9,
-      v_level.opponent_ability_nom_10
-    ], NULL);
-    v_opponent_ability_cycle_index := v_row.opponent_ability_cycle_index + 1;
-    v_opponent_ability_nom_round := v_opponent_ability_sequence[1 + ((v_opponent_ability_cycle_index - 1) % array_length(v_opponent_ability_sequence, 1))];
-  END IF;
-  SELECT * INTO v_opponent_ability FROM attacks WHERE nom = v_opponent_ability_nom_round;
-
-  -- Expiration des modificateurs actifs (comparés au numéro de TOUR — voir
-  -- v_round_no, pas v_turn_no —, comme en mode Auto) : vérifiée avant de
-  -- résoudre quoi que ce soit ce tour.
-  IF v_player_heal_dot_expires IS NOT NULL AND v_round_no > v_player_heal_dot_expires THEN
-    v_player_heal_dot_amount := NULL; v_player_heal_dot_expires := NULL;
-  END IF;
-  IF v_opponent_heal_dot_expires IS NOT NULL AND v_round_no > v_opponent_heal_dot_expires THEN
-    v_opponent_heal_dot_amount := NULL; v_opponent_heal_dot_expires := NULL;
-  END IF;
-  IF v_player_heal_disabled_expires IS NOT NULL AND v_round_no > v_player_heal_disabled_expires THEN
-    v_player_heal_disabled_expires := NULL;
-  END IF;
-  IF v_opponent_heal_disabled_expires IS NOT NULL AND v_round_no > v_opponent_heal_disabled_expires THEN
-    v_opponent_heal_disabled_expires := NULL;
-  END IF;
-
-  -- Super efficace : la capacité utilisée doit être du MÊME type que le
-  -- pokémon qui l'utilise, en plus d'être favorable dans la table de types
-  -- (voir même remarque en mode Auto, autobattle_resolve_battle) — recalculé
-  -- CHAQUE round ici (contrairement au mode Auto, figé pour tout le combat)
-  -- puisque la capacité jouée change à chaque tour. Métamorph JOUEUR : copie
-  -- le type et la liste "super efficace" de l'ADVERSAIRE (comme Métamorph
-  -- adversaire copie ceux du joueur ci-dessous) — pas les siens propres.
-  v_player_type_bonus := EXISTS (
-    SELECT 1 FROM (VALUES
-      (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_1 ELSE v_player_species.super_efficace_1 END),
-      (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_2 ELSE v_player_species.super_efficace_2 END),
-      (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_3 ELSE v_player_species.super_efficace_3 END),
-      (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_4 ELSE v_player_species.super_efficace_4 END)
-    ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_opponent_species.type))
-  ) AND lower(trim(v_ability.type)) = lower(trim(CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END));
-  -- Dégâts de base "espèce" : copie ceux de l'adversaire (SANS bonus XP —
-  -- reste une progression personnelle du joueur, jamais copiée, même
-  -- principe qu'en mode Auto) au lieu des siens propres.
-  v_player_damage_species_xp := (CASE WHEN v_is_metamorph THEN COALESCE(v_opponent_species.degats_base, 0) ELSE COALESCE(v_player_species.degats_base, 0) END)
-    + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'DMG');
-  v_player_damage := v_player_damage_species_xp
-    * (CASE WHEN v_player_type_bonus THEN 2 ELSE 1 END) + COALESCE(v_ability.degats_base, 0);
-  v_player_damage_original := v_player_damage;
-
-  -- Métamorph adversaire : copie le type et la liste "super efficace" du
-  -- pokémon du JOUEUR (comme en mode Auto, autobattle_resolve_battle) — pas
-  -- les siens propres, qui n'ont aucun sens pour Métamorph. Recalculé CHAQUE
-  -- round comme v_player_type_bonus ci-dessus (la capacité change à chaque
-  -- tour, potentiellement piochée dans un movepool différent).
-  v_opponent_type_bonus := EXISTS (
-    SELECT 1 FROM (VALUES
-      (CASE WHEN v_is_opponent_metamorph THEN v_player_species.super_efficace_1 ELSE v_opponent_species.super_efficace_1 END),
-      (CASE WHEN v_is_opponent_metamorph THEN v_player_species.super_efficace_2 ELSE v_opponent_species.super_efficace_2 END),
-      (CASE WHEN v_is_opponent_metamorph THEN v_player_species.super_efficace_3 ELSE v_opponent_species.super_efficace_3 END),
-      (CASE WHEN v_is_opponent_metamorph THEN v_player_species.super_efficace_4 ELSE v_opponent_species.super_efficace_4 END)
-    ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_player_species.type))
-  ) AND lower(trim(v_opponent_ability.type)) = lower(trim(CASE WHEN v_is_opponent_metamorph THEN v_player_species.type ELSE v_opponent_species.type END));
-  -- Dégâts de base "espèce" : copie ceux du joueur (SANS son bonus XP,
-  -- progression personnelle jamais "copiée" — même principe qu'en mode Auto)
-  -- au lieu du dégât de base configuré sur le niveau.
-  v_opponent_damage_species_xp := CASE WHEN v_is_opponent_metamorph THEN COALESCE(v_player_species.degats_base, 0) ELSE COALESCE(v_level.opponent_base_damage, 0) END;
-  v_opponent_damage := v_opponent_damage_species_xp * (CASE WHEN v_opponent_type_bonus THEN 2 ELSE 1 END)
-    + COALESCE(v_opponent_ability.degats_base, 0);
-  v_opponent_damage_original := v_opponent_damage;
-
-  v_player_never_miss := v_ability.precision IS NULL OR v_ability.precision = 0;
-  v_opponent_never_miss := v_opponent_ability.precision IS NULL OR v_opponent_ability.precision = 0;
-  -- talents_enabled a déjà été lu plus haut (le talent 'transform' devait être
-  -- connu avant la copie de l'adversaire).
-  SELECT precision_enabled INTO v_precision_enabled FROM autobattle_config WHERE id = 1;
-  v_precision_enabled := COALESCE(v_precision_enabled, true);
-
-  SELECT turn_effect, repeat_max_iterations, heal_type, heal_amount, heal_percent, status_reversed,
-         recoil_type, recoil_min, recoil_max, recoil_percent, invulnerable_next_turn,
-         bonus_damage_type, bonus_damage_multiplier, bonus_damage_flat, bonus_damage_min, bonus_damage_max,
-         bonus_damage_condition, bonus_damage_condition_dice_value, bonus_damage_status_filter,
-         stat_mod_target, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
-         stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
-         heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
-         stat_mod_type_filter, prevention_duration_turns,
-         keep_going_turns, keep_going_until_fail, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
-         heal_dot_until_awake, ignore_status_block,
-         weather_id, weather_chance, stat_mod_weather_condition, stat_mod_weather_id
-    INTO v_player_turn_effect, v_player_repeat_max, v_player_heal_type, v_player_heal_amount, v_player_heal_percent, v_player_status_reversed,
-         v_player_recoil_type, v_player_recoil_min, v_player_recoil_max, v_player_recoil_percent, v_player_invuln_grant,
-         v_player_bonus_type, v_player_bonus_multiplier, v_player_bonus_flat, v_player_bonus_min, v_player_bonus_max,
-         v_player_bonus_condition, v_player_bonus_dice_value, v_player_bonus_status_filter,
-         v_player_stat_mod_target, v_player_stat_mod_stat, v_player_stat_mod_value_type, v_player_stat_mod_flat, v_player_stat_mod_min, v_player_stat_mod_max, v_player_stat_mod_percent,
-         v_player_stat_mod_duration_type, v_player_stat_mod_duration_turns, v_player_stat_mod_max_uses,
-         v_player_heal_dot_config_amount, v_player_heal_dot_config_turns, v_player_heal_dot_config_type, v_player_heal_dot_config_percent, v_player_cancel_heal_duration, v_player_percent_hp_damage_percent,
-         v_player_stat_mod_type_filter, v_player_prevention_duration,
-         v_player_keep_going_turns, v_player_keep_going_until_fail, v_player_keep_going_bonus_type, v_player_keep_going_bonus_flat, v_player_keep_going_bonus_percent,
-         v_player_heal_dot_config_until_awake, v_player_ignore_status_block,
-         v_player_weather_id, v_player_weather_chance,
-         v_player_stat_mod_weather_condition, v_player_stat_mod_weather_id
-    FROM autobattle_ability_rules WHERE attack_nom = v_effective_player_ability_nom;
-  v_player_status_reversed := COALESCE(v_player_status_reversed, false);
-  v_player_invuln_grant := COALESCE(v_player_invuln_grant, false);
-  v_player_heal_dot_config_until_awake := COALESCE(v_player_heal_dot_config_until_awake, false);
-  v_player_keep_going_until_fail := COALESCE(v_player_keep_going_until_fail, false);
-
-  SELECT turn_effect, repeat_max_iterations, heal_type, heal_amount, heal_percent, status_reversed,
-         recoil_type, recoil_min, recoil_max, recoil_percent, invulnerable_next_turn,
-         bonus_damage_type, bonus_damage_multiplier, bonus_damage_flat, bonus_damage_min, bonus_damage_max,
-         bonus_damage_condition, bonus_damage_condition_dice_value, bonus_damage_status_filter,
-         stat_mod_target, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
-         stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
-         heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
-         stat_mod_type_filter, prevention_duration_turns,
-         keep_going_turns, keep_going_until_fail, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
-         heal_dot_until_awake, ignore_status_block,
-         weather_id, weather_chance, stat_mod_weather_condition, stat_mod_weather_id
-    INTO v_opponent_turn_effect, v_opponent_repeat_max, v_opponent_heal_type, v_opponent_heal_amount, v_opponent_heal_percent, v_opponent_status_reversed,
-         v_opponent_recoil_type, v_opponent_recoil_min, v_opponent_recoil_max, v_opponent_recoil_percent, v_opponent_invuln_grant,
-         v_opponent_bonus_type, v_opponent_bonus_multiplier, v_opponent_bonus_flat, v_opponent_bonus_min, v_opponent_bonus_max,
-         v_opponent_bonus_condition, v_opponent_bonus_dice_value, v_opponent_bonus_status_filter,
-         v_opponent_stat_mod_target, v_opponent_stat_mod_stat, v_opponent_stat_mod_value_type, v_opponent_stat_mod_flat, v_opponent_stat_mod_min, v_opponent_stat_mod_max, v_opponent_stat_mod_percent,
-         v_opponent_stat_mod_duration_type, v_opponent_stat_mod_duration_turns, v_opponent_stat_mod_max_uses,
-         v_opponent_heal_dot_config_amount, v_opponent_heal_dot_config_turns, v_opponent_heal_dot_config_type, v_opponent_heal_dot_config_percent, v_opponent_cancel_heal_duration, v_opponent_percent_hp_damage_percent,
-         v_opponent_stat_mod_type_filter, v_opponent_prevention_duration,
-         v_opponent_keep_going_turns, v_opponent_keep_going_until_fail, v_opponent_keep_going_bonus_type, v_opponent_keep_going_bonus_flat, v_opponent_keep_going_bonus_percent,
-         v_opponent_heal_dot_config_until_awake, v_opponent_ignore_status_block,
-         v_opponent_weather_id, v_opponent_weather_chance,
-         v_opponent_stat_mod_weather_condition, v_opponent_stat_mod_weather_id
-    FROM autobattle_ability_rules WHERE attack_nom = v_opponent_ability_nom_round;
-  v_opponent_status_reversed := COALESCE(v_opponent_status_reversed, false);
-  v_opponent_invuln_grant := COALESCE(v_opponent_invuln_grant, false);
-  v_opponent_heal_dot_config_until_awake := COALESCE(v_opponent_heal_dot_config_until_awake, false);
-  v_opponent_keep_going_until_fail := COALESCE(v_opponent_keep_going_until_fail, false);
-
-  -- Empaquette l'état/la capacité de chaque camp dans les types partagés
-  -- (voir autobattle_resolve_round_core, juste après autobattle_ability_burst
-  -- plus haut dans ce fichier) puis délègue la résolution du round à ce
-  -- moteur commun — réutilisé tel quel par pvp_resolve_round, aucune
-  -- duplication de la boucle de résolution elle-même. Tout ce qui suit
-  -- (récompenses/progression) relit les mêmes variables qu'avant ce
-  -- changement, simplement réalimentées depuis le résultat du moteur.
-  v_player_state.hp := v_player_hp;
-  v_player_state.max_hp := v_player_max_hp;
-  v_player_state.status := v_player_status;
-  v_player_state.damage_mods := v_player_damage_mods;
-  v_player_state.precision_mods := v_player_precision_mods;
-  v_player_state.heal_dot_amount := v_player_heal_dot_amount;
-  v_player_state.heal_dot_expires := v_player_heal_dot_expires;
-  v_player_state.heal_disabled_expires := v_player_heal_disabled_expires;
-  v_player_state.invulnerable := v_player_invulnerable;
-  v_player_state.invuln_granted_round := v_player_invuln_granted_round;
-  v_player_state.stat_mod_uses := v_player_stat_mod_uses;
-  v_player_state.used_ability := v_player_used_ability;
-  v_player_state.took_damage := v_player_took_damage;
-  v_player_state.skip_pending := v_player_skip_pending;
-  v_player_state.preparing := v_player_preparing;
-  v_player_state.preparing_ability_nom := v_player_preparing_ability_nom;
-  v_player_state.double_turn_pending := v_player_double_turn_pending;
-  v_player_state.prevention_expires := v_player_prevention_expires;
-  v_player_state.heal_dot_until_awake := v_player_heal_dot_until_awake;
-  v_player_state.keep_going_ability_nom := v_player_keep_going_ability_nom;
-  v_player_state.keep_going_remaining := v_player_keep_going_remaining;
-  v_player_state.keep_going_count := v_player_keep_going_count;
-  v_player_state.talent_state := v_player_talent_state;
-
-  v_opponent_state.hp := v_opponent_hp;
-  v_opponent_state.max_hp := v_level.opponent_hp;
-  v_opponent_state.status := v_opponent_status;
-  v_opponent_state.damage_mods := v_opponent_damage_mods;
-  v_opponent_state.precision_mods := v_opponent_precision_mods;
-  v_opponent_state.heal_dot_amount := v_opponent_heal_dot_amount;
-  v_opponent_state.heal_dot_expires := v_opponent_heal_dot_expires;
-  v_opponent_state.heal_disabled_expires := v_opponent_heal_disabled_expires;
-  v_opponent_state.invulnerable := v_opponent_invulnerable;
-  v_opponent_state.invuln_granted_round := v_opponent_invuln_granted_round;
-  v_opponent_state.stat_mod_uses := v_opponent_stat_mod_uses;
-  v_opponent_state.used_ability := v_opponent_used_ability;
-  v_opponent_state.took_damage := v_opponent_took_damage;
-  v_opponent_state.skip_pending := v_opponent_skip_pending;
-  v_opponent_state.preparing := v_opponent_preparing;
-  v_opponent_state.preparing_ability_nom := v_opponent_preparing_ability_nom;
-  v_opponent_state.double_turn_pending := v_opponent_double_turn_pending;
-  v_opponent_state.prevention_expires := v_opponent_prevention_expires;
-  v_opponent_state.heal_dot_until_awake := v_opponent_heal_dot_until_awake;
-  v_opponent_state.keep_going_ability_nom := v_opponent_keep_going_ability_nom;
-  v_opponent_state.keep_going_remaining := v_opponent_keep_going_remaining;
-  v_opponent_state.keep_going_count := v_opponent_keep_going_count;
-  v_opponent_state.talent_state := v_opponent_talent_state;
-
-  v_player_ability_cfg.ability_nom := v_effective_player_ability_nom;
-  v_player_ability_cfg.base_damage := v_player_damage;
-  v_player_ability_cfg.damage_species_xp := v_player_damage_species_xp;
-  v_player_ability_cfg.type_bonus := v_player_type_bonus;
-  v_player_ability_cfg.precision := v_ability.precision;
-  v_player_ability_cfg.degats_de := v_ability.degats_de;
-  v_player_ability_cfg.deals_damage := v_ability.deals_damage;
-  v_player_ability_cfg.status_effect := v_ability.status_effect;
-  v_player_ability_cfg.status_chance := v_ability.status_chance;
-  v_player_ability_cfg.turn_effect := v_player_turn_effect;
-  v_player_ability_cfg.repeat_max := v_player_repeat_max;
-  v_player_ability_cfg.heal_type := v_player_heal_type;
-  v_player_ability_cfg.heal_amount := v_player_heal_amount;
-  v_player_ability_cfg.heal_percent := v_player_heal_percent;
-  v_player_ability_cfg.status_reversed := v_player_status_reversed;
-  v_player_ability_cfg.recoil_type := v_player_recoil_type;
-  v_player_ability_cfg.recoil_min := v_player_recoil_min;
-  v_player_ability_cfg.recoil_max := v_player_recoil_max;
-  v_player_ability_cfg.recoil_percent := v_player_recoil_percent;
-  v_player_ability_cfg.invuln_grant := v_player_invuln_grant;
-  v_player_ability_cfg.bonus_type := v_player_bonus_type;
-  v_player_ability_cfg.bonus_multiplier := v_player_bonus_multiplier;
-  v_player_ability_cfg.bonus_flat := v_player_bonus_flat;
-  v_player_ability_cfg.bonus_min := v_player_bonus_min;
-  v_player_ability_cfg.bonus_max := v_player_bonus_max;
-  v_player_ability_cfg.bonus_condition := v_player_bonus_condition;
-  v_player_ability_cfg.bonus_dice_value := v_player_bonus_dice_value;
-  v_player_ability_cfg.bonus_status_filter := v_player_bonus_status_filter;
-  v_player_ability_cfg.stat_mod_target := v_player_stat_mod_target;
-  v_player_ability_cfg.stat_mod_stat := v_player_stat_mod_stat;
-  v_player_ability_cfg.stat_mod_value_type := v_player_stat_mod_value_type;
-  v_player_ability_cfg.stat_mod_flat := v_player_stat_mod_flat;
-  v_player_ability_cfg.stat_mod_min := v_player_stat_mod_min;
-  v_player_ability_cfg.stat_mod_max := v_player_stat_mod_max;
-  v_player_ability_cfg.stat_mod_percent := v_player_stat_mod_percent;
-  v_player_ability_cfg.stat_mod_duration_type := v_player_stat_mod_duration_type;
-  v_player_ability_cfg.stat_mod_duration_turns := v_player_stat_mod_duration_turns;
-  v_player_ability_cfg.stat_mod_max_uses := v_player_stat_mod_max_uses;
-  v_player_ability_cfg.heal_dot_config_amount := v_player_heal_dot_config_amount;
-  v_player_ability_cfg.heal_dot_config_turns := v_player_heal_dot_config_turns;
-  v_player_ability_cfg.heal_dot_config_type := v_player_heal_dot_config_type;
-  v_player_ability_cfg.heal_dot_config_percent := v_player_heal_dot_config_percent;
-  v_player_ability_cfg.cancel_heal_duration := v_player_cancel_heal_duration;
-  v_player_ability_cfg.percent_hp_damage_percent := v_player_percent_hp_damage_percent;
-  v_player_ability_cfg.ability_type := v_ability.type;
-  v_player_ability_cfg.stat_mod_type_filter := v_player_stat_mod_type_filter;
-  v_player_ability_cfg.prevention_duration := v_player_prevention_duration;
-  v_player_ability_cfg.keep_going_turns := v_player_keep_going_turns;
-  v_player_ability_cfg.keep_going_until_fail := v_player_keep_going_until_fail;
-  v_player_ability_cfg.keep_going_bonus_type := v_player_keep_going_bonus_type;
-  v_player_ability_cfg.keep_going_bonus_flat := v_player_keep_going_bonus_flat;
-  v_player_ability_cfg.keep_going_bonus_percent := v_player_keep_going_bonus_percent;
-  v_player_ability_cfg.heal_dot_until_awake := v_player_heal_dot_config_until_awake;
-  v_player_ability_cfg.ignore_status_block := v_player_ignore_status_block;
-  v_player_ability_cfg.weather_id := v_player_weather_id;
-  v_player_ability_cfg.weather_chance := v_player_weather_chance;
-  v_player_ability_cfg.stat_mod_weather_condition := v_player_stat_mod_weather_condition;
-  v_player_ability_cfg.stat_mod_weather_id := v_player_stat_mod_weather_id;
-
-  v_opponent_ability_cfg.ability_nom := v_opponent_ability_nom_round;
-  v_opponent_ability_cfg.base_damage := v_opponent_damage;
-  v_opponent_ability_cfg.damage_species_xp := v_opponent_damage_species_xp;
-  v_opponent_ability_cfg.type_bonus := v_opponent_type_bonus;
-  v_opponent_ability_cfg.precision := v_opponent_ability.precision;
-  v_opponent_ability_cfg.degats_de := v_opponent_ability.degats_de;
-  v_opponent_ability_cfg.deals_damage := v_opponent_ability.deals_damage;
-  v_opponent_ability_cfg.status_effect := v_opponent_ability.status_effect;
-  v_opponent_ability_cfg.status_chance := v_opponent_ability.status_chance;
-  v_opponent_ability_cfg.turn_effect := v_opponent_turn_effect;
-  v_opponent_ability_cfg.repeat_max := v_opponent_repeat_max;
-  v_opponent_ability_cfg.heal_type := v_opponent_heal_type;
-  v_opponent_ability_cfg.heal_amount := v_opponent_heal_amount;
-  v_opponent_ability_cfg.heal_percent := v_opponent_heal_percent;
-  v_opponent_ability_cfg.status_reversed := v_opponent_status_reversed;
-  v_opponent_ability_cfg.recoil_type := v_opponent_recoil_type;
-  v_opponent_ability_cfg.recoil_min := v_opponent_recoil_min;
-  v_opponent_ability_cfg.recoil_max := v_opponent_recoil_max;
-  v_opponent_ability_cfg.recoil_percent := v_opponent_recoil_percent;
-  v_opponent_ability_cfg.invuln_grant := v_opponent_invuln_grant;
-  v_opponent_ability_cfg.bonus_type := v_opponent_bonus_type;
-  v_opponent_ability_cfg.bonus_multiplier := v_opponent_bonus_multiplier;
-  v_opponent_ability_cfg.bonus_flat := v_opponent_bonus_flat;
-  v_opponent_ability_cfg.bonus_min := v_opponent_bonus_min;
-  v_opponent_ability_cfg.bonus_max := v_opponent_bonus_max;
-  v_opponent_ability_cfg.bonus_condition := v_opponent_bonus_condition;
-  v_opponent_ability_cfg.bonus_dice_value := v_opponent_bonus_dice_value;
-  v_opponent_ability_cfg.bonus_status_filter := v_opponent_bonus_status_filter;
-  v_opponent_ability_cfg.stat_mod_target := v_opponent_stat_mod_target;
-  v_opponent_ability_cfg.stat_mod_stat := v_opponent_stat_mod_stat;
-  v_opponent_ability_cfg.stat_mod_value_type := v_opponent_stat_mod_value_type;
-  v_opponent_ability_cfg.stat_mod_flat := v_opponent_stat_mod_flat;
-  v_opponent_ability_cfg.stat_mod_min := v_opponent_stat_mod_min;
-  v_opponent_ability_cfg.stat_mod_max := v_opponent_stat_mod_max;
-  v_opponent_ability_cfg.stat_mod_percent := v_opponent_stat_mod_percent;
-  v_opponent_ability_cfg.stat_mod_duration_type := v_opponent_stat_mod_duration_type;
-  v_opponent_ability_cfg.stat_mod_duration_turns := v_opponent_stat_mod_duration_turns;
-  v_opponent_ability_cfg.stat_mod_max_uses := v_opponent_stat_mod_max_uses;
-  v_opponent_ability_cfg.heal_dot_config_amount := v_opponent_heal_dot_config_amount;
-  v_opponent_ability_cfg.heal_dot_config_turns := v_opponent_heal_dot_config_turns;
-  v_opponent_ability_cfg.heal_dot_config_type := v_opponent_heal_dot_config_type;
-  v_opponent_ability_cfg.heal_dot_config_percent := v_opponent_heal_dot_config_percent;
-  v_opponent_ability_cfg.cancel_heal_duration := v_opponent_cancel_heal_duration;
-  v_opponent_ability_cfg.percent_hp_damage_percent := v_opponent_percent_hp_damage_percent;
-  v_opponent_ability_cfg.ability_type := v_opponent_ability.type;
-  v_opponent_ability_cfg.stat_mod_type_filter := v_opponent_stat_mod_type_filter;
-  v_opponent_ability_cfg.prevention_duration := v_opponent_prevention_duration;
-  v_opponent_ability_cfg.keep_going_turns := v_opponent_keep_going_turns;
-  v_opponent_ability_cfg.keep_going_until_fail := v_opponent_keep_going_until_fail;
-  v_opponent_ability_cfg.keep_going_bonus_type := v_opponent_keep_going_bonus_type;
-  v_opponent_ability_cfg.keep_going_bonus_flat := v_opponent_keep_going_bonus_flat;
-  v_opponent_ability_cfg.keep_going_bonus_percent := v_opponent_keep_going_bonus_percent;
-  v_opponent_ability_cfg.heal_dot_until_awake := v_opponent_heal_dot_config_until_awake;
-  v_opponent_ability_cfg.ignore_status_block := v_opponent_ignore_status_block;
-  v_opponent_ability_cfg.weather_id := v_opponent_weather_id;
-  v_opponent_ability_cfg.weather_chance := v_opponent_weather_chance;
-  v_opponent_ability_cfg.stat_mod_weather_condition := v_opponent_stat_mod_weather_condition;
-  v_opponent_ability_cfg.stat_mod_weather_id := v_opponent_stat_mod_weather_id;
-
-  -- Météo : id en cours (persisté sur la ligne de combat), bascule du mode, et
-  -- types d'espèce EFFECTIFS des deux camps — un pokémon transformé (talent
-  -- 'transform') a copié le type de l'autre, la météo doit le voir ainsi.
-  v_round_result := autobattle_resolve_round_core(
-    v_turn_no, v_round_no, v_first_attacker,
-    v_player_state, v_opponent_state, v_player_ability_cfg, v_opponent_ability_cfg,
-    v_precision_enabled, v_player_talents, v_opponent_talents,
-    v_row.weather_id, v_weather_enabled,
-    CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END,
-    CASE WHEN v_is_opponent_metamorph THEN v_player_species.type ELSE v_opponent_species.type END
-  );
-
-  v_player_hp := (v_round_result.player_state).hp;
-  v_player_status := (v_round_result.player_state).status;
-  v_player_damage_mods := (v_round_result.player_state).damage_mods;
-  v_player_precision_mods := (v_round_result.player_state).precision_mods;
-  v_player_heal_dot_amount := (v_round_result.player_state).heal_dot_amount;
-  v_player_heal_dot_expires := (v_round_result.player_state).heal_dot_expires;
-  v_player_heal_disabled_expires := (v_round_result.player_state).heal_disabled_expires;
-  v_player_invulnerable := (v_round_result.player_state).invulnerable;
-  v_player_invuln_granted_round := (v_round_result.player_state).invuln_granted_round;
-  v_player_stat_mod_uses := (v_round_result.player_state).stat_mod_uses;
-  v_player_used_ability := (v_round_result.player_state).used_ability;
-  v_player_took_damage := (v_round_result.player_state).took_damage;
-  v_player_skip_pending := (v_round_result.player_state).skip_pending;
-  v_player_preparing := (v_round_result.player_state).preparing;
-  v_player_preparing_ability_nom := (v_round_result.player_state).preparing_ability_nom;
-  v_player_double_turn_pending := (v_round_result.player_state).double_turn_pending;
-  v_player_prevention_expires := (v_round_result.player_state).prevention_expires;
-  v_player_heal_dot_until_awake := COALESCE((v_round_result.player_state).heal_dot_until_awake, false);
-  v_player_keep_going_ability_nom := (v_round_result.player_state).keep_going_ability_nom;
-  v_player_keep_going_remaining := COALESCE((v_round_result.player_state).keep_going_remaining, 0);
-  v_player_keep_going_count := COALESCE((v_round_result.player_state).keep_going_count, 0);
-  v_player_talent_state := COALESCE((v_round_result.player_state).talent_state, '[]'::jsonb);
-
-  v_opponent_hp := (v_round_result.opponent_state).hp;
-  v_opponent_status := (v_round_result.opponent_state).status;
-  v_opponent_damage_mods := (v_round_result.opponent_state).damage_mods;
-  v_opponent_precision_mods := (v_round_result.opponent_state).precision_mods;
-  v_opponent_heal_dot_amount := (v_round_result.opponent_state).heal_dot_amount;
-  v_opponent_heal_dot_expires := (v_round_result.opponent_state).heal_dot_expires;
-  v_opponent_heal_disabled_expires := (v_round_result.opponent_state).heal_disabled_expires;
-  v_opponent_invulnerable := (v_round_result.opponent_state).invulnerable;
-  v_opponent_invuln_granted_round := (v_round_result.opponent_state).invuln_granted_round;
-  v_opponent_stat_mod_uses := (v_round_result.opponent_state).stat_mod_uses;
-  v_opponent_used_ability := (v_round_result.opponent_state).used_ability;
-  v_opponent_took_damage := (v_round_result.opponent_state).took_damage;
-  v_opponent_skip_pending := (v_round_result.opponent_state).skip_pending;
-  v_opponent_preparing := (v_round_result.opponent_state).preparing;
-  v_opponent_preparing_ability_nom := (v_round_result.opponent_state).preparing_ability_nom;
-  v_opponent_double_turn_pending := (v_round_result.opponent_state).double_turn_pending;
-  v_opponent_prevention_expires := (v_round_result.opponent_state).prevention_expires;
-  v_opponent_heal_dot_until_awake := COALESCE((v_round_result.opponent_state).heal_dot_until_awake, false);
-  v_opponent_keep_going_ability_nom := (v_round_result.opponent_state).keep_going_ability_nom;
-  v_opponent_keep_going_remaining := COALESCE((v_round_result.opponent_state).keep_going_remaining, 0);
-  v_opponent_keep_going_count := COALESCE((v_round_result.opponent_state).keep_going_count, 0);
-  v_opponent_talent_state := COALESCE((v_round_result.opponent_state).talent_state, '[]'::jsonb);
-
-  v_turns := v_round_result.turns;
-  v_outcome := v_round_result.outcome;
-  v_turn_no := v_round_result.turn_no;
-  v_round_no := v_round_result.round_no;
-  -- Un camp qui a gagné une action supplémentaire ('charge_double_next'
-  -- libéré, 'first_and_replay') reprend la main dès le début du round
-  -- suivant — c'est ce qui lui donne deux actions consécutives, et pour
-  -- 'first_and_replay' ce qui le fait "passer premier" durablement.
-  v_first_attacker := COALESCE(v_round_result.next_first_attacker, v_first_attacker);
-
-  -- Un round peut se terminer AVANT que l'adversaire n'ait joué (le joueur a
-  -- gagné une action supplémentaire et reprend la main immédiatement) : sa
-  -- séquence de capacités ne doit alors pas avancer, sinon une position serait
-  -- sautée sans jamais avoir été jouée.
-  IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_turns) t WHERE t ->> 'attacker' = 'opponent') THEN
-    v_opponent_ability_cycle_index := v_row.opponent_ability_cycle_index;
-  END IF;
-
-  -- Capacité imposée au joueur au PROCHAIN tour : préparation en cours,
-  -- tour passé imposé par l'effet 'skip', ou chaîne "Continue sur sa
-  -- lancée" encore active. Le client verrouille sa grille dessus au lieu de
-  -- deviner à partir du turn_effect de la capacité jouée.
-  v_player_forced_ability_nom := CASE
-    WHEN v_outcome IS NOT NULL THEN NULL
-    -- Le joueur n'a pas agi de tout le round : l'adversaire a ouvert ET gagné
-    -- une action supplémentaire, ce qui a mis fin au round avant son tour
-    -- (voir autobattle_resolve_round_core). La capacité qu'il vient de
-    -- soumettre n'a donc rien fait — on la lui réimpose au round suivant au
-    -- lieu de la lui faire choisir une deuxième fois pour rien.
-    WHEN NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_turns) t WHERE t ->> 'attacker' = 'player')
-      THEN v_effective_player_ability_nom
-    WHEN v_player_preparing THEN v_player_preparing_ability_nom
-    WHEN v_player_skip_pending THEN v_effective_player_ability_nom
-    WHEN v_player_keep_going_ability_nom IS NOT NULL THEN v_player_keep_going_ability_nom
-    ELSE NULL END;
-
-  IF v_outcome = 'win' THEN
-    UPDATE player_pokemon SET battles_won = battles_won + 1 WHERE id = p_player_pokemon_id;
-
-    FOR v_reward IN SELECT * FROM autobattle_level_rewards WHERE level_id = p_level_id ORDER BY sort_order LOOP
-      IF v_reward.reward_type = 'xp' THEN
-        v_max_xp := autobattle_max_xp(v_pp.pokemon_nom);
-        v_new_xp := GREATEST(0, v_pp.xp + v_reward.xp_amount);
-        IF v_max_xp IS NOT NULL THEN v_new_xp := LEAST(v_new_xp, v_max_xp); END IF;
-        UPDATE player_pokemon SET xp = v_new_xp WHERE id = p_player_pokemon_id;
-        v_rewards := v_rewards || jsonb_build_array(jsonb_build_object(
-          'reward_type', 'xp', 'xp_amount', v_reward.xp_amount,
-          'player_pokemon_id', p_player_pokemon_id, 'xp_before', v_pp.xp, 'xp_after', v_new_xp
-        ));
-        v_pp.xp := v_new_xp;
-      ELSE
-        INSERT INTO player_items (player_id, item_nom, quantity)
-        VALUES (p_player_id, v_reward.item_nom, v_reward.item_quantity)
-        ON CONFLICT (player_id, item_nom) DO UPDATE SET quantity = player_items.quantity + EXCLUDED.quantity;
-        v_rewards := v_rewards || jsonb_build_array(jsonb_build_object(
-          'reward_type', v_reward.reward_type, 'item_nom', v_reward.item_nom, 'quantity', v_reward.item_quantity
-        ));
-      END IF;
-    END LOOP;
-
-    UPDATE autobattle_player_level_state
-      SET discovered = true, discovered_at = COALESCE(discovered_at, now()), completed = true, completed_at = now()
-      WHERE player_id = p_player_id AND level_id = p_level_id;
-
-    SELECT MAX(level_index) INTO v_max_level_index FROM autobattle_levels WHERE variant_id = v_variant.id;
-    IF v_level.level_index >= v_max_level_index THEN
-      v_variant_completed := true;
-      v_next_level_index := v_progress.current_level_index;
-    ELSE
-      v_next_level_index := v_progress.current_level_index + 1;
-    END IF;
-
-    UPDATE autobattle_player_variant_progress
-      SET current_level_index = v_next_level_index, variant_completed = v_variant_completed,
-          completed_at = CASE WHEN v_variant_completed THEN now() ELSE completed_at END
-      WHERE player_id = p_player_id AND variant_id = v_variant.id;
-  ELSIF v_outcome = 'lose' THEN
-    UPDATE autobattle_player_level_state
-      SET discovered = true, discovered_at = COALESCE(discovered_at, now())
-      WHERE player_id = p_player_id AND level_id = p_level_id;
-    v_next_level_index := v_progress.current_level_index;
-  END IF;
-
-  v_result := jsonb_build_object(
-    'status', 'ok',
-    'turn_no', v_turn_no,
-    -- Celui du PROCHAIN round : v_first_attacker vient d'être remis à jour
-    -- ci-dessus à partir de next_first_attacker, et c'est bien l'ordre à
-    -- venir qui intéresse le client (badge "(1er)"/"(2ème)" affiché pendant
-    -- qu'il choisit sa prochaine capacité).
-    'first_attacker', v_first_attacker,
-    'player_hp', GREATEST(0, v_player_hp),
-    'player_max_hp', v_player_max_hp,
-    'opponent_hp', GREATEST(0, v_opponent_hp),
-    'opponent_max_hp', v_level.opponent_hp,
-    'player_damage_per_hit', v_player_damage,
-    'opponent_damage_per_hit', v_opponent_damage,
-    'player_type_bonus', v_player_type_bonus,
-    'opponent_type_bonus', v_opponent_type_bonus,
-    'turns', v_turns,
-    'outcome', v_outcome,
-    'rewards', v_rewards,
-    'variant_completed', v_variant_completed,
-    'next_level_index', v_next_level_index,
-    'opponent_pokemon_nom', v_level.opponent_pokemon_nom,
-    'opponent_ability_nom', v_opponent_ability_nom_round,
-    'player_ability_nom', v_effective_player_ability_nom,
-    'player_forced_ability_nom', v_player_forced_ability_nom,
-    -- Cas Métamorph adversaire : sprite du joueur copié pour ce combat (voir
-    -- même champ en mode Auto, autobattle_resolve_battle) — absent en mode
-    -- Manuel jusqu'ici, le client ne pouvait donc jamais afficher le sprite
-    -- copié pour l'adversaire (seules les capacités l'étaient).
-    'opponent_image_override', CASE WHEN v_is_opponent_metamorph THEN v_player_species.image_miniature ELSE NULL END,
-    -- Cas Métamorph JOUEUR : sprite de l'adversaire copié pour ce combat.
-    'player_image_override', v_player_image_override
-  );
-
-  IF v_outcome IS NULL THEN
-    UPDATE autobattle_manual_battles SET
-      turn_no = v_turn_no, round_no = v_round_no, player_hp = v_player_hp, opponent_hp = v_opponent_hp,
-      player_status = v_player_status, opponent_status = v_opponent_status,
-      player_damage_mods = v_player_damage_mods, player_precision_mods = v_player_precision_mods,
-      opponent_damage_mods = v_opponent_damage_mods, opponent_precision_mods = v_opponent_precision_mods,
-      player_heal_dot_amount = v_player_heal_dot_amount, player_heal_dot_expires = v_player_heal_dot_expires,
-      opponent_heal_dot_amount = v_opponent_heal_dot_amount, opponent_heal_dot_expires = v_opponent_heal_dot_expires,
-      player_heal_disabled_expires = v_player_heal_disabled_expires, opponent_heal_disabled_expires = v_opponent_heal_disabled_expires,
-      player_invulnerable = v_player_invulnerable, player_invuln_granted_round = v_player_invuln_granted_round,
-      opponent_invulnerable = v_opponent_invulnerable, opponent_invuln_granted_round = v_opponent_invuln_granted_round,
-      player_used_ability = v_player_used_ability, player_took_damage = v_player_took_damage,
-      opponent_used_ability = v_opponent_used_ability, opponent_took_damage = v_opponent_took_damage,
-      player_skip_pending = v_player_skip_pending, opponent_skip_pending = v_opponent_skip_pending,
-      player_preparing = v_player_preparing, opponent_preparing = v_opponent_preparing,
-      player_preparing_ability_nom = v_player_preparing_ability_nom, opponent_preparing_ability_nom = v_opponent_preparing_ability_nom,
-      first_attacker = v_first_attacker,
-      player_double_turn_pending = v_player_double_turn_pending, opponent_double_turn_pending = v_opponent_double_turn_pending,
-      player_prevention_expires = v_player_prevention_expires, opponent_prevention_expires = v_opponent_prevention_expires,
-      player_heal_dot_until_awake = v_player_heal_dot_until_awake, opponent_heal_dot_until_awake = v_opponent_heal_dot_until_awake,
-      player_keep_going_ability_nom = v_player_keep_going_ability_nom, opponent_keep_going_ability_nom = v_opponent_keep_going_ability_nom,
-      player_keep_going_remaining = v_player_keep_going_remaining, opponent_keep_going_remaining = v_opponent_keep_going_remaining,
-      player_keep_going_count = v_player_keep_going_count, opponent_keep_going_count = v_opponent_keep_going_count,
-      player_talent_state = v_player_talent_state, opponent_talent_state = v_opponent_talent_state,
-      opponent_ability_cycle_index = v_opponent_ability_cycle_index,
-      player_stat_mod_uses = v_player_stat_mod_uses, opponent_stat_mod_uses = v_opponent_stat_mod_uses,
-      weather_id = v_round_result.weather_id,
-      turn_log = turn_log || v_turns, last_idempotency_key = p_idempotency_key, last_result = v_result
-    WHERE id = v_row.id;
-  ELSE
-    UPDATE autobattle_manual_battles SET
-      turn_no = v_turn_no, round_no = v_round_no, player_hp = v_player_hp, opponent_hp = v_opponent_hp,
-      outcome = v_outcome, turn_log = turn_log || v_turns,
-      last_idempotency_key = p_idempotency_key, last_result = v_result
-    WHERE id = v_row.id;
-  END IF;
-
-  RETURN v_result;
-END;
-$$;
-
-GRANT EXECUTE ON FUNCTION autobattle_resolve_manual_round(bigint, bigint, bigint, text, uuid) TO anon, authenticated;
-
 
 -- Démarre une tentative (Combat Manuel) contre un défi : tire au sort qui
 -- attaque en premier AVANT le choix de capacité (comme autobattle_start_
@@ -3607,10 +2298,6 @@ DECLARE
   v_talent_inflict      text;
   v_side                text;
   v_talents_enabled     boolean;
-  -- Météo — voir autobattle_start_manual_battle, même mécanique.
-  v_weather_enabled     boolean;
-  v_weather             jsonb;
-  v_weather_res         jsonb;
 BEGIN
   SELECT * INTO v_challenge FROM pvp_challenges WHERE id = p_challenge_id;
   IF v_challenge IS NULL THEN
@@ -3668,15 +2355,11 @@ BEGIN
   -- renvoyer v_first_attacker brut faisait échouer le test `=== 'player'` côté
   -- client (pile ou face + badge "(1er)"/"(2ème)" de ManualBattleScreen
   -- toujours affichés comme si l'adversaire commençait).
-  -- Bascule globale des talents (voir pvp_config.talents_enabled), puis filtre
-  -- 'cancel_talents' (voir autobattle_talents_effective).
+  -- Bascule globale des talents (voir pvp_config.talents_enabled).
   SELECT talents_enabled INTO v_talents_enabled FROM pvp_config WHERE id = 1;
   v_talents_enabled := COALESCE(v_talents_enabled, true);
-  v_a_talents := autobattle_talents_vs(v_pp.pokemon_nom, v_challenge.pokemon_nom, v_talents_enabled);
-  v_d_talents := autobattle_talents_vs(v_challenge.pokemon_nom, v_pp.pokemon_nom, v_talents_enabled);
-  -- Bascule globale de la météo (voir pvp_config.weather_enabled).
-  SELECT weather_enabled INTO v_weather_enabled FROM pvp_config WHERE id = 1;
-  v_weather_enabled := COALESCE(v_weather_enabled, true);
+  v_a_talents := autobattle_talents_for(v_pp.pokemon_nom, v_talents_enabled);
+  v_d_talents := autobattle_talents_for(v_challenge.pokemon_nom, v_talents_enabled);
   -- Talent 'priority' : remplace le tirage au sort (voir autobattle_resolve_battle).
   IF autobattle_talent_priority(v_a_talents) <> autobattle_talent_priority(v_d_talents) THEN
     v_first_attacker := CASE WHEN autobattle_talent_priority(v_a_talents) > autobattle_talent_priority(v_d_talents)
@@ -3696,13 +2379,9 @@ BEGIN
   FOREACH v_side IN ARRAY (CASE WHEN v_first_attacker = 'attacker' THEN ARRAY['player', 'opponent'] ELSE ARRAY['opponent', 'player'] END) LOOP
     IF v_side = 'player' THEN
       v_talent_res := autobattle_talent_act(v_a_talents, v_a_talent_state, 'player', 'battle_start', NULL,
-        v_attacker_max_hp, v_attacker_max_hp, v_d_status, v_a_status, v_d_talents, 0, v_weather);
+        v_attacker_max_hp, v_attacker_max_hp, v_d_status, v_a_status, v_d_talents, 0);
       v_a_talent_state := v_talent_res -> 'state';
       v_start_turns := v_start_turns || (v_talent_res -> 'turns');
-      -- Météo « à l'entrée en combat » : persistée sur la ligne de combat.
-      v_weather_res := autobattle_weather_set((v_talent_res ->> 'set_weather')::bigint, v_weather_enabled, v_weather, 'player', v_attacker_max_hp, 0);
-      v_weather := autobattle_weather_norm(v_weather_res -> 'weather');
-      v_start_turns := v_start_turns || (v_weather_res -> 'turns');
       v_talent_inflict := v_talent_res ->> 'inflict_status';
       IF v_talent_inflict IS NOT NULL THEN
         v_talent_res := autobattle_talent_status_guard(v_d_talents, v_d_talent_state, 'opponent', v_talent_inflict, v_challenge.max_hp, 0);
@@ -3714,13 +2393,9 @@ BEGIN
       END IF;
     ELSE
       v_talent_res := autobattle_talent_act(v_d_talents, v_d_talent_state, 'opponent', 'battle_start', NULL,
-        v_challenge.max_hp, v_challenge.max_hp, v_a_status, v_d_status, v_a_talents, 0, v_weather);
+        v_challenge.max_hp, v_challenge.max_hp, v_a_status, v_d_status, v_a_talents, 0);
       v_d_talent_state := v_talent_res -> 'state';
       v_start_turns := v_start_turns || (v_talent_res -> 'turns');
-      -- Voir le même commentaire côté attaquant.
-      v_weather_res := autobattle_weather_set((v_talent_res ->> 'set_weather')::bigint, v_weather_enabled, v_weather, 'opponent', v_challenge.max_hp, 0);
-      v_weather := autobattle_weather_norm(v_weather_res -> 'weather');
-      v_start_turns := v_start_turns || (v_weather_res -> 'turns');
       v_talent_inflict := v_talent_res ->> 'inflict_status';
       IF v_talent_inflict IS NOT NULL THEN
         v_talent_res := autobattle_talent_status_guard(v_a_talents, v_a_talent_state, 'player', v_talent_inflict, v_attacker_max_hp, 0);
@@ -3743,14 +2418,12 @@ BEGIN
     challenge_id, attacker_player_id, attacker_player_pokemon_id, first_attacker,
     attacker_hp, attacker_max_hp, defender_hp, defender_max_hp,
     started_at, last_idempotency_key, last_result,
-    turn_log, attacker_talent_state, defender_talent_state, attacker_status, defender_status,
-    weather_id
+    turn_log, attacker_talent_state, defender_talent_state, attacker_status, defender_status
   ) VALUES (
     p_challenge_id, p_attacker_player_id, p_attacker_player_pokemon_id, v_first_attacker,
     v_attacker_max_hp, v_attacker_max_hp, v_challenge.max_hp, v_challenge.max_hp,
     now(), p_idempotency_key, v_result,
-    v_start_turns, v_a_talent_state, v_d_talent_state, v_a_status, v_d_status,
-    autobattle_weather_id(v_weather)
+    v_start_turns, v_a_talent_state, v_d_talent_state, v_a_status, v_d_status
   );
 
   RETURN v_result;
@@ -3758,436 +2431,6 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION pvp_start_battle(bigint, bigint, bigint, uuid) TO anon, authenticated;
-
-
--- Résout UN SEUL "tour" (les deux camps, rafales/passes/préparations
--- comprises — comme autobattle_resolve_manual_round, voir son commentaire
--- pour le détail de chaque effet, repris ici à l'identique) contre un défi
--- PvP. v_attacker_*/v_defender_* ci-dessous (variables internes) désignent
--- respectivement le joueur qui attaque et l'instantané figé du défi — mais
--- le JSON renvoyé (turns[].attacker, player_hp/opponent_hp...) réutilise
--- volontairement le vocabulaire 'player'/'opponent' d'AutoBattleTurn/
--- AutoBattleManualRoundResult ('player' = l'attaquant, 'opponent' = le
--- défenseur figé) pour que AutoBattleScreen/ManualBattleScreen soient
--- réutilisés côté client SANS AUCUNE modification (voir PvpBattleScreen).
--- Aucun ticket, aucune récompense, aucune notion de Métamorph (limitation
--- volontaire) ; à la victoire/défaite, insère la ligne pvp_challenge_attempts
--- (tableau des scores de la bannière) au lieu de créditer XP/objets.
-CREATE OR REPLACE FUNCTION pvp_resolve_round(
-  p_attacker_player_id bigint,
-  p_challenge_id bigint,
-  p_attacker_player_pokemon_id bigint,
-  p_ability_nom text,
-  p_idempotency_key uuid
-)
-RETURNS jsonb
-LANGUAGE plpgsql
-AS $$
-DECLARE
-  v_challenge              record;
-  v_pp                     record;
-  v_a_species              record;
-  v_ability                record;
-  v_d_species              record;
-  v_d_ability              record;
-  v_row                    pvp_battles%ROWTYPE;
-  v_precision_enabled      boolean;
-  v_talents_enabled        boolean;
-  v_weather_enabled        boolean;
-  v_a_type_bonus           boolean;
-  v_d_type_bonus           boolean;
-  v_a_damage               integer;
-  v_d_damage               integer;
-  v_a_damage_species_xp    integer;
-  v_d_damage_species_xp    integer;
-  v_effective_a_ability_nom text;
-  v_d_ability_sequence     text[];
-  v_d_ability_cycle_index  integer;
-  v_d_ability_nom_round    text;
-  v_a_state                autobattle_combatant_state;
-  v_d_state                autobattle_combatant_state;
-  v_a_ability_cfg          autobattle_combatant_ability;
-  v_d_ability_cfg          autobattle_combatant_ability;
-  v_round_result           autobattle_round_result;
-  v_result                 jsonb;
-  v_challenger_source_id   bigint;
-BEGIN
-  SELECT * INTO v_challenge FROM pvp_challenges WHERE id = p_challenge_id;
-  IF v_challenge IS NULL THEN
-    RETURN jsonb_build_object('status', 'not_found');
-  END IF;
-  IF v_challenge.defender_player_id = p_attacker_player_id THEN
-    RETURN jsonb_build_object('status', 'own_challenge');
-  END IF;
-
-  SELECT * INTO v_pp FROM player_pokemon WHERE id = p_attacker_player_pokemon_id AND player_id = p_attacker_player_id;
-  IF v_pp IS NULL THEN
-    RETURN jsonb_build_object('status', 'ineligible_pokemon');
-  END IF;
-  IF v_pp.in_daycare THEN
-    RETURN jsonb_build_object('status', 'ineligible_pokemon');
-  END IF;
-  IF NOT (p_ability_nom = ANY(v_pp.moves)) THEN
-    RETURN jsonb_build_object('status', 'ineligible_ability');
-  END IF;
-
-  SELECT * INTO v_a_species FROM pokemon WHERE nom = v_pp.pokemon_nom;
-  IF v_a_species IS NULL OR NOT EXISTS (SELECT 1 FROM attacks WHERE nom = p_ability_nom) THEN
-    RETURN jsonb_build_object('status', 'ineligible_ability');
-  END IF;
-  IF EXISTS (SELECT 1 FROM autobattle_banned_attacks WHERE attack_nom = p_ability_nom) THEN
-    RETURN jsonb_build_object('status', 'ineligible_ability');
-  END IF;
-
-  SELECT * INTO v_d_species FROM pokemon WHERE nom = v_challenge.pokemon_nom;
-  IF v_d_species IS NULL THEN
-    RETURN jsonb_build_object('status', 'not_found');
-  END IF;
-
-  SELECT * INTO v_row FROM pvp_battles
-    WHERE attacker_player_id = p_attacker_player_id AND challenge_id = p_challenge_id FOR UPDATE;
-
-  -- Rejeu idempotent : voir le même commentaire dans l'ancienne
-  -- autobattle_resolve_manual_round (moteur partagé, même idiome).
-  IF v_row.id IS NOT NULL AND v_row.last_idempotency_key = p_idempotency_key THEN
-    RETURN v_row.last_result;
-  END IF;
-
-  IF v_row.id IS NOT NULL AND v_row.outcome IS NOT NULL THEN
-    DELETE FROM pvp_battles WHERE id = v_row.id;
-    v_row := NULL;
-  END IF;
-
-  IF v_row.id IS NULL THEN
-    RETURN jsonb_build_object('status', 'not_started');
-  END IF;
-
-  -- Capacité RÉELLEMENT jouée par l'attaquant ce tour (mémorisée s'il est en
-  -- cours de préparation, voir prepare_release).
-  -- Une chaîne "Continue sur sa lancée" en cours (voir autobattle_ability_
-  -- rules.keep_going_turns) verrouille la capacité comme une préparation.
-  v_effective_a_ability_nom := CASE
-    WHEN v_row.attacker_preparing THEN v_row.attacker_preparing_ability_nom
-    WHEN v_row.attacker_keep_going_ability_nom IS NOT NULL THEN v_row.attacker_keep_going_ability_nom
-    ELSE p_ability_nom END;
-  SELECT * INTO v_ability FROM attacks WHERE nom = v_effective_a_ability_nom;
-
-  -- Capacité défenseur ce tour : mémorisée si en cours de préparation, sinon
-  -- pigée dans la boucle des jusqu'à 4 capacités posées (voir pvp_challenges)
-  -- — une position par NOUVEAU tour défenseur (même mécanique que
-  -- autobattle_levels.opponent_ability_nom_1..10/opponent_ability_cycle_index,
-  -- juste bornée à 4 positions).
-  IF v_row.defender_preparing THEN
-    v_d_ability_nom_round := v_row.defender_preparing_ability_nom;
-    v_d_ability_cycle_index := v_row.defender_ability_cycle_index;
-  ELSIF v_row.defender_keep_going_ability_nom IS NOT NULL THEN
-    v_d_ability_nom_round := v_row.defender_keep_going_ability_nom;
-    v_d_ability_cycle_index := v_row.defender_ability_cycle_index;
-  ELSE
-    v_d_ability_sequence := v_challenge.ability_noms;
-    v_d_ability_cycle_index := v_row.defender_ability_cycle_index + 1;
-    v_d_ability_nom_round := v_d_ability_sequence[1 + ((v_d_ability_cycle_index - 1) % array_length(v_d_ability_sequence, 1))];
-  END IF;
-  SELECT * INTO v_d_ability FROM attacks WHERE nom = v_d_ability_nom_round;
-
-  v_a_type_bonus := EXISTS (
-    SELECT 1 FROM (VALUES
-      (v_a_species.super_efficace_1), (v_a_species.super_efficace_2),
-      (v_a_species.super_efficace_3), (v_a_species.super_efficace_4)
-    ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_d_species.type))
-  ) AND lower(trim(v_ability.type)) = lower(trim(v_a_species.type));
-  v_a_damage_species_xp := COALESCE(v_a_species.degats_base, 0) + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'DMG');
-  v_a_damage := v_a_damage_species_xp * (CASE WHEN v_a_type_bonus THEN 2 ELSE 1 END) + COALESCE(v_ability.degats_base, 0);
-
-  v_d_type_bonus := EXISTS (
-    SELECT 1 FROM (VALUES
-      (v_d_species.super_efficace_1), (v_d_species.super_efficace_2),
-      (v_d_species.super_efficace_3), (v_d_species.super_efficace_4)
-    ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_a_species.type))
-  ) AND lower(trim(v_d_ability.type)) = lower(trim(v_d_species.type));
-  -- Figé au dépôt du défi (voir pvp_challenges.damage_species_xp), pas
-  -- recalculé depuis l'XP courante du pokémon réel du défenseur.
-  v_d_damage_species_xp := v_challenge.damage_species_xp;
-  v_d_damage := v_d_damage_species_xp * (CASE WHEN v_d_type_bonus THEN 2 ELSE 1 END) + COALESCE(v_d_ability.degats_base, 0);
-
-  SELECT precision_enabled, talents_enabled, weather_enabled
-    INTO v_precision_enabled, v_talents_enabled, v_weather_enabled FROM pvp_config WHERE id = 1;
-  v_precision_enabled := COALESCE(v_precision_enabled, true);
-  v_talents_enabled := COALESCE(v_talents_enabled, true);
-  v_weather_enabled := COALESCE(v_weather_enabled, true);
-
-  -- Empaquette l'état persisté (pvp_battles) dans les types partagés avec le
-  -- moteur de résolution (voir autobattle_resolve_round_core, juste après
-  -- autobattle_ability_burst plus haut dans ce fichier — le MÊME moteur que
-  -- Combat Auto en mode Manuel, aucune duplication de la boucle elle-même).
-  v_a_state.hp := v_row.attacker_hp;
-  v_a_state.max_hp := v_row.attacker_max_hp;
-  v_a_state.status := v_row.attacker_status;
-  v_a_state.damage_mods := v_row.attacker_damage_mods;
-  v_a_state.precision_mods := v_row.attacker_precision_mods;
-  v_a_state.heal_dot_amount := v_row.attacker_heal_dot_amount;
-  v_a_state.heal_dot_expires := v_row.attacker_heal_dot_expires;
-  v_a_state.heal_disabled_expires := v_row.attacker_heal_disabled_expires;
-  v_a_state.invulnerable := v_row.attacker_invulnerable;
-  v_a_state.invuln_granted_round := v_row.attacker_invuln_granted_round;
-  v_a_state.stat_mod_uses := v_row.attacker_stat_mod_uses;
-  v_a_state.used_ability := v_row.attacker_used_ability;
-  v_a_state.took_damage := v_row.attacker_took_damage;
-  v_a_state.skip_pending := v_row.attacker_skip_pending;
-  v_a_state.preparing := v_row.attacker_preparing;
-  v_a_state.preparing_ability_nom := v_row.attacker_preparing_ability_nom;
-  v_a_state.double_turn_pending := v_row.attacker_double_turn_pending;
-  v_a_state.prevention_expires := v_row.attacker_prevention_expires;
-  v_a_state.heal_dot_until_awake := v_row.attacker_heal_dot_until_awake;
-  v_a_state.keep_going_ability_nom := v_row.attacker_keep_going_ability_nom;
-  v_a_state.keep_going_remaining := v_row.attacker_keep_going_remaining;
-  v_a_state.keep_going_count := v_row.attacker_keep_going_count;
-  v_a_state.talent_state := COALESCE(v_row.attacker_talent_state, '[]'::jsonb);
-
-  v_d_state.hp := v_row.defender_hp;
-  v_d_state.max_hp := v_challenge.max_hp;
-  v_d_state.status := v_row.defender_status;
-  v_d_state.damage_mods := v_row.defender_damage_mods;
-  v_d_state.precision_mods := v_row.defender_precision_mods;
-  v_d_state.heal_dot_amount := v_row.defender_heal_dot_amount;
-  v_d_state.heal_dot_expires := v_row.defender_heal_dot_expires;
-  v_d_state.heal_disabled_expires := v_row.defender_heal_disabled_expires;
-  v_d_state.invulnerable := v_row.defender_invulnerable;
-  v_d_state.invuln_granted_round := v_row.defender_invuln_granted_round;
-  v_d_state.stat_mod_uses := v_row.defender_stat_mod_uses;
-  v_d_state.used_ability := v_row.defender_used_ability;
-  v_d_state.took_damage := v_row.defender_took_damage;
-  v_d_state.skip_pending := v_row.defender_skip_pending;
-  v_d_state.preparing := v_row.defender_preparing;
-  v_d_state.preparing_ability_nom := v_row.defender_preparing_ability_nom;
-  v_d_state.double_turn_pending := v_row.defender_double_turn_pending;
-  v_d_state.prevention_expires := v_row.defender_prevention_expires;
-  v_d_state.heal_dot_until_awake := v_row.defender_heal_dot_until_awake;
-  v_d_state.keep_going_ability_nom := v_row.defender_keep_going_ability_nom;
-  v_d_state.keep_going_remaining := v_row.defender_keep_going_remaining;
-  v_d_state.keep_going_count := v_row.defender_keep_going_count;
-  v_d_state.talent_state := COALESCE(v_row.defender_talent_state, '[]'::jsonb);
-
-  SELECT turn_effect, repeat_max_iterations, heal_type, heal_amount, heal_percent, status_reversed,
-         recoil_type, recoil_min, recoil_max, recoil_percent, invulnerable_next_turn,
-         bonus_damage_type, bonus_damage_multiplier, bonus_damage_flat, bonus_damage_min, bonus_damage_max,
-         bonus_damage_condition, bonus_damage_condition_dice_value, bonus_damage_status_filter,
-         stat_mod_target, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
-         stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
-         heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
-         stat_mod_type_filter, prevention_duration_turns,
-         keep_going_turns, keep_going_until_fail, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
-         heal_dot_until_awake, ignore_status_block,
-         weather_id, weather_chance, stat_mod_weather_condition, stat_mod_weather_id
-    INTO v_a_ability_cfg.turn_effect, v_a_ability_cfg.repeat_max, v_a_ability_cfg.heal_type, v_a_ability_cfg.heal_amount, v_a_ability_cfg.heal_percent, v_a_ability_cfg.status_reversed,
-         v_a_ability_cfg.recoil_type, v_a_ability_cfg.recoil_min, v_a_ability_cfg.recoil_max, v_a_ability_cfg.recoil_percent, v_a_ability_cfg.invuln_grant,
-         v_a_ability_cfg.bonus_type, v_a_ability_cfg.bonus_multiplier, v_a_ability_cfg.bonus_flat, v_a_ability_cfg.bonus_min, v_a_ability_cfg.bonus_max,
-         v_a_ability_cfg.bonus_condition, v_a_ability_cfg.bonus_dice_value, v_a_ability_cfg.bonus_status_filter,
-         v_a_ability_cfg.stat_mod_target, v_a_ability_cfg.stat_mod_stat, v_a_ability_cfg.stat_mod_value_type, v_a_ability_cfg.stat_mod_flat, v_a_ability_cfg.stat_mod_min, v_a_ability_cfg.stat_mod_max, v_a_ability_cfg.stat_mod_percent,
-         v_a_ability_cfg.stat_mod_duration_type, v_a_ability_cfg.stat_mod_duration_turns, v_a_ability_cfg.stat_mod_max_uses,
-         v_a_ability_cfg.heal_dot_config_amount, v_a_ability_cfg.heal_dot_config_turns, v_a_ability_cfg.heal_dot_config_type, v_a_ability_cfg.heal_dot_config_percent, v_a_ability_cfg.cancel_heal_duration, v_a_ability_cfg.percent_hp_damage_percent,
-         v_a_ability_cfg.stat_mod_type_filter, v_a_ability_cfg.prevention_duration,
-         v_a_ability_cfg.keep_going_turns, v_a_ability_cfg.keep_going_until_fail, v_a_ability_cfg.keep_going_bonus_type, v_a_ability_cfg.keep_going_bonus_flat, v_a_ability_cfg.keep_going_bonus_percent,
-         v_a_ability_cfg.heal_dot_until_awake, v_a_ability_cfg.ignore_status_block,
-         v_a_ability_cfg.weather_id, v_a_ability_cfg.weather_chance,
-         v_a_ability_cfg.stat_mod_weather_condition, v_a_ability_cfg.stat_mod_weather_id
-    FROM autobattle_ability_rules WHERE attack_nom = v_effective_a_ability_nom;
-  v_a_ability_cfg.status_reversed := COALESCE(v_a_ability_cfg.status_reversed, false);
-  v_a_ability_cfg.invuln_grant := COALESCE(v_a_ability_cfg.invuln_grant, false);
-  v_a_ability_cfg.ability_nom := v_effective_a_ability_nom;
-  v_a_ability_cfg.base_damage := v_a_damage;
-  v_a_ability_cfg.damage_species_xp := v_a_damage_species_xp;
-  v_a_ability_cfg.type_bonus := v_a_type_bonus;
-  v_a_ability_cfg.precision := v_ability.precision;
-  v_a_ability_cfg.degats_de := v_ability.degats_de;
-  v_a_ability_cfg.deals_damage := v_ability.deals_damage;
-  v_a_ability_cfg.status_effect := v_ability.status_effect;
-  v_a_ability_cfg.status_chance := v_ability.status_chance;
-  v_a_ability_cfg.ability_type := v_ability.type;
-
-  SELECT turn_effect, repeat_max_iterations, heal_type, heal_amount, heal_percent, status_reversed,
-         recoil_type, recoil_min, recoil_max, recoil_percent, invulnerable_next_turn,
-         bonus_damage_type, bonus_damage_multiplier, bonus_damage_flat, bonus_damage_min, bonus_damage_max,
-         bonus_damage_condition, bonus_damage_condition_dice_value, bonus_damage_status_filter,
-         stat_mod_target, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
-         stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
-         heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
-         stat_mod_type_filter, prevention_duration_turns,
-         keep_going_turns, keep_going_until_fail, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
-         heal_dot_until_awake, ignore_status_block,
-         weather_id, weather_chance, stat_mod_weather_condition, stat_mod_weather_id
-    INTO v_d_ability_cfg.turn_effect, v_d_ability_cfg.repeat_max, v_d_ability_cfg.heal_type, v_d_ability_cfg.heal_amount, v_d_ability_cfg.heal_percent, v_d_ability_cfg.status_reversed,
-         v_d_ability_cfg.recoil_type, v_d_ability_cfg.recoil_min, v_d_ability_cfg.recoil_max, v_d_ability_cfg.recoil_percent, v_d_ability_cfg.invuln_grant,
-         v_d_ability_cfg.bonus_type, v_d_ability_cfg.bonus_multiplier, v_d_ability_cfg.bonus_flat, v_d_ability_cfg.bonus_min, v_d_ability_cfg.bonus_max,
-         v_d_ability_cfg.bonus_condition, v_d_ability_cfg.bonus_dice_value, v_d_ability_cfg.bonus_status_filter,
-         v_d_ability_cfg.stat_mod_target, v_d_ability_cfg.stat_mod_stat, v_d_ability_cfg.stat_mod_value_type, v_d_ability_cfg.stat_mod_flat, v_d_ability_cfg.stat_mod_min, v_d_ability_cfg.stat_mod_max, v_d_ability_cfg.stat_mod_percent,
-         v_d_ability_cfg.stat_mod_duration_type, v_d_ability_cfg.stat_mod_duration_turns, v_d_ability_cfg.stat_mod_max_uses,
-         v_d_ability_cfg.heal_dot_config_amount, v_d_ability_cfg.heal_dot_config_turns, v_d_ability_cfg.heal_dot_config_type, v_d_ability_cfg.heal_dot_config_percent, v_d_ability_cfg.cancel_heal_duration, v_d_ability_cfg.percent_hp_damage_percent,
-         v_d_ability_cfg.stat_mod_type_filter, v_d_ability_cfg.prevention_duration,
-         v_d_ability_cfg.keep_going_turns, v_d_ability_cfg.keep_going_until_fail, v_d_ability_cfg.keep_going_bonus_type, v_d_ability_cfg.keep_going_bonus_flat, v_d_ability_cfg.keep_going_bonus_percent,
-         v_d_ability_cfg.heal_dot_until_awake, v_d_ability_cfg.ignore_status_block,
-         v_d_ability_cfg.weather_id, v_d_ability_cfg.weather_chance,
-         v_d_ability_cfg.stat_mod_weather_condition, v_d_ability_cfg.stat_mod_weather_id
-    FROM autobattle_ability_rules WHERE attack_nom = v_d_ability_nom_round;
-  v_d_ability_cfg.status_reversed := COALESCE(v_d_ability_cfg.status_reversed, false);
-  v_d_ability_cfg.invuln_grant := COALESCE(v_d_ability_cfg.invuln_grant, false);
-  v_d_ability_cfg.ability_nom := v_d_ability_nom_round;
-  v_d_ability_cfg.base_damage := v_d_damage;
-  v_d_ability_cfg.damage_species_xp := v_d_damage_species_xp;
-  v_d_ability_cfg.type_bonus := v_d_type_bonus;
-  v_d_ability_cfg.precision := v_d_ability.precision;
-  v_d_ability_cfg.degats_de := v_d_ability.degats_de;
-  v_d_ability_cfg.deals_damage := v_d_ability.deals_damage;
-  v_d_ability_cfg.status_effect := v_d_ability.status_effect;
-  v_d_ability_cfg.status_chance := v_d_ability.status_chance;
-  v_d_ability_cfg.ability_type := v_d_ability.type;
-
-  v_round_result := autobattle_resolve_round_core(
-    v_row.turn_no, v_row.round_no,
-    CASE WHEN v_row.first_attacker = 'attacker' THEN 'player' ELSE 'opponent' END,
-    v_a_state, v_d_state, v_a_ability_cfg, v_d_ability_cfg, v_precision_enabled,
-    -- Talents d'espèce : celle du pokémon de l'attaquant, et celle FIGÉE sur le
-    -- défi pour le défenseur (pvp_challenges.pokemon_nom, pas une ligne
-    -- player_pokemon vivante). _vs : filtre 'cancel_talents', à repasser à
-    -- CHAQUE round puisque les listes sont re-résolues ici.
-    autobattle_talents_vs(v_pp.pokemon_nom, v_challenge.pokemon_nom, v_talents_enabled),
-    autobattle_talents_vs(v_challenge.pokemon_nom, v_pp.pokemon_nom, v_talents_enabled),
-    -- Météo : id persisté sur la ligne de combat, bascule du mode, et types
-    -- d'espèce des deux camps (le PvP n'a jamais géré le talent 'transform',
-    -- les types sont donc ceux des espèces telles quelles).
-    v_row.weather_id, v_weather_enabled, v_a_species.type, v_d_species.type
-  );
-
-  -- Voir autobattle_resolve_manual_round : un round peut se terminer avant que
-  -- le défenseur n'ait joué (action supplémentaire côté attaquant), sa
-  -- séquence de capacités ne doit alors pas avancer.
-  IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_round_result.turns) t WHERE t ->> 'attacker' = 'opponent') THEN
-    v_d_ability_cycle_index := v_row.defender_ability_cycle_index;
-  END IF;
-
-  v_result := jsonb_build_object(
-    'status', 'ok',
-    'turn_no', v_round_result.turn_no,
-    -- Celui du PROCHAIN round : un camp ayant gagné une action supplémentaire
-    -- reprend la main dès son début (voir next_first_attacker).
-    'first_attacker', COALESCE(v_round_result.next_first_attacker, CASE WHEN v_row.first_attacker = 'attacker' THEN 'player' ELSE 'opponent' END),
-    'player_hp', GREATEST(0, (v_round_result.player_state).hp),
-    'player_max_hp', v_row.attacker_max_hp,
-    'opponent_hp', GREATEST(0, (v_round_result.opponent_state).hp),
-    'opponent_max_hp', v_challenge.max_hp,
-    'player_damage_per_hit', v_a_damage,
-    'opponent_damage_per_hit', v_d_damage,
-    'player_type_bonus', v_a_type_bonus,
-    'opponent_type_bonus', v_d_type_bonus,
-    'turns', v_round_result.turns,
-    'outcome', v_round_result.outcome,
-    'opponent_pokemon_nom', v_challenge.pokemon_nom,
-    'opponent_ability_nom', v_d_ability_nom_round,
-    'player_ability_nom', v_effective_a_ability_nom,
-    -- Capacité imposée au joueur au PROCHAIN tour (préparation, tour passé
-    -- imposé, ou chaîne "Continue sur sa lancée") — voir le même champ dans
-    -- autobattle_resolve_manual_round, le client verrouille sa grille dessus.
-    'player_forced_ability_nom', CASE
-      WHEN v_round_result.outcome IS NOT NULL THEN NULL
-      -- Voir autobattle_resolve_manual_round : capacité soumise mais jamais
-      -- jouée (le défenseur a ouvert le round et gagné une action
-      -- supplémentaire), réimposée au round suivant.
-      WHEN NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_round_result.turns) t WHERE t ->> 'attacker' = 'player')
-        THEN v_effective_a_ability_nom
-      WHEN (v_round_result.player_state).preparing THEN (v_round_result.player_state).preparing_ability_nom
-      WHEN (v_round_result.player_state).skip_pending THEN v_effective_a_ability_nom
-      WHEN (v_round_result.player_state).keep_going_ability_nom IS NOT NULL THEN (v_round_result.player_state).keep_going_ability_nom
-      ELSE NULL END
-  );
-
-  IF v_round_result.outcome IS NULL THEN
-    UPDATE pvp_battles SET
-      turn_no = v_round_result.turn_no, round_no = v_round_result.round_no,
-      attacker_hp = (v_round_result.player_state).hp, defender_hp = (v_round_result.opponent_state).hp,
-      attacker_status = (v_round_result.player_state).status, defender_status = (v_round_result.opponent_state).status,
-      attacker_damage_mods = (v_round_result.player_state).damage_mods, attacker_precision_mods = (v_round_result.player_state).precision_mods,
-      defender_damage_mods = (v_round_result.opponent_state).damage_mods, defender_precision_mods = (v_round_result.opponent_state).precision_mods,
-      attacker_heal_dot_amount = (v_round_result.player_state).heal_dot_amount, attacker_heal_dot_expires = (v_round_result.player_state).heal_dot_expires,
-      defender_heal_dot_amount = (v_round_result.opponent_state).heal_dot_amount, defender_heal_dot_expires = (v_round_result.opponent_state).heal_dot_expires,
-      attacker_heal_disabled_expires = (v_round_result.player_state).heal_disabled_expires, defender_heal_disabled_expires = (v_round_result.opponent_state).heal_disabled_expires,
-      attacker_invulnerable = (v_round_result.player_state).invulnerable, attacker_invuln_granted_round = (v_round_result.player_state).invuln_granted_round,
-      defender_invulnerable = (v_round_result.opponent_state).invulnerable, defender_invuln_granted_round = (v_round_result.opponent_state).invuln_granted_round,
-      attacker_used_ability = (v_round_result.player_state).used_ability, attacker_took_damage = (v_round_result.player_state).took_damage,
-      defender_used_ability = (v_round_result.opponent_state).used_ability, defender_took_damage = (v_round_result.opponent_state).took_damage,
-      attacker_skip_pending = (v_round_result.player_state).skip_pending, defender_skip_pending = (v_round_result.opponent_state).skip_pending,
-      attacker_preparing = (v_round_result.player_state).preparing, defender_preparing = (v_round_result.opponent_state).preparing,
-      attacker_preparing_ability_nom = (v_round_result.player_state).preparing_ability_nom, defender_preparing_ability_nom = (v_round_result.opponent_state).preparing_ability_nom,
-      attacker_double_turn_pending = (v_round_result.player_state).double_turn_pending, defender_double_turn_pending = (v_round_result.opponent_state).double_turn_pending,
-      attacker_prevention_expires = (v_round_result.player_state).prevention_expires, defender_prevention_expires = (v_round_result.opponent_state).prevention_expires,
-      attacker_heal_dot_until_awake = COALESCE((v_round_result.player_state).heal_dot_until_awake, false), defender_heal_dot_until_awake = COALESCE((v_round_result.opponent_state).heal_dot_until_awake, false),
-      attacker_keep_going_ability_nom = (v_round_result.player_state).keep_going_ability_nom, defender_keep_going_ability_nom = (v_round_result.opponent_state).keep_going_ability_nom,
-      attacker_keep_going_remaining = COALESCE((v_round_result.player_state).keep_going_remaining, 0), defender_keep_going_remaining = COALESCE((v_round_result.opponent_state).keep_going_remaining, 0),
-      attacker_keep_going_count = COALESCE((v_round_result.player_state).keep_going_count, 0), defender_keep_going_count = COALESCE((v_round_result.opponent_state).keep_going_count, 0),
-      attacker_talent_state = COALESCE((v_round_result.player_state).talent_state, '[]'::jsonb), defender_talent_state = COALESCE((v_round_result.opponent_state).talent_state, '[]'::jsonb),
-      -- Le camp qui a gagné une action supplémentaire reprend la main au début
-      -- du round suivant (voir autobattle_round_result.next_first_attacker).
-      first_attacker = CASE WHEN COALESCE(v_round_result.next_first_attacker, 'player') = 'player' THEN 'attacker' ELSE 'defender' END,
-      defender_ability_cycle_index = v_d_ability_cycle_index,
-      attacker_stat_mod_uses = (v_round_result.player_state).stat_mod_uses, defender_stat_mod_uses = (v_round_result.opponent_state).stat_mod_uses,
-      weather_id = v_round_result.weather_id,
-      turn_log = turn_log || v_round_result.turns, last_idempotency_key = p_idempotency_key, last_result = v_result
-    WHERE id = v_row.id;
-  ELSE
-    UPDATE pvp_battles SET
-      turn_no = v_round_result.turn_no, round_no = v_round_result.round_no,
-      attacker_hp = (v_round_result.player_state).hp, defender_hp = (v_round_result.opponent_state).hp,
-      defender_ability_cycle_index = v_d_ability_cycle_index,
-      outcome = v_round_result.outcome, turn_log = turn_log || v_round_result.turns,
-      last_idempotency_key = p_idempotency_key, last_result = v_result
-    WHERE id = v_row.id;
-
-    INSERT INTO pvp_challenge_attempts (
-      challenge_id, defender_player_id, attacker_player_id, attacker_player_pokemon_id, attacker_pokemon_nom,
-      outcome, duration_turns, defender_hp_remaining, idempotency_key
-    ) VALUES (
-      p_challenge_id, v_challenge.defender_player_id, p_attacker_player_id, p_attacker_player_pokemon_id, v_pp.pokemon_nom,
-      v_round_result.outcome,
-      -- Jeu au tour par tour : compte les TOURS plutôt que le temps réel
-      -- écoulé (voir commentaire de pvp_challenge_attempts). round_no avance
-      -- de 1 à chaque nouveau segment de tour (un par camp, jamais au milieu
-      -- d'une rafale, voir autobattle_resolve_round_core) — un round complet
-      -- (attaquant + défenseur) en avance donc toujours 2, sauf si le combat
-      -- se termine PENDANT le tout premier segment d'un round (K.O. dès la
-      -- capacité de l'attaquant, avant même que le défenseur n'agisse), d'où
-      -- l'arrondi supérieur plutôt qu'une simple division entière.
-      CASE WHEN v_round_result.outcome = 'win' THEN GREATEST(1, CEIL(v_round_result.round_no / 2.0)::integer) ELSE NULL END,
-      CASE WHEN v_round_result.outcome = 'lose' THEN GREATEST(0, (v_round_result.opponent_state).hp) ELSE NULL END,
-      p_idempotency_key
-    );
-
-    -- Le Champion vient de tomber : le remplace par le défi régulier déjà
-    -- posé par l'attaquant (précondition vérifiée par pvp_start_battle, voir
-    -- son commentaire) — voir pvp_promote_to_champion pour le détail (nouvelle
-    -- ligne pour le nouveau Champion, tableau des scores vierge, "Champion
-    -- depuis" = maintenant ; l'ANCIEN Champion redevient un Challenger normal,
-    -- il n'est jamais retiré — voir requirement dédié). Si ce défi a
-    -- entretemps disparu (retiré pendant le combat, cas limite), le Champion
-    -- est simplement dépossédé sans successeur automatique (même bascule
-    -- is_champion = false, redevient Challenger) — un admin peut toujours en
-    -- nommer un nouveau depuis AdminPvpPanel.
-    IF v_round_result.outcome = 'win' AND v_challenge.is_champion THEN
-      SELECT id INTO v_challenger_source_id FROM pvp_challenges
-        WHERE defender_player_id = p_attacker_player_id AND active = true AND is_champion = false
-        ORDER BY created_at DESC LIMIT 1;
-      IF v_challenger_source_id IS NOT NULL THEN
-        PERFORM pvp_promote_to_champion(v_challenger_source_id);
-      ELSE
-        UPDATE pvp_challenges SET is_champion = false WHERE id = p_challenge_id;
-      END IF;
-    END IF;
-  END IF;
-
-  RETURN v_result;
-END;
-$$;
-
-GRANT EXECUTE ON FUNCTION pvp_resolve_round(bigint, bigint, bigint, text, uuid) TO anon, authenticated;
-
 
 -- Démarre (ou redémarre — une tentative précédente est toujours écrasée,
 -- voir DELETE ci-dessous) un combat d'essai pour la boucle p_ability_noms
@@ -4230,10 +2473,6 @@ DECLARE
   v_d_status        text;
   v_talent_inflict  text;
   v_side            text;
-  -- Météo — voir autobattle_start_manual_battle, même mécanique. La bascule est
-  -- lue sur v_config, déjà chargé (comme talents_enabled juste en dessous).
-  v_weather         jsonb;
-  v_weather_res     jsonb;
 BEGIN
   SELECT * INTO v_config FROM pvp_config WHERE id = 1;
 
@@ -4274,10 +2513,9 @@ BEGIN
   -- Même conversion que pvp_start_battle : la colonne garde 'attacker'/
   -- 'defender', le JSON client parle 'player'/'opponent'.
   -- Bascule globale des talents (voir pvp_config.talents_enabled) : v_config est
-  -- déjà chargé ici, pas besoin d'un SELECT dédié. _vs : filtre 'cancel_talents'
-  -- (voir autobattle_talents_effective).
-  v_a_talents := autobattle_talents_vs(v_pp.pokemon_nom, v_config.trial_pokemon_nom, COALESCE(v_config.talents_enabled, true));
-  v_d_talents := autobattle_talents_vs(v_config.trial_pokemon_nom, v_pp.pokemon_nom, COALESCE(v_config.talents_enabled, true));
+  -- déjà chargé ici, pas besoin d'un SELECT dédié.
+  v_a_talents := autobattle_talents_for(v_pp.pokemon_nom, COALESCE(v_config.talents_enabled, true));
+  v_d_talents := autobattle_talents_for(v_config.trial_pokemon_nom, COALESCE(v_config.talents_enabled, true));
 
   v_talent_start := autobattle_talent_open(v_a_talents, 'player', v_attacker_max_hp);
   v_start_turns := v_start_turns || (v_talent_start -> 'turns');
@@ -4292,13 +2530,9 @@ BEGIN
   FOREACH v_side IN ARRAY (CASE WHEN v_first_attacker = 'attacker' THEN ARRAY['player', 'opponent'] ELSE ARRAY['opponent', 'player'] END) LOOP
     IF v_side = 'player' THEN
       v_talent_res := autobattle_talent_act(v_a_talents, v_a_talent_state, 'player', 'battle_start', NULL,
-        v_attacker_max_hp, v_attacker_max_hp, v_d_status, v_a_status, v_d_talents, 0, v_weather);
+        v_attacker_max_hp, v_attacker_max_hp, v_d_status, v_a_status, v_d_talents, 0);
       v_a_talent_state := v_talent_res -> 'state';
       v_start_turns := v_start_turns || (v_talent_res -> 'turns');
-      -- Météo « à l'entrée en combat » : persistée sur la ligne d'essai.
-      v_weather_res := autobattle_weather_set((v_talent_res ->> 'set_weather')::bigint, COALESCE(v_config.weather_enabled, true), v_weather, 'player', v_attacker_max_hp, 0);
-      v_weather := autobattle_weather_norm(v_weather_res -> 'weather');
-      v_start_turns := v_start_turns || (v_weather_res -> 'turns');
       v_talent_inflict := v_talent_res ->> 'inflict_status';
       IF v_talent_inflict IS NOT NULL THEN
         v_talent_res := autobattle_talent_status_guard(v_d_talents, v_d_talent_state, 'opponent', v_talent_inflict, v_dummy_hp, 0);
@@ -4310,13 +2544,9 @@ BEGIN
       END IF;
     ELSE
       v_talent_res := autobattle_talent_act(v_d_talents, v_d_talent_state, 'opponent', 'battle_start', NULL,
-        v_dummy_hp, v_dummy_hp, v_a_status, v_d_status, v_a_talents, 0, v_weather);
+        v_dummy_hp, v_dummy_hp, v_a_status, v_d_status, v_a_talents, 0);
       v_d_talent_state := v_talent_res -> 'state';
       v_start_turns := v_start_turns || (v_talent_res -> 'turns');
-      -- Voir le même commentaire côté attaquant.
-      v_weather_res := autobattle_weather_set((v_talent_res ->> 'set_weather')::bigint, COALESCE(v_config.weather_enabled, true), v_weather, 'opponent', v_dummy_hp, 0);
-      v_weather := autobattle_weather_norm(v_weather_res -> 'weather');
-      v_start_turns := v_start_turns || (v_weather_res -> 'turns');
       v_talent_inflict := v_talent_res ->> 'inflict_status';
       IF v_talent_inflict IS NOT NULL THEN
         v_talent_res := autobattle_talent_status_guard(v_a_talents, v_a_talent_state, 'player', v_talent_inflict, v_attacker_max_hp, 0);
@@ -4346,15 +2576,13 @@ BEGIN
     dummy_pokemon_nom, dummy_max_hp, dummy_ability_nom,
     first_attacker, attacker_hp, attacker_max_hp, defender_hp, defender_max_hp,
     started_at, last_idempotency_key, last_result,
-    turn_log, attacker_talent_state, defender_talent_state, attacker_status, defender_status,
-    weather_id
+    turn_log, attacker_talent_state, defender_talent_state, attacker_status, defender_status
   ) VALUES (
     p_player_id, p_player_pokemon_id, p_ability_noms,
     v_config.trial_pokemon_nom, v_dummy_hp, v_config.trial_ability_nom,
     v_first_attacker, v_attacker_max_hp, v_attacker_max_hp, v_dummy_hp, v_dummy_hp,
     now(), p_idempotency_key, v_result,
-    v_start_turns, v_a_talent_state, v_d_talent_state, v_a_status, v_d_status,
-    autobattle_weather_id(v_weather)
+    v_start_turns, v_a_talent_state, v_d_talent_state, v_a_status, v_d_status
   );
 
   RETURN v_result;
@@ -4362,317 +2590,3 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION pvp_trial_start(bigint, bigint, text[], boolean, uuid) TO anon, authenticated;
-
-
--- Résout UN SEUL round d'un combat d'essai (voir pvp_trial_start) : contrairement
--- à pvp_resolve_round, AUCUNE capacité n'est choisie interactivement — les
--- deux camps cyclent automatiquement (l'attaquant à travers sa boucle en
--- cours de test, le pantin à travers sa capacité unique) — voir
--- PvpTrialBattleScreen, qui rappelle cette fonction en boucle jusqu'à l'issue
--- sans jamais attendre d'action du joueur.
-CREATE OR REPLACE FUNCTION pvp_trial_resolve_round(
-  p_player_id bigint,
-  p_idempotency_key uuid
-)
-RETURNS jsonb
-LANGUAGE plpgsql
-AS $$
-DECLARE
-  v_row                    pvp_trial_battles%ROWTYPE;
-  v_pp                     record;
-  v_a_species              record;
-  v_ability                record;
-  v_d_species              record;
-  v_d_ability              record;
-  v_precision_enabled      boolean;
-  v_talents_enabled        boolean;
-  v_weather_enabled        boolean;
-  v_a_type_bonus           boolean;
-  v_d_type_bonus           boolean;
-  v_a_damage               integer;
-  v_d_damage               integer;
-  v_a_damage_species_xp    integer;
-  v_a_ability_cycle_index  integer;
-  v_a_ability_nom_round    text;
-  v_a_state                autobattle_combatant_state;
-  v_d_state                autobattle_combatant_state;
-  v_a_ability_cfg          autobattle_combatant_ability;
-  v_d_ability_cfg          autobattle_combatant_ability;
-  v_round_result           autobattle_round_result;
-  v_result                 jsonb;
-BEGIN
-  SELECT * INTO v_row FROM pvp_trial_battles WHERE player_id = p_player_id FOR UPDATE;
-  IF v_row.id IS NULL THEN
-    RETURN jsonb_build_object('status', 'not_started');
-  END IF;
-
-  IF v_row.last_idempotency_key = p_idempotency_key OR v_row.outcome IS NOT NULL THEN
-    RETURN v_row.last_result;
-  END IF;
-
-  SELECT * INTO v_pp FROM player_pokemon WHERE id = v_row.player_pokemon_id;
-  IF v_pp IS NULL THEN
-    RETURN jsonb_build_object('status', 'ineligible_pokemon');
-  END IF;
-  SELECT * INTO v_a_species FROM pokemon WHERE nom = v_pp.pokemon_nom;
-  SELECT * INTO v_d_species FROM pokemon WHERE nom = v_row.dummy_pokemon_nom;
-  IF v_a_species IS NULL OR v_d_species IS NULL THEN
-    RETURN jsonb_build_object('status', 'not_found');
-  END IF;
-
-  -- Capacité attaquant ce round : boucle automatique (comme le défenseur en
-  -- PvP normal, voir pvp_resolve_round) — jamais choisie interactivement ici.
-  IF v_row.attacker_preparing THEN
-    v_a_ability_nom_round := v_row.attacker_preparing_ability_nom;
-    v_a_ability_cycle_index := v_row.attacker_ability_cycle_index;
-  ELSIF v_row.attacker_keep_going_ability_nom IS NOT NULL THEN
-    v_a_ability_nom_round := v_row.attacker_keep_going_ability_nom;
-    v_a_ability_cycle_index := v_row.attacker_ability_cycle_index;
-  ELSE
-    v_a_ability_cycle_index := v_row.attacker_ability_cycle_index + 1;
-    v_a_ability_nom_round := v_row.attacker_ability_noms[1 + ((v_a_ability_cycle_index - 1) % array_length(v_row.attacker_ability_noms, 1))];
-  END IF;
-  SELECT * INTO v_ability FROM attacks WHERE nom = v_a_ability_nom_round;
-  IF v_ability IS NULL THEN
-    RETURN jsonb_build_object('status', 'ineligible_ability');
-  END IF;
-
-  -- Capacité du pantin : toujours la même (dummy_ability_nom), aucune boucle
-  -- nécessaire — même en cas de 'prepare_release'/'skip', la mémorisation
-  -- (defender_preparing_ability_nom) retombe de toute façon sur cette seule
-  -- capacité.
-  SELECT * INTO v_d_ability FROM attacks WHERE nom = v_row.dummy_ability_nom;
-  IF v_d_ability IS NULL THEN
-    RETURN jsonb_build_object('status', 'not_found');
-  END IF;
-
-  v_a_type_bonus := EXISTS (
-    SELECT 1 FROM (VALUES
-      (v_a_species.super_efficace_1), (v_a_species.super_efficace_2),
-      (v_a_species.super_efficace_3), (v_a_species.super_efficace_4)
-    ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_d_species.type))
-  ) AND lower(trim(v_ability.type)) = lower(trim(v_a_species.type));
-  v_a_damage_species_xp := COALESCE(v_a_species.degats_base, 0) + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'DMG');
-  v_a_damage := v_a_damage_species_xp * (CASE WHEN v_a_type_bonus THEN 2 ELSE 1 END) + COALESCE(v_ability.degats_base, 0);
-
-  -- Le pantin n'a pas de "dégâts d'espèce+XP" (n'existe dans aucun roster,
-  -- pas de progression) : ses dégâts viennent UNIQUEMENT de la capacité
-  -- choisie par l'admin (censée être "anodine") — voir pvp_config.trial_ability_nom.
-  v_d_type_bonus := EXISTS (
-    SELECT 1 FROM (VALUES
-      (v_d_species.super_efficace_1), (v_d_species.super_efficace_2),
-      (v_d_species.super_efficace_3), (v_d_species.super_efficace_4)
-    ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_a_species.type))
-  ) AND lower(trim(v_d_ability.type)) = lower(trim(v_d_species.type));
-  v_d_damage := (CASE WHEN v_d_type_bonus THEN 2 ELSE 1 END) * 0 + COALESCE(v_d_ability.degats_base, 0);
-
-  SELECT precision_enabled, talents_enabled, weather_enabled
-    INTO v_precision_enabled, v_talents_enabled, v_weather_enabled FROM pvp_config WHERE id = 1;
-  v_precision_enabled := COALESCE(v_precision_enabled, true);
-  v_talents_enabled := COALESCE(v_talents_enabled, true);
-  v_weather_enabled := COALESCE(v_weather_enabled, true);
-
-  v_a_state.hp := v_row.attacker_hp;
-  v_a_state.max_hp := v_row.attacker_max_hp;
-  v_a_state.status := v_row.attacker_status;
-  v_a_state.damage_mods := v_row.attacker_damage_mods;
-  v_a_state.precision_mods := v_row.attacker_precision_mods;
-  v_a_state.heal_dot_amount := v_row.attacker_heal_dot_amount;
-  v_a_state.heal_dot_expires := v_row.attacker_heal_dot_expires;
-  v_a_state.heal_disabled_expires := v_row.attacker_heal_disabled_expires;
-  v_a_state.invulnerable := v_row.attacker_invulnerable;
-  v_a_state.invuln_granted_round := v_row.attacker_invuln_granted_round;
-  v_a_state.stat_mod_uses := v_row.attacker_stat_mod_uses;
-  v_a_state.used_ability := v_row.attacker_used_ability;
-  v_a_state.took_damage := v_row.attacker_took_damage;
-  v_a_state.skip_pending := v_row.attacker_skip_pending;
-  v_a_state.preparing := v_row.attacker_preparing;
-  v_a_state.preparing_ability_nom := v_row.attacker_preparing_ability_nom;
-  v_a_state.double_turn_pending := v_row.attacker_double_turn_pending;
-  v_a_state.prevention_expires := v_row.attacker_prevention_expires;
-  v_a_state.heal_dot_until_awake := v_row.attacker_heal_dot_until_awake;
-  v_a_state.keep_going_ability_nom := v_row.attacker_keep_going_ability_nom;
-  v_a_state.keep_going_remaining := v_row.attacker_keep_going_remaining;
-  v_a_state.keep_going_count := v_row.attacker_keep_going_count;
-  v_a_state.talent_state := COALESCE(v_row.attacker_talent_state, '[]'::jsonb);
-
-  v_d_state.hp := v_row.defender_hp;
-  v_d_state.max_hp := v_row.dummy_max_hp;
-  v_d_state.status := v_row.defender_status;
-  v_d_state.damage_mods := v_row.defender_damage_mods;
-  v_d_state.precision_mods := v_row.defender_precision_mods;
-  v_d_state.heal_dot_amount := v_row.defender_heal_dot_amount;
-  v_d_state.heal_dot_expires := v_row.defender_heal_dot_expires;
-  v_d_state.heal_disabled_expires := v_row.defender_heal_disabled_expires;
-  v_d_state.invulnerable := v_row.defender_invulnerable;
-  v_d_state.invuln_granted_round := v_row.defender_invuln_granted_round;
-  v_d_state.stat_mod_uses := v_row.defender_stat_mod_uses;
-  v_d_state.used_ability := v_row.defender_used_ability;
-  v_d_state.took_damage := v_row.defender_took_damage;
-  v_d_state.skip_pending := v_row.defender_skip_pending;
-  v_d_state.preparing := v_row.defender_preparing;
-  v_d_state.preparing_ability_nom := v_row.defender_preparing_ability_nom;
-  v_d_state.double_turn_pending := v_row.defender_double_turn_pending;
-  v_d_state.prevention_expires := v_row.defender_prevention_expires;
-  v_d_state.heal_dot_until_awake := v_row.defender_heal_dot_until_awake;
-  v_d_state.keep_going_ability_nom := v_row.defender_keep_going_ability_nom;
-  v_d_state.keep_going_remaining := v_row.defender_keep_going_remaining;
-  v_d_state.keep_going_count := v_row.defender_keep_going_count;
-  v_d_state.talent_state := COALESCE(v_row.defender_talent_state, '[]'::jsonb);
-
-  SELECT turn_effect, repeat_max_iterations, heal_type, heal_amount, heal_percent, status_reversed,
-         recoil_type, recoil_min, recoil_max, recoil_percent, invulnerable_next_turn,
-         bonus_damage_type, bonus_damage_multiplier, bonus_damage_flat, bonus_damage_min, bonus_damage_max,
-         bonus_damage_condition, bonus_damage_condition_dice_value, bonus_damage_status_filter,
-         stat_mod_target, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
-         stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
-         heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
-         stat_mod_type_filter, prevention_duration_turns,
-         keep_going_turns, keep_going_until_fail, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
-         heal_dot_until_awake, ignore_status_block,
-         weather_id, weather_chance, stat_mod_weather_condition, stat_mod_weather_id
-    INTO v_a_ability_cfg.turn_effect, v_a_ability_cfg.repeat_max, v_a_ability_cfg.heal_type, v_a_ability_cfg.heal_amount, v_a_ability_cfg.heal_percent, v_a_ability_cfg.status_reversed,
-         v_a_ability_cfg.recoil_type, v_a_ability_cfg.recoil_min, v_a_ability_cfg.recoil_max, v_a_ability_cfg.recoil_percent, v_a_ability_cfg.invuln_grant,
-         v_a_ability_cfg.bonus_type, v_a_ability_cfg.bonus_multiplier, v_a_ability_cfg.bonus_flat, v_a_ability_cfg.bonus_min, v_a_ability_cfg.bonus_max,
-         v_a_ability_cfg.bonus_condition, v_a_ability_cfg.bonus_dice_value, v_a_ability_cfg.bonus_status_filter,
-         v_a_ability_cfg.stat_mod_target, v_a_ability_cfg.stat_mod_stat, v_a_ability_cfg.stat_mod_value_type, v_a_ability_cfg.stat_mod_flat, v_a_ability_cfg.stat_mod_min, v_a_ability_cfg.stat_mod_max, v_a_ability_cfg.stat_mod_percent,
-         v_a_ability_cfg.stat_mod_duration_type, v_a_ability_cfg.stat_mod_duration_turns, v_a_ability_cfg.stat_mod_max_uses,
-         v_a_ability_cfg.heal_dot_config_amount, v_a_ability_cfg.heal_dot_config_turns, v_a_ability_cfg.heal_dot_config_type, v_a_ability_cfg.heal_dot_config_percent, v_a_ability_cfg.cancel_heal_duration, v_a_ability_cfg.percent_hp_damage_percent,
-         v_a_ability_cfg.stat_mod_type_filter, v_a_ability_cfg.prevention_duration,
-         v_a_ability_cfg.keep_going_turns, v_a_ability_cfg.keep_going_until_fail, v_a_ability_cfg.keep_going_bonus_type, v_a_ability_cfg.keep_going_bonus_flat, v_a_ability_cfg.keep_going_bonus_percent,
-         v_a_ability_cfg.heal_dot_until_awake, v_a_ability_cfg.ignore_status_block,
-         v_a_ability_cfg.weather_id, v_a_ability_cfg.weather_chance,
-         v_a_ability_cfg.stat_mod_weather_condition, v_a_ability_cfg.stat_mod_weather_id
-    FROM autobattle_ability_rules WHERE attack_nom = v_a_ability_nom_round;
-  v_a_ability_cfg.status_reversed := COALESCE(v_a_ability_cfg.status_reversed, false);
-  v_a_ability_cfg.invuln_grant := COALESCE(v_a_ability_cfg.invuln_grant, false);
-  v_a_ability_cfg.ability_nom := v_a_ability_nom_round;
-  v_a_ability_cfg.base_damage := v_a_damage;
-  v_a_ability_cfg.damage_species_xp := v_a_damage_species_xp;
-  v_a_ability_cfg.type_bonus := v_a_type_bonus;
-  v_a_ability_cfg.precision := v_ability.precision;
-  v_a_ability_cfg.degats_de := v_ability.degats_de;
-  v_a_ability_cfg.deals_damage := v_ability.deals_damage;
-  v_a_ability_cfg.status_effect := v_ability.status_effect;
-  v_a_ability_cfg.status_chance := v_ability.status_chance;
-  v_a_ability_cfg.ability_type := v_ability.type;
-
-  SELECT turn_effect, repeat_max_iterations, heal_type, heal_amount, heal_percent, status_reversed,
-         recoil_type, recoil_min, recoil_max, recoil_percent, invulnerable_next_turn,
-         bonus_damage_type, bonus_damage_multiplier, bonus_damage_flat, bonus_damage_min, bonus_damage_max,
-         bonus_damage_condition, bonus_damage_condition_dice_value, bonus_damage_status_filter,
-         stat_mod_target, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
-         stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
-         heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
-         stat_mod_type_filter, prevention_duration_turns,
-         keep_going_turns, keep_going_until_fail, keep_going_bonus_type, keep_going_bonus_flat, keep_going_bonus_percent,
-         heal_dot_until_awake, ignore_status_block,
-         weather_id, weather_chance, stat_mod_weather_condition, stat_mod_weather_id
-    INTO v_d_ability_cfg.turn_effect, v_d_ability_cfg.repeat_max, v_d_ability_cfg.heal_type, v_d_ability_cfg.heal_amount, v_d_ability_cfg.heal_percent, v_d_ability_cfg.status_reversed,
-         v_d_ability_cfg.recoil_type, v_d_ability_cfg.recoil_min, v_d_ability_cfg.recoil_max, v_d_ability_cfg.recoil_percent, v_d_ability_cfg.invuln_grant,
-         v_d_ability_cfg.bonus_type, v_d_ability_cfg.bonus_multiplier, v_d_ability_cfg.bonus_flat, v_d_ability_cfg.bonus_min, v_d_ability_cfg.bonus_max,
-         v_d_ability_cfg.bonus_condition, v_d_ability_cfg.bonus_dice_value, v_d_ability_cfg.bonus_status_filter,
-         v_d_ability_cfg.stat_mod_target, v_d_ability_cfg.stat_mod_stat, v_d_ability_cfg.stat_mod_value_type, v_d_ability_cfg.stat_mod_flat, v_d_ability_cfg.stat_mod_min, v_d_ability_cfg.stat_mod_max, v_d_ability_cfg.stat_mod_percent,
-         v_d_ability_cfg.stat_mod_duration_type, v_d_ability_cfg.stat_mod_duration_turns, v_d_ability_cfg.stat_mod_max_uses,
-         v_d_ability_cfg.heal_dot_config_amount, v_d_ability_cfg.heal_dot_config_turns, v_d_ability_cfg.heal_dot_config_type, v_d_ability_cfg.heal_dot_config_percent, v_d_ability_cfg.cancel_heal_duration, v_d_ability_cfg.percent_hp_damage_percent,
-         v_d_ability_cfg.stat_mod_type_filter, v_d_ability_cfg.prevention_duration,
-         v_d_ability_cfg.keep_going_turns, v_d_ability_cfg.keep_going_until_fail, v_d_ability_cfg.keep_going_bonus_type, v_d_ability_cfg.keep_going_bonus_flat, v_d_ability_cfg.keep_going_bonus_percent,
-         v_d_ability_cfg.heal_dot_until_awake, v_d_ability_cfg.ignore_status_block,
-         v_d_ability_cfg.weather_id, v_d_ability_cfg.weather_chance,
-         v_d_ability_cfg.stat_mod_weather_condition, v_d_ability_cfg.stat_mod_weather_id
-    FROM autobattle_ability_rules WHERE attack_nom = v_row.dummy_ability_nom;
-  v_d_ability_cfg.status_reversed := COALESCE(v_d_ability_cfg.status_reversed, false);
-  v_d_ability_cfg.invuln_grant := COALESCE(v_d_ability_cfg.invuln_grant, false);
-  v_d_ability_cfg.ability_nom := v_row.dummy_ability_nom;
-  v_d_ability_cfg.base_damage := v_d_damage;
-  v_d_ability_cfg.damage_species_xp := 0;
-  v_d_ability_cfg.type_bonus := v_d_type_bonus;
-  v_d_ability_cfg.precision := v_d_ability.precision;
-  v_d_ability_cfg.degats_de := v_d_ability.degats_de;
-  v_d_ability_cfg.deals_damage := v_d_ability.deals_damage;
-  v_d_ability_cfg.status_effect := v_d_ability.status_effect;
-  v_d_ability_cfg.status_chance := v_d_ability.status_chance;
-  v_d_ability_cfg.ability_type := v_d_ability.type;
-
-  v_round_result := autobattle_resolve_round_core(
-    v_row.turn_no, v_row.round_no,
-    CASE WHEN v_row.first_attacker = 'attacker' THEN 'player' ELSE 'opponent' END,
-    v_a_state, v_d_state, v_a_ability_cfg, v_d_ability_cfg, v_precision_enabled,
-    -- Talents d'espèce : le pantin d'essai utilise ceux de l'espèce snapshotée
-    -- sur la ligne d'essai (pvp_trial_battles.dummy_pokemon_nom). _vs : filtre
-    -- 'cancel_talents', voir pvp_resolve_round.
-    autobattle_talents_vs(v_pp.pokemon_nom, v_row.dummy_pokemon_nom, v_talents_enabled),
-    autobattle_talents_vs(v_row.dummy_pokemon_nom, v_pp.pokemon_nom, v_talents_enabled),
-    -- Météo : voir pvp_resolve_round, même mécanique.
-    v_row.weather_id, v_weather_enabled, v_a_species.type, v_d_species.type
-  );
-
-  v_result := jsonb_build_object(
-    'status', 'ok',
-    'turn_no', v_round_result.turn_no,
-    -- Celui du PROCHAIN round : un camp ayant gagné une action supplémentaire
-    -- reprend la main dès son début (voir next_first_attacker).
-    'first_attacker', COALESCE(v_round_result.next_first_attacker, CASE WHEN v_row.first_attacker = 'attacker' THEN 'player' ELSE 'opponent' END),
-    'player_hp', GREATEST(0, (v_round_result.player_state).hp),
-    'player_max_hp', v_row.attacker_max_hp,
-    'opponent_hp', GREATEST(0, (v_round_result.opponent_state).hp),
-    'opponent_max_hp', v_row.dummy_max_hp,
-    'player_damage_per_hit', v_a_damage,
-    'opponent_damage_per_hit', v_d_damage,
-    'player_type_bonus', v_a_type_bonus,
-    'opponent_type_bonus', v_d_type_bonus,
-    'turns', v_round_result.turns,
-    'outcome', v_round_result.outcome,
-    'opponent_pokemon_nom', v_row.dummy_pokemon_nom,
-    'opponent_ability_nom', v_row.dummy_ability_nom,
-    'player_ability_nom', v_a_ability_nom_round
-  );
-
-  IF v_round_result.outcome IS NULL THEN
-    UPDATE pvp_trial_battles SET
-      turn_no = v_round_result.turn_no, round_no = v_round_result.round_no,
-      attacker_hp = (v_round_result.player_state).hp, defender_hp = (v_round_result.opponent_state).hp,
-      attacker_status = (v_round_result.player_state).status, defender_status = (v_round_result.opponent_state).status,
-      attacker_damage_mods = (v_round_result.player_state).damage_mods, attacker_precision_mods = (v_round_result.player_state).precision_mods,
-      defender_damage_mods = (v_round_result.opponent_state).damage_mods, defender_precision_mods = (v_round_result.opponent_state).precision_mods,
-      attacker_heal_dot_amount = (v_round_result.player_state).heal_dot_amount, attacker_heal_dot_expires = (v_round_result.player_state).heal_dot_expires,
-      defender_heal_dot_amount = (v_round_result.opponent_state).heal_dot_amount, defender_heal_dot_expires = (v_round_result.opponent_state).heal_dot_expires,
-      attacker_heal_disabled_expires = (v_round_result.player_state).heal_disabled_expires, defender_heal_disabled_expires = (v_round_result.opponent_state).heal_disabled_expires,
-      attacker_invulnerable = (v_round_result.player_state).invulnerable, attacker_invuln_granted_round = (v_round_result.player_state).invuln_granted_round,
-      defender_invulnerable = (v_round_result.opponent_state).invulnerable, defender_invuln_granted_round = (v_round_result.opponent_state).invuln_granted_round,
-      attacker_used_ability = (v_round_result.player_state).used_ability, attacker_took_damage = (v_round_result.player_state).took_damage,
-      defender_used_ability = (v_round_result.opponent_state).used_ability, defender_took_damage = (v_round_result.opponent_state).took_damage,
-      attacker_skip_pending = (v_round_result.player_state).skip_pending, defender_skip_pending = (v_round_result.opponent_state).skip_pending,
-      attacker_preparing = (v_round_result.player_state).preparing, defender_preparing = (v_round_result.opponent_state).preparing,
-      attacker_preparing_ability_nom = (v_round_result.player_state).preparing_ability_nom, defender_preparing_ability_nom = (v_round_result.opponent_state).preparing_ability_nom,
-      attacker_double_turn_pending = (v_round_result.player_state).double_turn_pending, defender_double_turn_pending = (v_round_result.opponent_state).double_turn_pending,
-      attacker_prevention_expires = (v_round_result.player_state).prevention_expires, defender_prevention_expires = (v_round_result.opponent_state).prevention_expires,
-      attacker_heal_dot_until_awake = COALESCE((v_round_result.player_state).heal_dot_until_awake, false), defender_heal_dot_until_awake = COALESCE((v_round_result.opponent_state).heal_dot_until_awake, false),
-      attacker_keep_going_ability_nom = (v_round_result.player_state).keep_going_ability_nom, defender_keep_going_ability_nom = (v_round_result.opponent_state).keep_going_ability_nom,
-      attacker_keep_going_remaining = COALESCE((v_round_result.player_state).keep_going_remaining, 0), defender_keep_going_remaining = COALESCE((v_round_result.opponent_state).keep_going_remaining, 0),
-      attacker_keep_going_count = COALESCE((v_round_result.player_state).keep_going_count, 0), defender_keep_going_count = COALESCE((v_round_result.opponent_state).keep_going_count, 0),
-      attacker_talent_state = COALESCE((v_round_result.player_state).talent_state, '[]'::jsonb), defender_talent_state = COALESCE((v_round_result.opponent_state).talent_state, '[]'::jsonb),
-      -- Le camp qui a gagné une action supplémentaire reprend la main au début
-      -- du round suivant (voir autobattle_round_result.next_first_attacker).
-      first_attacker = CASE WHEN COALESCE(v_round_result.next_first_attacker, 'player') = 'player' THEN 'attacker' ELSE 'defender' END,
-      attacker_ability_cycle_index = v_a_ability_cycle_index,
-      attacker_stat_mod_uses = (v_round_result.player_state).stat_mod_uses, defender_stat_mod_uses = (v_round_result.opponent_state).stat_mod_uses,
-      weather_id = v_round_result.weather_id,
-      turn_log = turn_log || v_round_result.turns, last_idempotency_key = p_idempotency_key, last_result = v_result
-    WHERE id = v_row.id;
-  ELSE
-    UPDATE pvp_trial_battles SET
-      turn_no = v_round_result.turn_no, round_no = v_round_result.round_no,
-      attacker_hp = (v_round_result.player_state).hp, defender_hp = (v_round_result.opponent_state).hp,
-      attacker_ability_cycle_index = v_a_ability_cycle_index,
-      outcome = v_round_result.outcome, turn_log = turn_log || v_round_result.turns,
-      last_idempotency_key = p_idempotency_key, last_result = v_result
-    WHERE id = v_row.id;
-  END IF;
-
-  RETURN v_result;
-END;
-$$;
-
-GRANT EXECUTE ON FUNCTION pvp_trial_resolve_round(bigint, uuid) TO anon, authenticated;
-

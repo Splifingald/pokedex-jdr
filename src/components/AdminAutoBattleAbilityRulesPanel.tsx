@@ -4,8 +4,10 @@ import type {
   AutoBattleRecoilType, AutoBattleBonusDamageType, AutoBattleBonusDamageCondition,
   AutoBattleStatModTarget, AutoBattleStatModStat, AutoBattleStatModValueType, AutoBattleStatModDurationType,
   AutoBattleStatusEffect, AutoBattleKeepGoingBonusType, AutoBattleIgnoreStatusBlock,
+  AutoBattleWeather,
 } from '../types'
 import { useAutoBattleAbilityRules } from '../hooks/useAutoBattleAbilityRules'
+import { useAutoBattleWeathers } from '../hooks/useAutoBattleWeathers'
 import { useAttacks } from '../hooks/useAttacks'
 import { MoveSearchInput } from './MoveSearchInput'
 import { NumberInput } from './NumberInput'
@@ -125,12 +127,14 @@ function EffectCategory({ label, children }: { label: string; children: React.Re
 }
 
 function AbilityRuleRow({
-  rule, attack, attackTypes, onUpdate, onRemove, rowRef, highlighted, expanded, onToggle,
+  rule, attack, attackTypes, weathers, onUpdate, onRemove, rowRef, highlighted, expanded, onToggle,
 }: {
   rule: AutoBattleAbilityRule
   attack: Attack | undefined
   /** Types élémentaires réellement présents dans le catalogue d'attaques — seule source fiable pour le filtre de type du modificateur de stat, qui est comparé côté SQL à attacks.type. */
   attackTypes: string[]
+  /** Météos configurées (voir AdminAutoBattleWeathersPanel), triées par nom — la règle n'en stocke que l'id. */
+  weathers: AutoBattleWeather[]
   onUpdate: (attackNom: string, patch: Partial<Omit<AutoBattleAbilityRule, 'attack_nom' | 'created_at'>>) => void
   onRemove: (attackNom: string) => void
   rowRef?: (el: HTMLDivElement | null) => void
@@ -235,6 +239,19 @@ function AbilityRuleRow({
       stat_mod_flat: rule.stat_mod_flat ?? 3,
       stat_mod_duration_type: rule.stat_mod_duration_type ?? 'turns',
       stat_mod_duration_turns: rule.stat_mod_duration_turns ?? 3,
+    })
+  }
+
+  // Météo levée par la capacité : weather_id et weather_chance vont toujours
+  // ensemble (la contrainte CHECK exige 1..100 dès que la chance est posée).
+  const handleWeatherToggle = (on: boolean) => {
+    if (!on) {
+      onUpdate(rule.attack_nom, { weather_id: null, weather_chance: null })
+      return
+    }
+    onUpdate(rule.attack_nom, {
+      weather_id: rule.weather_id ?? weathers[0]?.id ?? null,
+      weather_chance: rule.weather_chance ?? 100,
     })
   }
 
@@ -370,6 +387,9 @@ function AbilityRuleRow({
   if (rule.stat_mod_target == null) addableEffects.push({ value: 'statmod', label: 'Modificateur de stat', group: 'Statistiques' })
   if (!rule.invulnerable_next_turn) addableEffects.push({ value: 'invuln', label: 'Invulnérabilité au prochain tour adverse', group: 'Défense' })
   if (rule.prevention_duration_turns == null) addableEffects.push({ value: 'prevention', label: 'Prévention (bloque les dégâts super efficaces)', group: 'Défense' })
+  // Proposé seulement s'il existe au moins une météo à lever — sinon l'effet
+  // serait inerte et l'admin n'aurait rien à choisir.
+  if (rule.weather_id == null && weathers.length > 0) addableEffects.push({ value: 'weather', label: 'Déclenche une météo', group: 'Terrain' })
 
   const groupedAddableEffects = new Map<string, typeof addableEffects>()
   for (const opt of addableEffects) {
@@ -392,6 +412,7 @@ function AbilityRuleRow({
       case 'keepgoing': handleKeepGoingToggle(true); break
       case 'ignorestatus': onUpdate(rule.attack_nom, { ignore_status_block: 'sleep' }); break
       case 'prevention': handlePreventionToggle(true); break
+      case 'weather': handleWeatherToggle(true); break
     }
   }
 
@@ -945,6 +966,56 @@ function AbilityRuleRow({
               />
               <span className="text-ink-muted-2 text-xs">(0 = illimité)</span>
             </div>
+            {/* Condition « météo en cours » : hors condition, la capacité se joue
+                normalement mais n'applique aucun buff/debuff. Un seul select
+                porte les quatre cas et écrit toujours le couple cohérent
+                stat_mod_weather_condition + stat_mod_weather_id. */}
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-ink-muted-2 text-xs">Seulement par</span>
+              <select
+                value={rule.stat_mod_weather_condition === 'this' ? `w${rule.stat_mod_weather_id ?? ''}` : (rule.stat_mod_weather_condition ?? '')}
+                onChange={(e) => {
+                  const v = e.target.value
+                  if (v === '') onUpdate(rule.attack_nom, { stat_mod_weather_condition: null, stat_mod_weather_id: null })
+                  else if (v === 'any' || v === 'none') onUpdate(rule.attack_nom, { stat_mod_weather_condition: v, stat_mod_weather_id: null })
+                  else onUpdate(rule.attack_nom, { stat_mod_weather_condition: 'this', stat_mod_weather_id: Number(v.slice(1)) })
+                }}
+                className={SELECT_CLASS}
+              >
+                <option value="">N'importe quel temps</option>
+                <option value="any">N'importe quelle météo active</option>
+                <option value="none">Aucune météo active</option>
+                {weathers.map((w) => <option key={w.id} value={`w${w.id}`}>{w.nom}</option>)}
+              </select>
+            </div>
+          </EffectSection>
+        )}
+      </EffectCategory>
+
+      <EffectCategory label="Terrain">
+        {rule.weather_id != null && (
+          <EffectSection label="Déclenche une météo" onRemove={() => handleWeatherToggle(false)}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <select
+                value={rule.weather_id ?? ''}
+                onChange={(e) => onUpdate(rule.attack_nom, { weather_id: e.target.value === '' ? null : Number(e.target.value) })}
+                className={SELECT_CLASS}
+              >
+                {weathers.map((w) => <option key={w.id} value={w.id}>{w.nom}</option>)}
+              </select>
+              <NumberInput
+                min={1}
+                fallback={100}
+                value={rule.weather_chance ?? 100}
+                onCommit={(v) => onUpdate(rule.attack_nom, { weather_chance: Math.max(1, Math.min(100, v)) })}
+                className={NUM_CLASS_SM}
+              />
+              <span className="text-ink-muted-2 text-xs">% de chances</span>
+            </div>
+            <span className="text-ink-muted-2 text-[11px] mt-1">
+              À chaque utilisation qui a touché. Une météo déjà en cours est remplacée ; ses effets « à chaque
+              tour » commencent au tour suivant.
+            </span>
           </EffectSection>
         )}
       </EffectCategory>
@@ -1013,6 +1084,12 @@ function AbilityRuleRow({
 export function AdminAutoBattleAbilityRulesPanel() {
   const { rules, loading: rulesLoading, addRule, updateRule, removeRule } = useAutoBattleAbilityRules()
   const { attacks, loading: attacksLoading } = useAttacks()
+  const { weathers, loading: weathersLoading } = useAutoBattleWeathers()
+
+  const sortedWeathers = useMemo(
+    () => [...weathers].sort((a, b) => a.nom.localeCompare(b.nom, 'fr')),
+    [weathers]
+  )
 
   const attacksByName = useMemo(() => {
     const map = new Map<string, Attack>()
@@ -1092,7 +1169,7 @@ export function AdminAutoBattleAbilityRulesPanel() {
     return () => window.clearTimeout(timeout)
   }, [justAddedNom, sortedRules])
 
-  if (rulesLoading || attacksLoading) {
+  if (rulesLoading || attacksLoading || weathersLoading) {
     return (
       <div className="bg-cream border-[3px] border-[#a3841a] rounded-[var(--radius-pixel)] shadow-[var(--shadow-pixel)] w-full p-6">
         <p className="text-ink-muted-2 text-sm">Chargement…</p>
@@ -1141,6 +1218,7 @@ export function AdminAutoBattleAbilityRulesPanel() {
               rule={rule}
               attack={attacksByName.get(rule.attack_nom)}
               attackTypes={attackTypes}
+              weathers={sortedWeathers}
               onUpdate={updateRule}
               onRemove={removeRule}
               rowRef={setRowRef}

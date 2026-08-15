@@ -8,6 +8,7 @@ const DEFAULTS: PvpConfig = {
   icon_url: '',
   precision_enabled: true,
   talents_enabled: true,
+  weather_enabled: true,
   loadout_max: 4,
   trial_pokemon_nom: '',
   trial_hp: 80,

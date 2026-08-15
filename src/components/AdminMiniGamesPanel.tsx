@@ -8,10 +8,11 @@ import { AdminSafariPanel } from './AdminSafariPanel'
 import { AdminAutoBattlePanel } from './AdminAutoBattlePanel'
 import { AdminCombatAbilitiesPanel } from './AdminCombatAbilitiesPanel'
 import { AdminAutoBattleTalentsPanel } from './AdminAutoBattleTalentsPanel'
+import { AdminAutoBattleWeathersPanel } from './AdminAutoBattleWeathersPanel'
 import { AdminPvpPanel } from './AdminPvpPanel'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 
-type SubSection = 'casino' | 'magikarp' | 'mining' | 'pension' | 'safari' | 'combat-abilities' | 'talents' | 'autobattle' | 'pvp'
+type SubSection = 'casino' | 'magikarp' | 'mining' | 'pension' | 'safari' | 'combat-abilities' | 'talents' | 'weather' | 'autobattle' | 'pvp'
 
 const SUB_SECTIONS: { id: SubSection; label: string }[] = [
   { id: 'casino', label: '🎰 Casino' },
@@ -24,6 +25,9 @@ const SUB_SECTIONS: { id: SubSection; label: string }[] = [
   { id: 'combat-abilities', label: '✨ Capacités de combat' },
   // Même portée que les capacités de combat (les deux modes), mais par ESPÈCE.
   { id: 'talents', label: '🧬 Talents' },
+  // Effets de TERRAIN, déclenchés par un talent ou une capacité — d'où sa place
+  // juste après les deux, et avant les réglages propres à chaque mode.
+  { id: 'weather', label: '🌦️ Météo' },
   { id: 'autobattle', label: '⚔️ Combat JcE' },
   { id: 'pvp', label: '🛡️ Combat JcJ' },
 ]
@@ -63,6 +67,8 @@ export function AdminMiniGamesPanel() {
       {sub === 'combat-abilities' && <AdminCombatAbilitiesPanel />}
 
       {sub === 'talents' && <AdminAutoBattleTalentsPanel />}
+
+      {sub === 'weather' && <AdminAutoBattleWeathersPanel />}
 
       {sub === 'autobattle' && <AdminAutoBattlePanel />}
 

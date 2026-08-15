@@ -18,6 +18,7 @@ import {
 import { TYPE_COLORS } from '../../lib/typeColors'
 import { PixelIcon } from '../icons/PixelIcon'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
+import { PIXEL_BORDER_SM } from '../../lib/panelStyles'
 import type { AutoBattleTurn } from '../../types'
 
 // Libellé du texte flottant affiché quand un statut fait passer le tour
@@ -82,6 +83,9 @@ interface Props {
 }
 
 const COUNTDOWN_STEPS = ['3', '2', '1', 'GO !']
+
+/** Durée d'affichage de la bulle de météo (ms) — même valeur que la bulle de talent d'AutoBattlePokemonPicker. */
+const WEATHER_TIP_DURATION = 3000
 
 // Ralentissement global de toutes les animations/affichages de texte de
 // l'écran de combat (1.3× plus lent que la base historique) — appliqué une
@@ -261,6 +265,16 @@ export function AutoBattleScreen({
   const [talentSide, setTalentSide] = useState<Side | null>(null)
   const [talentKey, setTalentKey] = useState(0)
   const [talentLabel, setTalentLabel] = useState('')
+  // Météo en cours (voir AutoBattleTurn.weather_tick) : pastille ronde posée
+  // entre les deux noms de pokémon. Une seule à la fois, remplacée par le
+  // prochain tour weather_set — aucune ne s'éteint d'elle-même, elle dure
+  // jusqu'à la fin du combat. `details` vient du serveur (une ligne par effet,
+  // voir autobattle_weather_details) : le client n'a jamais à relire la config.
+  const [activeWeather, setActiveWeather] = useState<{ nom: string; icon: string | null; details: string[] } | null>(null)
+  // Bulle de description ouverte au clic sur la pastille — éphémère (3 s ou dès
+  // que l'utilisateur fait autre chose), même mécanique que les talents dans
+  // AutoBattlePokemonPicker.
+  const [weatherTipOpen, setWeatherTipOpen] = useState(false)
   const [recoilFx, setRecoilFx] = useState<{ side: Side; amount: number } | null>(null)
   const [recoilKey, setRecoilKey] = useState(0)
   const [playerInvulnerable, setPlayerInvulnerable] = useState(false)
@@ -380,6 +394,26 @@ export function AutoBattleScreen({
     return () => observer.disconnect()
   }, [])
 
+  // Bulle de météo : affichage éphémère, elle se ferme d'elle-même au bout de
+  // 3 s ou dès que l'utilisateur fait autre chose (clic n'importe où, scroll,
+  // resize) — décalque d'AutoBattlePokemonPicker pour les talents. Capture sur
+  // `document` et pas `window` : le scroll du corps de la popup de combat ne
+  // remonte pas jusqu'à window, même en phase de capture.
+  useEffect(() => {
+    if (!weatherTipOpen) return
+    const close = () => setWeatherTipOpen(false)
+    const timer = window.setTimeout(close, WEATHER_TIP_DURATION)
+    document.addEventListener('pointerdown', close, true)
+    document.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.clearTimeout(timer)
+      document.removeEventListener('pointerdown', close, true)
+      document.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [weatherTipOpen])
+
   // Compte à rebours 3…2…1…GO ! avant le premier coup, même idiome que
   // MagikarpGame — les deux pokémon sont déjà affichés pendant ce temps.
   // Combat Manuel (skipCountdown) : pas de compte à rebours, le joueur choisit
@@ -462,20 +496,24 @@ export function AutoBattleScreen({
       ? { name: ownedPokemonName(playerPokemon), iconSrc: playerImageOverride ?? playerSpecies?.image_miniature, ability: turn?.ability_nom ?? playerAbilityNom }
       : { name: opponentNom, iconSrc: opponentImageOverride ?? opponentSpecies?.image_miniature, ability: turn?.ability_nom ?? opponentAbilityNom }
 
-    // `content` : soit une phrase simple, soit un découpage autour d'une
-    // mention à mettre en valeur — un STATUT (coloré) ou un nom de TALENT (gras).
+    // `content` : soit une phrase simple, soit un découpage autour d'une mention
+    // à mettre en valeur — un STATUT (coloré), un nom de TALENT ou un nom de
+    // MÉTÉO (gras). `neutral` retire l'icône et le nom du pokémon : la météo qui
+    // se lève n'appartient à aucun camp.
     const pushHistory = (
       side: Side,
       content:
         | string
         | { before: string; status: AutoBattleStatusEffect; after: string }
-        | { before: string; talent: string; after: string },
-      extra?: { damage?: number; heal?: number; superEffective?: boolean; precisionFormula?: string; damageFormula?: string; healFormula?: string }
+        | { before: string; talent: string; after: string }
+        | { before: string; weather: string; after: string },
+      extra?: { damage?: number; heal?: number; superEffective?: boolean; precisionFormula?: string; damageFormula?: string; healFormula?: string; neutral?: boolean }
     ) => {
       const info = sideInfo(side)
       historyIdRef.current += 1
       const isStatus = typeof content !== 'string' && 'status' in content
       const isTalent = typeof content !== 'string' && 'talent' in content
+      const isWeather = typeof content !== 'string' && 'weather' in content
       const entry: AutoBattleHistoryEntryData = {
         id: historyIdRef.current, elapsedMs: Date.now() - battleStart, side, pokemonName: info.name, iconSrc: info.iconSrc,
         text: typeof content === 'string' ? content : undefined,
@@ -484,6 +522,8 @@ export function AutoBattleScreen({
           return { before: content.before, statusLabel: display.label, statusColor: display.color, after: content.after }
         })(),
         talentText: !isTalent ? undefined : { before: content.before, talentLabel: content.talent, after: content.after },
+        weatherText: !isWeather ? undefined : { before: content.before, weatherLabel: content.weather, after: content.after },
+        neutral: extra?.neutral,
         damage: extra?.damage && extra.damage > 0 ? extra.damage : undefined,
         heal: extra?.heal && extra.heal > 0 ? extra.heal : undefined,
         superEffective: extra?.superEffective,
@@ -559,7 +599,21 @@ export function AutoBattleScreen({
       // suivants, mais l'attaque de CE tour-ci est de toute façon jouée sous
       // la pénalité de précision (elle n'est jamais sautée, contrairement au
       // sommeil).
-      const precedingTick = i > 0 ? turns[i - 1] : undefined
+      // ATTENTION : ce tick n'est PAS forcément turns[i-1]. Le serveur glisse
+      // entre lui et l'attaque des tours qui ne sont l'action de personne : le
+      // tick de soin passif du camp concerné (heal_dot_tick, émis juste après
+      // le tick de statut) et les déclenchements de talents (talent_tick, émis
+      // avant l'entrée d'attaque — « à chaque tour », guérison automatique
+      // côté cible…). Sans remonter au-dessus de ces tours-là, le badge
+      // Peur/Confusion n'était jamais effacé dès qu'un soin passif ou un
+      // talent s'intercalait, et le détail de précision en admin perdait la
+      // ligne du malus.
+      let precedingTick: AutoBattleTurn | undefined
+      for (let j = i - 1; j >= 0; j--) {
+        if (turns[j].talent_tick || turns[j].heal_dot_tick) continue
+        precedingTick = turns[j]
+        break
+      }
       const attackerPrecisionStatus: AutoBattleStatusEffect | null =
         precedingTick?.status_tick && precedingTick.attacker === attackerSide
         && (precedingTick.status === 'confusion' || precedingTick.status === 'fear')
@@ -605,17 +659,74 @@ export function AutoBattleScreen({
       // 'status_tick' et 'heal_dot_tick' n'appartiennent jamais à un tel
       // bloc, cassent toujours la série (un tick n'est pas "réutiliser la
       // capacité").
-      if (turn.skipped || turn.status_tick || turn.heal_dot_tick || turn.talent_tick) {
+      if (turn.skipped || turn.status_tick || turn.heal_dot_tick || turn.talent_tick || turn.weather_tick) {
         streak = 0
         prevStreakAttacker = null
       } else {
         streak = attackerSide === prevStreakAttacker ? streak + 1 : 1
         prevStreakAttacker = attackerSide
       }
-      const multiplier = (turn.skipped || turn.status_tick || turn.heal_dot_tick || turn.talent_tick) ? 1 : speedMultiplierForRepeat(streak)
+      const multiplier = (turn.skipped || turn.status_tick || turn.heal_dot_tick || turn.talent_tick || turn.weather_tick) ? 1 : speedMultiplierForRepeat(streak)
       const durations = computeDurations(multiplier * speedMultiplier)
       const impactOffset = durations.anticipation + durations.lunge + durations.strikeRise + durations.strikeLand
       const turnDuration = impactOffset + durations.return + durations.gap
+
+      // Événement de MÉTÉO (voir autobattle_weathers). Deux formes, distinguées
+      // par weather_set :
+      //   • la météo SE LÈVE : annonce de terrain, neutre (aucun camp), qui
+      //     remplace le bandeau ; l'animation est jouée sur le pokémon qui l'a
+      //     déclenchée, d'où un `attacker` quand même renseigné.
+      //   • TICK de début de tour : dégâts et/ou statut sur CE pokémon-là.
+      // Comme pour un talent, `attacker` désigne le camp CONCERNÉ et jamais un
+      // attaquant, et les PV font foi sur attacker_hp_after.
+      if (turn.weather_tick) {
+        const animation = turn.weather_animation ?? 'idle'
+        const label = turn.weather_nom ?? 'Météo'
+        scheduleAttackAnimation({
+          side: attackerSide, animation, abilityNom: '', durations, turnStart, full: true, damage: 0,
+        })
+        timers.push(window.setTimeout(() => setAttackState({ side: attackerSide, phase: 'return', durations, animation }), turnStart + impactOffset))
+        timers.push(window.setTimeout(() => setAttackState(null), turnStart + impactOffset + durations.return))
+
+        timers.push(window.setTimeout(() => {
+          setShownTurnIndex(i)
+          setTalentSide(attackerSide)
+          setTalentLabel(label)
+          setTalentKey((k) => k + 1)
+          if (turn.weather_set) {
+            setActiveWeather({ nom: label, icon: turn.weather_icon ?? null, details: turn.weather_details ?? [] })
+            pushHistory(
+              attackerSide,
+              { before: '', weather: label, after: turn.weather_replaced ? ' remplace la météo en cours !' : ' se lève !' },
+              { neutral: true },
+            )
+            return
+          }
+          // Tick : les PV annoncés sont ceux d'AVANT le soin de seuil éventuel
+          // (voir autobattle_weather_tick) — le tour de talent qui suit remonte
+          // la barre, exactement comme pour un tick de brûlure.
+          if (turn.attacker_hp_after != null) {
+            if (attackerSide === 'player') setPlayerHp(Math.min(playerMaxHp, turn.attacker_hp_after))
+            else setOpponentHp(Math.min(opponentMaxHp, turn.attacker_hp_after))
+          }
+          // Statut de terrain : il vise le pokémon CONCERNÉ lui-même, pas son
+          // adversaire (contrairement au talent 'inflict_status').
+          if (turn.weather_inflicted_status) {
+            if (attackerSide === 'player') setPlayerStatus(turn.weather_inflicted_status)
+            else setOpponentStatus(turn.weather_inflicted_status)
+          }
+          pushHistory(
+            attackerSide,
+            turn.weather_inflicted_status
+              ? { before: 'subit ', weather: label, after: '' }
+              : { before: 'est frappé par ', weather: label, after: '' },
+            { damage: turn.weather_damage },
+          )
+        }, turnStart + durations.anticipation))
+        timers.push(window.setTimeout(() => setTalentSide(null), turnStart + durations.anticipation + FLYING_TEXT_MS))
+        cursor += turnDuration
+        continue
+      }
 
       // Déclenchement d'un TALENT d'espèce (voir autobattle_talents) : jamais
       // l'usage d'une capacité, donc jamais sideInfo(...).ability — en Combat
@@ -639,10 +750,12 @@ export function AutoBattleScreen({
           setTalentKey((k) => k + 1)
           // 'endure_ko' remonte les PV à 1 et 'heal_below_hp' soigne : c'est
           // attacker_hp_after (le propriétaire du talent) qui fait foi ici,
-          // jamais defender_hp_after.
+          // jamais defender_hp_after. Borné aux PV max : 'type_damage_to_heal'
+          // annonce PV + soin sans connaître le maximum côté serveur (voir
+          // autobattle_talent_defend), le surplus de soin doit être rogné ici.
           if (turn.attacker_hp_after != null) {
-            if (attackerSide === 'player') setPlayerHp(turn.attacker_hp_after)
-            else setOpponentHp(turn.attacker_hp_after)
+            if (attackerSide === 'player') setPlayerHp(Math.min(playerMaxHp, turn.attacker_hp_after))
+            else setOpponentHp(Math.min(opponentMaxHp, turn.attacker_hp_after))
           }
           if (turn.heal != null && turn.heal > 0) {
             setHealSide(attackerSide)
@@ -657,6 +770,17 @@ export function AutoBattleScreen({
           if (turn.talent_inflicted_status) {
             if (attackerSide === 'player') setOpponentStatus(turn.talent_inflicted_status)
             else setPlayerStatus(turn.talent_inflicted_status)
+          }
+          // 'auto_cure_first_status' : `attacker` est ici la CIBLE du statut
+          // (le porteur du talent, voir autobattle_talent_status_guard), et le
+          // statut ne s'applique pas du tout côté serveur. Le tour de talent
+          // qui l'a infligé le porte quand même (talent_inflicted_status est
+          // émis avant que la garde ne se prononce) : sans cet effacement, le
+          // badge s'allumait pour un statut inexistant et n'était plus jamais
+          // retiré, faute de tick de statut pour le guérir.
+          if (turn.talent_kind === 'auto_cure_first_status') {
+            if (attackerSide === 'player') setPlayerStatus(null)
+            else setOpponentStatus(null)
           }
           pushHistory(
             attackerSide,
@@ -811,6 +935,16 @@ export function AutoBattleScreen({
           if (turn.invulnerable_granted) {
             if (attackerSide === 'player') setPlayerInvulnerable(true)
             else setOpponentInvulnerable(true)
+          }
+          // Peur/confusion : le tour qui suit le tick n'est pas toujours une
+          // attaque — une capacité à effet ('prepare_release', 'charge_double
+          // _next', 'skip', rafale tirée à 0) produit ici un tour passé. C'est
+          // alors CE tour-ci qui consomme le tick, et le badge doit disparaître
+          // comme il le fait sur une attaque (voir les deux branches plus bas),
+          // sinon il reste affiché jusqu'à la fin du combat.
+          if (attackerPrecisionStatus && precedingTick?.status_cured) {
+            if (attackerSide === 'player') setPlayerStatus(null)
+            else setOpponentStatus(null)
           }
         }, turnStart + durations.anticipation))
         timers.push(window.setTimeout(() => setSkipSide(null), turnStart + durations.anticipation + FLYING_TEXT_MS))
@@ -1101,7 +1235,48 @@ export function AutoBattleScreen({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-4 relative">
+        {/* Météo en cours (voir autobattle_weathers) : pastille pile entre les
+            deux JAUGES DE PV, au ras du bas de l'arène — c'est la seule bande
+            horizontale que ni les sprites ni leurs animations n'occupent (un
+            bond ou un projectile traverse tout le reste de la grille).
+            Positionnée en absolu par-dessus la grille (z-20 : au-dessus du z-10
+            que prend la colonne qui attaque) plutôt qu'insérée dans le flux,
+            qui décalerait les deux colonnes.
+            Fond transparent : seule l'icône se voit, mais le bouton garde sa
+            surface cliquable. Un clic ouvre la description, générée côté serveur. */}
+        {activeWeather && (
+          <div className="absolute left-1/2 -translate-x-1/2 bottom-0 z-20 flex flex-col items-center">
+            <button
+              type="button"
+              // Pas de bascule on/off au reclic : le pointerdown de fermeture
+              // (capture, voir l'effet plus haut) part AVANT le click, un
+              // toggle rouvrirait donc systématiquement. Recliquer ré-affiche
+              // simplement la bulle — comportement identique aux talents.
+              onClick={() => setWeatherTipOpen(true)}
+              title={activeWeather.nom}
+              aria-label={`Météo : ${activeWeather.nom}`}
+              className="w-8 h-8 rounded-full flex items-center justify-center text-xl leading-none bg-transparent animate-[celebrate-pop_0.52s_ease-out]"
+            >
+              {activeWeather.icon || '🌦️'}
+            </button>
+            {weatherTipOpen && (
+              <div
+                role="tooltip"
+                // Sortie du flux elle aussi : la bulle ne doit jamais pousser
+                // les sprites vers le bas quand elle s'ouvre.
+                className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 w-56 max-w-[80vw] p-2 rounded bg-white text-ink text-xs leading-snug flex flex-col gap-1 ${PIXEL_BORDER_SM} shadow-[var(--shadow-pixel)]`}
+              >
+                <span className="font-bold">{activeWeather.nom}</span>
+                {activeWeather.details.length === 0 ? (
+                  <span className="text-ink-muted-2">Aucun effet direct.</span>
+                ) : (
+                  activeWeather.details.map((line, i) => <span key={i}>{line}</span>)
+                )}
+              </div>
+            )}
+          </div>
+        )}
         {/* Le camp qui attaque passe au-dessus de l'autre colonne : sans ça,
             un sprite qui bondit sur l'adversaire (ou un rayon/projectile qui
             le traverse) passerait derrière lui, le joueur étant le premier des

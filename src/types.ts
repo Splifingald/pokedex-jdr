@@ -874,6 +874,10 @@ export interface AutoBattleConfig {
   // précision — désactivés, aucun talent n'est lu ni déclenché, y compris les
   // annonces d'ouverture de combat. Les configurations restent en base.
   talents_enabled: boolean
+  // Météo (autobattle_weathers) désactivable globalement, même principe :
+  // désactivée, aucune météo n'est chargée ni levée et toutes les conditions
+  // « météo en cours » se comportent comme « aucune météo ».
+  weather_enabled: boolean
   // Icônes du mode de jeu affichées sur la bannière de chaque parcours
   // (AutoBattleVariantBanner) selon son game_mode — partagées par toutes les
   // variantes, réglées dans l'admin "Combat Auto — Général".
@@ -1150,6 +1154,16 @@ export interface AutoBattleAbilityRule {
   // le statut concerné — les deux autres continuent de faire passer le tour.
   // Le tick de statut a lieu normalement dans tous les cas.
   ignore_status_block: AutoBattleIgnoreStatusBlock | null
+  // Météo levée par la capacité (façon Danse Pluie, voir AutoBattleWeather) :
+  // à chaque utilisation qui a touché, weather_chance % de chances de lever
+  // weather_id. null = la capacité ne touche pas à la météo (ou la météo a été
+  // supprimée depuis, ON DELETE SET NULL).
+  weather_id: number | null
+  weather_chance: number | null
+  // Condition « météo en cours » du modificateur de stat ci-dessus : hors
+  // condition, la capacité se joue normalement mais n'applique aucun buff/debuff.
+  stat_mod_weather_condition: AutoBattleWeatherCondition | null
+  stat_mod_weather_id: number | null
   created_at: string
 }
 
@@ -1179,6 +1193,10 @@ export type AutoBattleTalentKind =
   | 'transform'
   /** « Somnolent » : endormi, il lui faut un 6 exact au dé pour se réveiller (au lieu de 4, 5 ou 6). */
   | 'heavy_sleeper'
+  /** Lève la météo `weather_id` avec `percent` % de chances, au moment donné par `trigger`. Voir AutoBattleWeather. */
+  | 'set_weather'
+  /** Annule TOUS les talents du combat, des deux côtés (le sien compris) : dès qu'un des deux pokémon le porte, le combat se joue exactement comme si la bascule globale `talents_enabled` était éteinte. Filtré côté serveur à la résolution des talents, avant tout le reste — voir autobattle_talents_effective / _vs dans supabase/schema.sql. Seul le talent annulateur lui-même reste annoncé au tour 0. */
+  | 'cancel_talents'
 
 export type AutoBattleTalentStat = 'damage' | 'precision'
 export type AutoBattleTalentValueType = 'flat' | 'percent_max_hp' | 'range'
@@ -1225,6 +1243,56 @@ export interface AutoBattleTalent {
   max_uses: number | null
   trigger: AutoBattleTalentTrigger | null
   dice_value: number | null
+  /** Météo levée par un talent 'set_weather' — null si elle a été supprimée depuis (ON DELETE SET NULL), le talent devient alors inerte. */
+  weather_id: number | null
+  /** Condition « météo en cours » d'un 'stat_boost' (null = aucune condition). */
+  weather_condition: AutoBattleWeatherCondition | null
+  /** Météo visée quand weather_condition vaut 'this'. */
+  weather_condition_id: number | null
+  created_at: string
+}
+
+// ── Météo (effets de TERRAIN, tables autobattle_weathers / _weather_effects) ──
+// Troisième couche d'effets configurables après les capacités (par capacité) et
+// les talents (par espèce) : la météo est partagée par LES DEUX camps et une
+// SEULE peut être active à la fois — en déclencher une remplace la précédente.
+// Elle est permanente (aucune durée en tours) et repart toujours à « aucune » au
+// combat suivant. Éditée depuis AdminAutoBattleWeathersPanel, appliquée
+// exclusivement côté serveur (helpers autobattle_weather_* de schema.sql).
+export type AutoBattleWeatherEffectKind = 'stat_mod' | 'inflict_status' | 'damage'
+/** À quoi le filtre de types d'un 'stat_mod' se compare. */
+export type AutoBattleWeatherTargetScope = 'pokemon_type' | 'ability_type'
+/** Condition « météo en cours » d'un buff/debuff : 'this' = la météo désignée par l'id qui accompagne ce champ. */
+export type AutoBattleWeatherCondition = 'any' | 'none' | 'this'
+
+// Une ligne d'autobattle_weather_effects. Comme pour les talents, les colonnes
+// sont mutualisées entre les kinds : seul un sous-ensemble est pertinent par kind.
+export interface AutoBattleWeatherEffect {
+  id: number
+  weather_id: number
+  kind: AutoBattleWeatherEffectKind
+  stat: AutoBattleTalentStat | null
+  /** Montant signé du buff/debuff (la précision est sur 10, comme AutoBattleTalent.amount). */
+  amount: number | null
+  target_scope: AutoBattleWeatherTargetScope | null
+  status: AutoBattleStatusEffect | null
+  /** Probabilité par tour, 1..100. */
+  percent: number | null
+  damage_amount: number | null
+  /** Liste d'INCLUSION : vide ou null = tous les types. */
+  type_filter: string[] | null
+  created_at: string
+}
+
+// Une ligne d'autobattle_weathers. Une météo sans aucun effet est valide : elle
+// sert alors uniquement de condition aux buff/debuff des talents et capacités.
+export interface AutoBattleWeather {
+  id: number
+  nom: string
+  /** Emoji affiché en combat dans la pastille ronde entre les deux noms de pokémon — vide/null = emoji générique côté client. */
+  icon: string | null
+  /** Animation jouée quand la météo se lève — null = 'idle'. */
+  animation: BattleAnimationId | null
   created_at: string
 }
 
@@ -1325,6 +1393,30 @@ export interface AutoBattleTurn {
   talent_absorbed?: number
   /** Statut infligé à l'ADVERSAIRE du porteur par un talent 'inflict_status' — un tour de talent n'étant pas un tour d'attaque, il ne passe pas par status_applied, mais le badge doit quand même apparaître. */
   talent_inflicted_status?: AutoBattleStatusEffect
+  /** Météo levée par un talent 'set_weather' : le tour de talent annonce le TALENT, un tour weather_tick séparé annonce la météo juste après. */
+  talent_set_weather?: number
+  // weather_tick = ce tour est un événement de MÉTÉO (voir autobattle_weathers).
+  // Mêmes conventions qu'un talent_tick : `attacker` désigne le camp CONCERNÉ et
+  // non un attaquant, defender_hp_after n'a pas de sens (il reprend les PV du
+  // camp concerné), et le client resynchronise les PV sur attacker_hp_after.
+  // weather_set = la météo vient de se LEVER (bandeau à remplacer côté client) ;
+  // weather_replaced = elle en a chassé une autre. Sans weather_set, c'est un
+  // tick de début de tour : weather_damage / weather_inflicted_status disent ce
+  // qu'il a produit sur ce pokémon.
+  weather_tick?: boolean
+  weather_id?: number
+  weather_nom?: string
+  weather_animation?: BattleAnimationId | null
+  /** Emoji de la pastille météo affichée entre les deux noms de pokémon. */
+  weather_icon?: string | null
+  /** Description de la météo, UNE LIGNE PAR EFFET (générée par autobattle_weather_details) — affichée dans la bulle ouverte au clic sur la pastille. Tableau vide = météo sans effet. */
+  weather_details?: string[]
+  /** Effets bruts de la météo — servent à marquer les capacités concernées dans la grille de sélection (voir weatherAffectsAbility). */
+  weather_effects?: AutoBattleWeatherEffect[]
+  weather_set?: boolean
+  weather_replaced?: boolean
+  weather_damage?: number
+  weather_inflicted_status?: AutoBattleStatusEffect
   // Décoration CLIENT UNIQUEMENT (jamais renvoyée par le serveur) — voir
   // ManualBattleScreen : en Combat Manuel la capacité change à chaque tour,
   // contrairement au Combat Auto où elle est fixe (playerAbilityNom/
@@ -1460,6 +1552,8 @@ export interface PvpConfig {
   // Voir AutoBattleConfig.talents_enabled — même bascule, propre au mode JcJ
   // (elle couvre aussi le combat d'essai "Tester").
   talents_enabled: boolean
+  // Voir AutoBattleConfig.weather_enabled — idem pour la météo.
+  weather_enabled: boolean
   // Nombre maximum de capacités dans la boucle défensive d'un défi — les
   // doublons comptent (voir PvpAbilityLoadoutPicker, pvp_post_challenge).
   loadout_max: number

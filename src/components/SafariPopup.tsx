@@ -15,6 +15,7 @@ import { GameBanner } from './CasinoGameCard'
 import { SafariBoard } from './SafariBoard'
 import { SafariMoveFeed } from './SafariMoveFeed'
 import { SafariCaughtPopup } from './SafariCaughtPopup'
+import { SafariInfoPopup } from './SafariInfoPopup'
 import { PixelIcon } from './icons/PixelIcon'
 import { CloseIcon } from './icons/CloseIcon'
 import { SAFARI_ICON } from '../lib/icons'
@@ -42,6 +43,7 @@ export function SafariPopup({ player, playerItems, itemsByName, pokedollarImageU
   const [now, setNow] = useState(() => Date.now())
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null)
   const [caught, setCaught] = useState<{ nom: string; imageUrl: string | undefined; playerPokemonId: number } | null>(null)
+  const [showInfo, setShowInfo] = useState(false)
 
   const playersById = useMemo(() => {
     const map = new Map<number, Player>()
@@ -164,6 +166,13 @@ export function SafariPopup({ player, playerItems, itemsByName, pokedollarImageU
           <div className="flex items-center gap-2 min-w-0">
             <PixelIcon src={SAFARI_ICON} size={24} colored className="text-ink shrink-0" />
             <h3 className="text-ink text-lg font-bold truncate">{config.nom}</h3>
+            <button
+              onClick={() => setShowInfo(true)}
+              title="Comment ça marche ?"
+              className="w-8 h-8 rounded-full flex items-center justify-center text-ink hover:bg-black/10 shrink-0 text-lg"
+            >
+              ℹ️
+            </button>
           </div>
           <div className="text-right shrink-0 text-xs">
             {session && !sessionExpired && sessionCountdownMs !== null && (
@@ -218,6 +227,8 @@ export function SafariPopup({ player, playerItems, itemsByName, pokedollarImageU
           )}
         </div>
       </div>
+
+      {showInfo && <SafariInfoPopup onClose={() => setShowInfo(false)} />}
 
       {caught && (
         <SafariCaughtPopup
