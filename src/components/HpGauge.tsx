@@ -9,9 +9,11 @@ interface Props {
   showValue?: boolean
   /** Classes de bordure de la barre (défaut: fin liseré ink) — pour un contour plus marqué sur fond chargé */
   barBorderClassName?: string
+  /** Côté où coller le texte "current / max" (défaut: droite) — passé à gauche pour le pokémon de gauche en combat, afin de dégager le centre de l'arène (voir AutoBattleScreen : la pastille de météo s'y pose). */
+  valueAlign?: 'left' | 'right'
 }
 
-export function HpGauge({ current, max, onChange, showValue = true, barBorderClassName = 'border border-ink' }: Props) {
+export function HpGauge({ current, max, onChange, showValue = true, barBorderClassName = 'border border-ink', valueAlign = 'right' }: Props) {
   // Ref plutôt que state : évite un re-render (donc un ré-attachement de listener)
   // entre le pointerdown et le premier pointermove du drag.
   const dragging = useRef(false)
@@ -71,7 +73,7 @@ export function HpGauge({ current, max, onChange, showValue = true, barBorderCla
   return (
     <div>
       {showValue && (
-        <div className={`text-xs font-bold text-right mb-0.5 ${textColor}`}>{current} / {max}</div>
+        <div className={`text-xs font-bold ${valueAlign === 'left' ? 'text-left' : 'text-right'} mb-0.5 ${textColor}`}>{current} / {max}</div>
       )}
       {bar}
     </div>

@@ -608,9 +608,16 @@ export function AutoBattleScreen({
       // Peur/Confusion n'était jamais effacé dès qu'un soin passif ou un
       // talent s'intercalait, et le détail de précision en admin perdait la
       // ligne du malus.
+      // Un statut REPOSÉ entre-temps par une tentative persistante (voir
+      // status_dot_tick) doit couper court à l'effacement du badge plus bas :
+      // le tick de Peur guérit la peur, mais la tentative qui suit dans le même
+      // tour peut avoir immédiatement infligé autre chose, et ce badge-là doit
+      // rester allumé.
+      let statusReapplied = false
       let precedingTick: AutoBattleTurn | undefined
       for (let j = i - 1; j >= 0; j--) {
-        if (turns[j].talent_tick || turns[j].heal_dot_tick) continue
+        if (turns[j].status_dot_tick) { statusReapplied = true; continue }
+        if (turns[j].talent_tick || turns[j].heal_dot_tick || turns[j].damage_dot_tick || turns[j].leech_dot_tick) continue
         precedingTick = turns[j]
         break
       }
@@ -659,14 +666,16 @@ export function AutoBattleScreen({
       // 'status_tick' et 'heal_dot_tick' n'appartiennent jamais à un tel
       // bloc, cassent toujours la série (un tick n'est pas "réutiliser la
       // capacité").
-      if (turn.skipped || turn.status_tick || turn.heal_dot_tick || turn.talent_tick || turn.weather_tick) {
+      const isTickTurn = turn.status_tick || turn.heal_dot_tick || turn.damage_dot_tick
+        || turn.leech_dot_tick || turn.status_dot_tick || turn.talent_tick || turn.weather_tick
+      if (turn.skipped || isTickTurn) {
         streak = 0
         prevStreakAttacker = null
       } else {
         streak = attackerSide === prevStreakAttacker ? streak + 1 : 1
         prevStreakAttacker = attackerSide
       }
-      const multiplier = (turn.skipped || turn.status_tick || turn.heal_dot_tick || turn.talent_tick || turn.weather_tick) ? 1 : speedMultiplierForRepeat(streak)
+      const multiplier = (turn.skipped || isTickTurn) ? 1 : speedMultiplierForRepeat(streak)
       const durations = computeDurations(multiplier * speedMultiplier)
       const impactOffset = durations.anticipation + durations.lunge + durations.strikeRise + durations.strikeLand
       const turnDuration = impactOffset + durations.return + durations.gap
@@ -700,6 +709,13 @@ export function AutoBattleScreen({
               { before: '', weather: label, after: turn.weather_replaced ? ' remplace la météo en cours !' : ' se lève !' },
               { neutral: true },
             )
+            return
+          }
+          // Météo DISSIPÉE par une capacité (voir clear_weather) : le tour
+          // décrit la météo qui disparaît, le bandeau est simplement retiré.
+          if (turn.weather_cleared) {
+            setActiveWeather(null)
+            pushHistory(attackerSide, { before: '', weather: label, after: ' se dissipe !' }, { neutral: true })
             return
           }
           // Tick : les PV annoncés sont ceux d'AVANT le soin de seuil éventuel
@@ -875,6 +891,70 @@ export function AutoBattleScreen({
       // afficherait donc "a utilisé <mauvaise capacité>" et donnerait
       // l'impression que cette capacité a soigné deux fois). Pas d'animation
       // d'attaque : juste le HP qui remonte et une ligne d'historique dédiée.
+      // Tentative de statut persistante QUI A ABOUTI (voir AutoBattleTurn.
+      // status_dot_tick — les jets ratés n'émettent rien) : `attacker` est la
+      // victime, qui gagne le statut. Pas d'animation d'attaque, juste le
+      // badge et une ligne d'historique, comme un statut infligé par un coup.
+      if (turn.status_dot_tick) {
+        timers.push(window.setTimeout(() => {
+          setShownTurnIndex(i)
+          if (turn.status_dot_applied) {
+            if (attackerSide === 'player') setPlayerStatus(turn.status_dot_applied)
+            else setOpponentStatus(turn.status_dot_applied)
+            pushHistory(attackerSide, { before: 'est affecté par ', status: turn.status_dot_applied, after: '' })
+          }
+        }, turnStart + durations.anticipation))
+        cursor += turnDuration
+        continue
+      }
+
+      // Ticks des effets persistants OFFENSIFS (voir AutoBattleTurn.
+      // damage_dot_tick / leech_dot_tick) : miroirs du tick de soin passif
+      // ci-dessous — jamais l'usage d'une capacité, donc pas d'animation
+      // d'attaque. `attacker` désigne ici la VICTIME (le camp dont c'est le
+      // tour, comme un tick de brûlure) : c'est elle qui encaisse, et pour le
+      // vol de vie c'est l'AUTRE camp (defender_hp_after) qui récupère.
+      if (turn.damage_dot_tick || turn.leech_dot_tick) {
+        const victimSide = attackerSide
+        const thiefSide: Side = victimSide === 'player' ? 'opponent' : 'player'
+        timers.push(window.setTimeout(() => {
+          setShownTurnIndex(i)
+          if (turn.attacker_hp_after != null) {
+            if (victimSide === 'player') setPlayerHp(turn.attacker_hp_after)
+            else setOpponentHp(turn.attacker_hp_after)
+          }
+          if (turn.damage > 0) {
+            setShakeSide(victimSide)
+            setFlashSide(victimSide)
+            setLastDamage({ side: victimSide, damage: turn.damage, superEffective: false })
+            setHitKey((k) => k + 1)
+            window.setTimeout(() => setShakeSide(null), SHAKE_MS)
+            window.setTimeout(() => setFlashSide(null), FLASH_MS)
+          }
+          // Vol de vie : les PV rendus au voleur (0 si son soin est bloqué par
+          // un Anti-Soin) remontent sa barre et jouent son effet de soin.
+          if (turn.leech_dot_tick && turn.heal != null && turn.heal > 0) {
+            if (turn.defender_hp_after != null) {
+              if (thiefSide === 'player') setPlayerHp(turn.defender_hp_after)
+              else setOpponentHp(turn.defender_hp_after)
+            }
+            setHealSide(thiefSide)
+            setLastHeal({ side: thiefSide, amount: turn.heal })
+            setHealKey((k) => k + 1)
+            // N'importe quel soin guérit le poison, celui-ci compris.
+            if (thiefSide === 'player') setPlayerStatus((s) => (s === 'poison' ? null : s))
+            else setOpponentStatus((s) => (s === 'poison' ? null : s))
+          }
+          pushHistory(
+            victimSide,
+            turn.leech_dot_tick ? 'se fait drainer des PV' : 'subit des dégâts persistants',
+            { damage: turn.damage },
+          )
+        }, turnStart + durations.anticipation))
+        cursor += turnDuration
+        continue
+      }
+
       if (turn.heal_dot_tick) {
         timers.push(window.setTimeout(() => {
           setShownTurnIndex(i)
@@ -942,7 +1022,7 @@ export function AutoBattleScreen({
           // alors CE tour-ci qui consomme le tick, et le badge doit disparaître
           // comme il le fait sur une attaque (voir les deux branches plus bas),
           // sinon il reste affiché jusqu'à la fin du combat.
-          if (attackerPrecisionStatus && precedingTick?.status_cured) {
+          if (attackerPrecisionStatus && precedingTick?.status_cured && !statusReapplied) {
             if (attackerSide === 'player') setPlayerStatus(null)
             else setOpponentStatus(null)
           }
@@ -979,8 +1059,14 @@ export function AutoBattleScreen({
         setAttackState({ side: attackerSide, phase: 'return', durations, animation: attackAnimation })
 
         if (turn.missed) {
-          setMissSide(turn.invulnerable_miss ? hitSide : attackerSide)
-          setMissLabel(turn.invulnerable_miss ? 'Invulnérable !' : 'MANQUÉ')
+          // Immunité de type (turn.no_effect) : le texte s'affiche sur la
+          // CIBLE, comme pour l'invulnérabilité — c'est son type qui annule le
+          // coup, pas l'attaquant qui a mal visé.
+          // Statut exigé sur la cible et absent (voir requires_status_failed) :
+          // la capacité ne pouvait pas fonctionner, le texte s'affiche donc
+          // aussi sur la CIBLE — c'est son état qui décide, pas la visée.
+          setMissSide(turn.invulnerable_miss || turn.no_effect || turn.requires_status_failed ? hitSide : attackerSide)
+          setMissLabel(turn.requires_status_failed ? 'Échec !' : turn.no_effect ? 'Aucun effet !' : turn.invulnerable_miss ? 'Invulnérable !' : 'MANQUÉ')
           setMissKey((k) => k + 1)
           // Le pokémon protégé reste estompé — le bouclier peut encore
           // bloquer d'autres coups si l'adversaire enchaîne une rafale (voir
@@ -991,14 +1077,23 @@ export function AutoBattleScreen({
           const abilityNom = turn.ability_nom ?? (attackerSide === 'player' ? playerAbilityNom : opponentAbilityNom)
           const ability = attacksByName?.get(abilityNom)
 
-          pushHistory(attackerSide, `a manqué son attaque ${sideInfo(attackerSide, turn).ability}`, {
-            // Un coup arrêté par l'invulnérabilité adverse n'a rien à voir
-            // avec la précision (le serveur court-circuite le jet) : pas de
-            // détail à afficher dans ce cas.
-            precisionFormula: isAdmin && !turn.invulnerable_miss
-              ? buildPrecisionDebug(ability?.precision, attackerPrecisionStatus, turn.precision_mod_amount ?? 0)
-              : undefined,
-          })
+          pushHistory(
+            attackerSide,
+            turn.requires_status_failed
+              ? { before: `a utilisé ${sideInfo(attackerSide, turn).ability} — sans effet hors `, status: turn.requires_status!, after: '' }
+              : turn.no_effect
+              ? `a utilisé ${sideInfo(attackerSide, turn).ability} — aucun effet sur ce type`
+              : `a manqué son attaque ${sideInfo(attackerSide, turn).ability}`,
+            {
+              // Un coup arrêté par l'invulnérabilité adverse, une immunité de
+              // type ou un statut exigé absent n'a rien à voir avec la
+              // précision (le serveur court-circuite le jet) : pas de détail à
+              // afficher dans ce cas.
+              precisionFormula: isAdmin && !turn.invulnerable_miss && !turn.no_effect && !turn.requires_status_failed
+                ? buildPrecisionDebug(ability?.precision, attackerPrecisionStatus, turn.precision_mod_amount ?? 0)
+                : undefined,
+            }
+          )
           // Peur/confusion : cette attaque ratée (ou non) est précisément
           // celle sous l'effet révélé par le tick précédent (turns[i-1]) —
           // le badge a été délibérément laissé affiché jusqu'ici (voir le
@@ -1007,7 +1102,7 @@ export function AutoBattleScreen({
           // peur guérit toujours en un coup, mais la confusion peut persister
           // (comme le sommeil) et le badge doit alors rester affiché pour les
           // tours suivants.
-          if (attackerPrecisionStatus && precedingTick?.status_cured) {
+          if (attackerPrecisionStatus && precedingTick?.status_cured && !statusReapplied) {
             if (attackerSide === 'player') setPlayerStatus(null)
             else setOpponentStatus(null)
           }
@@ -1055,10 +1150,16 @@ export function AutoBattleScreen({
           if (turn.percent_hp_damage) {
             const percent = rule?.percent_hp_damage_percent
             if (percent != null) {
-              const hpBefore = turn.defender_hp_after + turn.damage
+              // Base du calcul : les PV RESTANTS avant le coup (reconstruits
+              // depuis defender_hp_after + damage) ou les PV MAX de la cible,
+              // selon percent_hp_damage_basis — voir describeAbilityRule.
+              const onMaxHp = rule?.percent_hp_damage_basis === 'max'
+              const hpBefore = onMaxHp
+                ? (hitSide === 'player' ? playerMaxHp : opponentMaxHp)
+                : turn.defender_hp_after + turn.damage
               const computed = Math.floor(hpBefore * percent / 100)
               const extra = turn.damage - computed
-              damageFormula = `${percent}% des PV restants de la cible (${hpBefore})`
+              damageFormula = `${percent}% des PV ${onMaxHp ? 'max' : 'restants'} de la cible (${hpBefore})`
               if (extra !== 0) damageFormula += ` ${extra > 0 ? '+' : '-'} ${Math.abs(extra)} (additionnel)`
               damageFormula += ` = ${turn.damage}`
             }
@@ -1111,7 +1212,7 @@ export function AutoBattleScreen({
         // effectivement guéri le statut (avant un éventuel NOUVEAU statut
         // appliqué par ce même coup plus bas, qui écrasera cet effacement le
         // cas échéant).
-        if (attackerPrecisionStatus && precedingTick?.status_cured) {
+        if (attackerPrecisionStatus && precedingTick?.status_cured && !statusReapplied) {
           if (attackerSide === 'player') setPlayerStatus(null)
           else setOpponentStatus(null)
         }
@@ -1147,6 +1248,20 @@ export function AutoBattleScreen({
           if (statusTarget === 'player') setPlayerStatus(turn.status_applied)
           else setOpponentStatus(turn.status_applied)
           pushHistory(statusTarget, { before: 'est affecté par ', status: turn.status_applied, after: '' })
+        }
+
+        // Purges jouées par ce coup sur son AUTEUR (voir
+        // autobattle_ability_rules.clear_damage_dot / cure_status) : le badge
+        // de statut s'éteint ici, les dégâts sur la durée n'ont pas de badge
+        // et ne laissent qu'une ligne d'historique. La météo dissipée, elle,
+        // arrive dans un tour weather_tick séparé (voir plus haut).
+        if (turn.cleanse_dot) {
+          pushHistory(attackerSide, 'dissipe les effets persistants qui le rongeaient')
+        }
+        if (turn.cleanse_status) {
+          if (attackerSide === 'player') setPlayerStatus(null)
+          else setOpponentStatus(null)
+          pushHistory(attackerSide, { before: 'se soigne de ', status: turn.cleanse_status, after: '' })
         }
 
         // Invulnérabilité accordée par ce coup à son auteur (voir
@@ -1236,47 +1351,6 @@ export function AutoBattleScreen({
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-4 relative">
-        {/* Météo en cours (voir autobattle_weathers) : pastille pile entre les
-            deux JAUGES DE PV, au ras du bas de l'arène — c'est la seule bande
-            horizontale que ni les sprites ni leurs animations n'occupent (un
-            bond ou un projectile traverse tout le reste de la grille).
-            Positionnée en absolu par-dessus la grille (z-20 : au-dessus du z-10
-            que prend la colonne qui attaque) plutôt qu'insérée dans le flux,
-            qui décalerait les deux colonnes.
-            Fond transparent : seule l'icône se voit, mais le bouton garde sa
-            surface cliquable. Un clic ouvre la description, générée côté serveur. */}
-        {activeWeather && (
-          <div className="absolute left-1/2 -translate-x-1/2 bottom-0 z-20 flex flex-col items-center">
-            <button
-              type="button"
-              // Pas de bascule on/off au reclic : le pointerdown de fermeture
-              // (capture, voir l'effet plus haut) part AVANT le click, un
-              // toggle rouvrirait donc systématiquement. Recliquer ré-affiche
-              // simplement la bulle — comportement identique aux talents.
-              onClick={() => setWeatherTipOpen(true)}
-              title={activeWeather.nom}
-              aria-label={`Météo : ${activeWeather.nom}`}
-              className="w-8 h-8 rounded-full flex items-center justify-center text-xl leading-none bg-transparent animate-[celebrate-pop_0.52s_ease-out]"
-            >
-              {activeWeather.icon || '🌦️'}
-            </button>
-            {weatherTipOpen && (
-              <div
-                role="tooltip"
-                // Sortie du flux elle aussi : la bulle ne doit jamais pousser
-                // les sprites vers le bas quand elle s'ouvre.
-                className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 w-56 max-w-[80vw] p-2 rounded bg-white text-ink text-xs leading-snug flex flex-col gap-1 ${PIXEL_BORDER_SM} shadow-[var(--shadow-pixel)]`}
-              >
-                <span className="font-bold">{activeWeather.nom}</span>
-                {activeWeather.details.length === 0 ? (
-                  <span className="text-ink-muted-2">Aucun effet direct.</span>
-                ) : (
-                  activeWeather.details.map((line, i) => <span key={i}>{line}</span>)
-                )}
-              </div>
-            )}
-          </div>
-        )}
         {/* Le camp qui attaque passe au-dessus de l'autre colonne : sans ça,
             un sprite qui bondit sur l'adversaire (ou un rayon/projectile qui
             le traverse) passerait derrière lui, le joueur étant le premier des
@@ -1351,9 +1425,6 @@ export function AutoBattleScreen({
               <AutoBattleAttackVfx key={vfxKey} kind={attackVfx.kind} color={attackVfx.color} sign={1} reachPx={reachPx} travelMs={attackVfx.travelMs} damage={attackVfx.damage} />
             )}
           </div>
-          <div className="w-full max-w-[160px]">
-            <HpGauge current={Math.max(0, playerHp)} max={playerMaxHp} />
-          </div>
         </div>
 
         <div ref={opponentColRef} className={`flex flex-col items-center gap-2 relative ${attackState?.side === 'opponent' ? 'z-10' : ''}`}>
@@ -1418,9 +1489,67 @@ export function AutoBattleScreen({
               <AutoBattleAttackVfx key={vfxKey} kind={attackVfx.kind} color={attackVfx.color} sign={-1} reachPx={reachPx} travelMs={attackVfx.travelMs} damage={attackVfx.damage} />
             )}
           </div>
-          <div className="w-full max-w-[160px]">
-            <HpGauge current={Math.max(0, opponentHp)} max={opponentMaxHp} />
-          </div>
+        </div>
+      </div>
+
+      {/* Jauges de PV des DEUX camps sur une seule rangée, séparées par une
+          colonne centrale étroite réservée à la pastille de météo. Elles
+          étaient auparavant dans leur colonne respective, la pastille venant
+          se poser en absolu par-dessus : sur mobile elle chevauchait les deux
+          jauges. Ici le chevauchement est impossible par construction, quelle
+          que soit la largeur d'écran, et chaque jauge prend tout le reste de la
+          place (flex-1). La colonne centrale garde sa largeur même sans météo :
+          la mise en page ne bouge pas quand une météo se lève en cours de
+          combat. Sortir les jauges de la grille des sprites les aligne au
+          passage à la même hauteur, même quand un nom de pokémon se replie sur
+          deux lignes d'un seul côté.
+          -mt-2 : rattrape le gap-4 du conteneur pour retrouver l'écart d'origine
+          entre le bas des sprites et les jauges (gap-2). */}
+      <div className="flex items-end gap-1 -mt-2">
+        <div className="flex-1 min-w-0">
+          <HpGauge current={Math.max(0, playerHp)} max={playerMaxHp} valueAlign="left" />
+        </div>
+        {/* Largeur figée à celle de la pastille (w-8) : le strict minimum
+            réservé au centre, tout le reste va aux deux jauges. */}
+        <div className="relative w-8 shrink-0 flex justify-center">
+          {/* Fond transparent : seule l'icône se voit, mais le bouton garde sa
+              surface cliquable. Un clic ouvre la description, générée côté
+              serveur (voir autobattle_weather_details). */}
+          {activeWeather && (
+            <>
+              <button
+                type="button"
+                // Pas de bascule on/off au reclic : le pointerdown de fermeture
+                // (capture, voir l'effet plus haut) part AVANT le click, un
+                // toggle rouvrirait donc systématiquement. Recliquer ré-affiche
+                // simplement la bulle — comportement identique aux talents.
+                onClick={() => setWeatherTipOpen(true)}
+                title={activeWeather.nom}
+                aria-label={`Météo : ${activeWeather.nom}`}
+                className="w-8 h-8 rounded-full flex items-center justify-center text-xl leading-none bg-transparent animate-[celebrate-pop_0.52s_ease-out]"
+              >
+                {activeWeather.icon || '🌦️'}
+              </button>
+              {weatherTipOpen && (
+                <div
+                  role="tooltip"
+                  // Hors du flux : la bulle ne doit jamais pousser ce qui suit
+                  // vers le bas quand elle s'ouvre.
+                  className={`absolute z-20 top-full left-1/2 -translate-x-1/2 mt-1 w-56 max-w-[80vw] p-2 rounded bg-white text-ink text-xs leading-snug flex flex-col gap-1 ${PIXEL_BORDER_SM} shadow-[var(--shadow-pixel)]`}
+                >
+                  <span className="font-bold">{activeWeather.nom}</span>
+                  {activeWeather.details.length === 0 ? (
+                    <span className="text-ink-muted-2">Aucun effet direct.</span>
+                  ) : (
+                    activeWeather.details.map((line, i) => <span key={i}>{line}</span>)
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <HpGauge current={Math.max(0, opponentHp)} max={opponentMaxHp} />
         </div>
       </div>
 

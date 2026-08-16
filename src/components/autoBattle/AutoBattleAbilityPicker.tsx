@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import type { Pokemon, PlayerPokemon, Attack, AutoBattleAbilityRule } from '../../types'
 import { getStatusEffectDisplay, describeAbilityRule } from '../../lib/autoBattle'
-import { getSuperEfficace } from '../../lib/pokemonFacts'
+import { isTypeSuperEffective, isAbilityBlockedByType } from '../../lib/typeChart'
 import { TypeBadge } from '../TypeBadge'
 import { PixelIcon } from '../icons/PixelIcon'
 import { STAT_ICON, DICE_GENERIC_ICON } from '../../lib/icons'
 import { AutoBattleLaunchBar } from './AutoBattleLaunchBar'
+import { AbilityEffectLines } from './AbilityEffectLines'
 import { getPrecisionColor, formatPrecision } from '../../lib/precisionColor'
 import { PANEL } from '../../lib/panelStyles'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
@@ -13,10 +14,8 @@ import { useToast } from '../../context/ToastContext'
 
 interface Props {
   playerPokemon: PlayerPokemon
-  /** Espèce EFFECTIVEMENT combattante (celle copiée par Métamorph le cas échéant, voir AutoBattlePopup) — sert à déterminer le badge Super Efficace par capacité : celui-ci n'apparaît que si le pokémon est super efficace contre l'adversaire ET que le type de LA CAPACITÉ correspond au type du pokémon (voir requirement, même règle que le bonus de dégâts x2). */
-  playerSpecies?: Pokemon
   opponentSpecies?: Pokemon
-  /** Ce niveau a-t-il déjà été joué au moins une fois (autobattle_player_level_state.discovered) — même règle que AutoBattlePokemonPicker : le badge "Super Efficace" par capacité ne doit pas apparaître lors du tout premier combat contre cet adversaire. Spécifique au mode Auto : en Combat Manuel (ManualBattleAbilityGrid) le badge reste visible dès le premier combat. */
+  /** Ce niveau a-t-il déjà été joué au moins une fois (autobattle_player_level_state.discovered) — même règle que AutoBattlePokemonPicker : le badge "Super Efficace" par capacité ne doit pas apparaître lors du tout premier combat contre cet adversaire. Spécifique au mode Auto : en Combat Manuel (ManualBattleAbilityGrid) le badge reste visible dès le premier combat. Les capacités SANS EFFET, elles, restent grisées même sur un adversaire non découvert : elles ne sont tout simplement pas jouables. */
   opponentDiscovered: boolean
   attacksByName: Map<string, Attack>
   abilityRulesByName: Map<string, AutoBattleAbilityRule>
@@ -45,14 +44,12 @@ interface Props {
 // qui déclenche le combat et le débit du ticket (voir handleSelectAbility
 // dans AutoBattlePopup). Tant qu'il n'est pas pressé, le joueur peut changer
 // d'avis ou revenir en arrière sans rien dépenser.
-export function AutoBattleAbilityPicker({ playerPokemon, playerSpecies, opponentSpecies, opponentDiscovered, attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, onSelect, noTicket, onBack }: Props) {
+export function AutoBattleAbilityPicker({ playerPokemon, opponentSpecies, opponentDiscovered, attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, onSelect, noTicket, onBack }: Props) {
   const { showToast } = useToast()
   const [selected, setSelected] = useState<Attack | null>(null)
   const abilities = playerPokemon.moves
     .map((nom) => attacksByName.get(nom))
     .filter((a): a is Attack => a != null)
-  const isSuperEffectiveSpecies = opponentDiscovered && opponentSpecies != null
-    && getSuperEfficace(playerSpecies).includes(opponentSpecies.type)
 
   return (
     <div className="flex flex-col gap-3">
@@ -62,16 +59,27 @@ export function AutoBattleAbilityPicker({ playerPokemon, playerSpecies, opponent
       </div>
       <div className="flex flex-col gap-2">
         {abilities.map((a) => {
-          const ineligible = bannedAttacks.has(a.nom)
-          const effectLines = describeAbilityRule(abilityRulesByName.get(a.nom), a)
-          const superEffective = isSuperEffectiveSpecies && playerSpecies != null
-            && a.type.toLowerCase().trim() === playerSpecies.type.toLowerCase().trim()
+          const rule = abilityRulesByName.get(a.nom)
+          const banned = bannedAttacks.has(a.nom)
+          // Immunité de type : cette capacité ne peut RIEN faire à l'adversaire
+          // (voir src/lib/typeChart.ts, même règle que type_no_effect côté
+          // serveur) — grisée et non sélectionnable, au même titre qu'une
+          // capacité bannie. Seules les capacités qui VISENT l'adversaire sont
+          // concernées : un soin/buff sur soi reste jouable (requirement).
+          const noEffect = !banned && isAbilityBlockedByType(a, rule, opponentSpecies?.type)
+          const ineligible = banned || noEffect
+          const effectLines = describeAbilityRule(rule, a)
+          // Super efficace : type de LA CAPACITÉ vs type de l'adversaire —
+          // plus aucun rapport avec le type du pokémon qui la lance.
+          const superEffective = opponentDiscovered && isTypeSuperEffective(a.type, opponentSpecies?.type)
           const isSelected = selected?.nom === a.nom
           return (
             <button
               key={a.nom}
               onClick={() => {
-                if (ineligible) {
+                if (noEffect) {
+                  showToast(`Aucun effet sur un pokémon de type ${opponentSpecies?.type ?? ''}`.trim())
+                } else if (banned) {
                   showToast("Cette capacité n'est pas disponible dans ce mode de jeu")
                 } else {
                   setSelected(a)
@@ -92,7 +100,12 @@ export function AutoBattleAbilityPicker({ playerPokemon, playerSpecies, opponent
                   Super Efficace
                 </span>
               )}
-              {ineligible ? (
+              {noEffect && (
+                <span className="text-xs font-bold px-2.5 py-1 rounded-full text-white bg-ink/70 whitespace-nowrap shrink-0">
+                  Aucun effet
+                </span>
+              )}
+              {banned ? (
                 <span className="flex items-center gap-1 shrink-0">
                   <span className="text-sm">🛑</span>
                   <span className="text-ink text-xs font-bold">BAN</span>
@@ -129,13 +142,7 @@ export function AutoBattleAbilityPicker({ playerPokemon, playerSpecies, opponent
                       </span>
                     )
                   })()}
-                  {effectLines.length > 0 && (
-                    <div className="w-full flex flex-col gap-0.5 mt-0.5">
-                      {effectLines.map((line, i) => (
-                        <span key={i} className="text-ink-muted-2 text-sm leading-tight">{line}</span>
-                      ))}
-                    </div>
-                  )}
+                  <AbilityEffectLines lines={effectLines} textClassName="text-sm" />
                 </>
               )}
             </button>

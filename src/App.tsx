@@ -16,6 +16,7 @@ import { POKEDOLLAR_ITEM_NAME } from './types'
 import { maybeResetGiftTimerOnEntry } from './lib/gifting'
 import { logHistoryEvent } from './lib/historyLog'
 import { AdminTab } from './components/AdminTab'
+import { TypeChartTab } from './components/TypeChartTab'
 import { AdminAttacksPanel } from './components/AdminAttacksPanel'
 import { RencontresTab } from './components/RencontresTab'
 import { ManualDiscoveryModal } from './components/ManualDiscoveryModal'
@@ -46,6 +47,7 @@ const TAB_TITLES: Record<TabId, string> = {
   sac: 'SAC',
   carte: 'CARTE',
   attaques: 'CAPACITÉS',
+  types: 'TABLE DES TYPES',
   rencontres: 'RENCONTRES',
   campagne: 'JOURNAL DE CAMPAGNE',
   admin: 'ADMIN',
@@ -87,7 +89,7 @@ export default function App() {
   // Si l'onglet actif devient invisible (déconnexion, sortie du mode admin, fonctionnalité désactivée), on revient à l'accueil
   useEffect(() => {
     if ((activeTab === 'equipe' || activeTab === 'sac') && !player) setActiveTab('accueil')
-    if ((activeTab === 'admin' || activeTab === 'attaques' || activeTab === 'rencontres' || activeTab === 'campagne') && !isAdmin) setActiveTab('accueil')
+    if ((activeTab === 'admin' || activeTab === 'attaques' || activeTab === 'types' || activeTab === 'rencontres' || activeTab === 'campagne') && !isAdmin) setActiveTab('accueil')
     if (activeTab === 'pokedex' && !parameters.feature_pokedex_enabled) setActiveTab('accueil')
     if (activeTab === 'equipe' && !parameters.feature_pokemon_enabled) setActiveTab('accueil')
     if (activeTab === 'sac' && !parameters.feature_inventory_enabled) setActiveTab('accueil')
@@ -160,6 +162,7 @@ export default function App() {
     showSacTab: !!player && parameters.feature_inventory_enabled,
     showCarteTab: parameters.feature_map_enabled,
     showAttacksTab: isAdmin,
+    showTypesTab: isAdmin,
     showRencontresTab: isAdmin,
     showCampagneTab: isAdmin,
     showAdminTab: isAdmin,
@@ -278,6 +281,10 @@ export default function App() {
             <div className="flex-1 overflow-y-auto p-4">
               <AdminAttacksPanel />
             </div>
+          )}
+
+          {activeTab === 'types' && isAdmin && (
+            <TypeChartTab />
           )}
 
           {activeTab === 'rencontres' && isAdmin && (

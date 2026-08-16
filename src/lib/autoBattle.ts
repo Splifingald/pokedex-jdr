@@ -22,6 +22,17 @@ export const STATUS_EFFECT_LABEL: Record<AutoBattleStatusEffect, string> = {
   frozen: 'Gel',
 }
 
+/**
+ * Sens d'un modificateur de stat : la cible et le sens sont deux réglages
+ * indépendants (une capacité peut se baisser une stat à elle-même). Les règles
+ * écrites avant l'ajout de stat_mod_direction n'ont pas de sens explicite : on
+ * retombe alors sur l'ancienne convention (adversaire = baisse, soi = hausse),
+ * exactement comme autobattle_stat_mod_signed côté SQL.
+ */
+export function isStatModDebuff(rule: Pick<AutoBattleAbilityRule, 'stat_mod_target' | 'stat_mod_direction'>): boolean {
+  return (rule.stat_mod_direction ?? (rule.stat_mod_target === 'opponent' ? 'debuff' : 'buff')) === 'debuff'
+}
+
 const STATUS_ID_BY_EFFECT: Record<AutoBattleStatusEffect, StatusId> = {
   paralysis: 'paralysie',
   fear: 'apeure',
@@ -141,6 +152,22 @@ export function generateIdempotencyKey(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
+// Libellé de la condition de dégâts additionnels 'weight_ratio' (comparaison
+// des POIDS des deux espèces, voir AutoBattleAbilityRule.bonus_damage_weight_*
+// et son miroir SQL autobattle_weight_condition). Le « 100 % » se dit
+// simplement « plus lourd / plus léger que », les autres pourcentages
+// s'écrivent tels quels.
+export function describeWeightCondition(rule: AutoBattleAbilityRule): string {
+  const percent = rule.bonus_damage_weight_percent ?? 100
+  const heavier = rule.bonus_damage_weight_comparison !== 'lower'
+  const subject = rule.bonus_damage_weight_target === 'opponent' ? "si l'adversaire pèse" : "s'il pèse"
+  const other = rule.bonus_damage_weight_target === 'opponent' ? 'son poids' : 'le poids de l’adversaire'
+  if (percent === 100) {
+    return `${subject} ${heavier ? 'plus' : 'moins'} que ${other}`
+  }
+  return `${subject} ${heavier ? 'plus' : 'moins'} de ${percent}% de ${other}`
+}
+
 // Résumé textuel court des effets spéciaux d'une capacité (voir
 // autobattle_ability_rules) — une ligne par effet configuré, utilisé par les
 // écrans de sélection de capacité en Combat Auto (AutoBattleAbilityPicker,
@@ -160,30 +187,30 @@ export function describeAbilityRule(
   const lines: string[] = []
   const weatherNom = (id: number | null) => (id != null ? weatherNames?.get(id) ?? null : null)
   if (rule.turn_effect === 'skip') {
-    lines.push('Passe son tour un coup sur deux')
+    lines.push('Passe son tour 1 fois sur 2')
   } else if (rule.turn_effect === 'play_twice') {
-    lines.push('Attaque deux fois de suite')
+    lines.push('Attaque 2 fois')
   } else if (rule.turn_effect === 'play_three') {
-    lines.push('Attaque trois fois de suite')
+    lines.push('Attaque 3 fois')
   } else if (rule.turn_effect === 'play_random') {
-    lines.push(`Attaque entre ${rule.turn_random_min} et ${rule.turn_random_max} fois de suite`)
+    lines.push(`Attaque ${rule.turn_random_min} à ${rule.turn_random_max} fois`)
   } else if (rule.turn_effect === 'repeat_until_fail') {
-    lines.push(`Attaque en rafale jusqu'au premier échec (max ${rule.repeat_max_iterations} fois)`)
+    lines.push(`Rafale jusqu'au 1er échec (max ${rule.repeat_max_iterations})`)
   } else if (rule.turn_effect === 'prepare_release') {
-    lines.push('Nécessite un tour de préparation avant de frapper')
+    lines.push('1 tour de préparation')
   } else if (rule.turn_effect === 'charge_double_next') {
-    lines.push('Ne fait rien ce tour-ci, mais joue 2 fois au prochain tour')
+    lines.push('Rien ce tour, joue 2 fois au suivant')
   } else if (rule.turn_effect === 'first_and_replay') {
-    lines.push('Ne consomme pas le tour : rejoue aussitôt et passe premier')
+    lines.push('Rejoue aussitôt et passe premier')
   }
   if (rule.keep_going_turns || rule.keep_going_until_fail) {
     lines.push(rule.keep_going_until_fail
-      ? "Se rejoue automatiquement à chaque tour jusqu'au premier raté"
-      : `Se rejoue automatiquement pendant ${rule.keep_going_turns} tour${(rule.keep_going_turns ?? 0) > 1 ? 's' : ''} de plus (s'arrête au premier raté)`)
+      ? "Se rejoue seul jusqu'au 1er raté"
+      : `Se rejoue seul ${rule.keep_going_turns} tour${(rule.keep_going_turns ?? 0) > 1 ? 's' : ''} de plus (stop au 1er raté)`)
     if (rule.keep_going_bonus_type === 'flat' && rule.keep_going_bonus_flat) {
-      lines.push(`+${rule.keep_going_bonus_flat} dégâts cumulés à chaque réutilisation`)
+      lines.push(`+${rule.keep_going_bonus_flat} dégâts cumulés par réutilisation`)
     } else if (rule.keep_going_bonus_type === 'percent_damage' && rule.keep_going_bonus_percent) {
-      lines.push(`+${rule.keep_going_bonus_percent}% des dégâts de base du pokémon, cumulés à chaque réutilisation`)
+      lines.push(`+${rule.keep_going_bonus_percent}% des dégâts de base cumulés par réutilisation`)
     }
   }
   if (rule.heal_type === 'static' && rule.heal_amount) {
@@ -207,58 +234,98 @@ export function describeAbilityRule(
     lines.push(`Soigne ${rule.heal_dot_amount} PV/tour ${healDotDuration}`)
   }
   if (rule.cancel_heal_duration_turns) {
-    lines.push(`Annule les soins adverses pendant ${rule.cancel_heal_duration_turns} tours`)
+    lines.push(`Bloque les soins adverses ${rule.cancel_heal_duration_turns} tours`)
+  }
+  // Effets persistants OFFENSIFS : posés sur l'adversaire, un pourcentage se
+  // comptant toujours sur SES PV max (voir AutoBattleAbilityRule.damage_dot_*).
+  if (rule.damage_dot_duration_turns) {
+    const amount = rule.damage_dot_type === 'percent_max_hp'
+      ? `${rule.damage_dot_percent}% de ses PV max`
+      : `${rule.damage_dot_amount} PV`
+    lines.push(`Ronge l'adversaire de ${amount}/tour pendant ${rule.damage_dot_duration_turns} tours`)
+  }
+  if (rule.leech_dot_duration_turns) {
+    const amount = rule.leech_dot_type === 'percent_max_hp'
+      ? `${rule.leech_dot_percent}% de ses PV max`
+      : `${rule.leech_dot_amount} PV`
+    lines.push(`Vole ${amount}/tour à l'adversaire pendant ${rule.leech_dot_duration_turns} tours`)
+  }
+  if (rule.status_dot_duration_turns && rule.status_dot_status) {
+    lines.push(`${rule.status_dot_chance}% par tour d'infliger ${STATUS_EFFECT_LABEL[rule.status_dot_status]} pendant ${rule.status_dot_duration_turns} tours`)
+  }
+  if (rule.clear_damage_dot) {
+    lines.push('Dissipe les effets persistants qu\'il subit')
+  }
+  if (rule.cure_status) {
+    lines.push('Guérit son statut')
+  }
+  if (rule.clear_weather) {
+    lines.push('Dissipe la météo en cours')
+  }
+  if (rule.pierce_immunity_type && rule.pierce_immunity_turns) {
+    lines.push(`Ignore l'immunité des ${rule.pierce_immunity_type} pendant ${rule.pierce_immunity_turns} tours`)
+  }
+  if (rule.requires_target_status) {
+    lines.push(`Ne marche que sur une cible sous ${STATUS_EFFECT_LABEL[rule.requires_target_status]}`)
   }
   if (rule.stat_mod_target && rule.stat_mod_stat) {
-    const statLabel = rule.stat_mod_stat === 'damage' ? 'dégâts' : 'précision'
-    const targetLabel = rule.stat_mod_target === 'opponent' ? "de l'adversaire" : 'de son utilisateur'
-    const verb = rule.stat_mod_target === 'opponent' ? 'Réduit' : 'Augmente'
+    // Forme télégraphique « Dégâts adverses -5 (3 tours) » plutôt qu'une phrase
+    // complète : c'est la ligne la plus longue du lot, et elle tombe sur des
+    // cartes larges d'une demi-colonne en Combat Manuel.
+    const statLabel = rule.stat_mod_stat === 'damage' ? 'Dégâts' : 'Précision'
+    const targetLabel = rule.stat_mod_target === 'opponent'
+      ? (rule.stat_mod_stat === 'damage' ? 'adverses' : 'adverse')
+      : (rule.stat_mod_stat === 'damage' ? 'alliés' : 'alliée')
+    const sign = isStatModDebuff(rule) ? '-' : '+'
     const amount = rule.stat_mod_value_type === 'flat' ? `${rule.stat_mod_flat}`
       : rule.stat_mod_value_type === 'range' ? `${rule.stat_mod_min}-${rule.stat_mod_max}`
       : `${rule.stat_mod_percent}%`
-    const duration = rule.stat_mod_duration_type === 'battle_end' ? "jusqu'à la fin du combat" : `pendant ${rule.stat_mod_duration_turns} tours`
-    const usesSuffix = rule.stat_mod_max_uses ? ` (max ${rule.stat_mod_max_uses}×)` : ''
-    const typeSuffix = rule.stat_mod_type_filter ? ` — capacités ${rule.stat_mod_type_filter} uniquement` : ''
+    const duration = rule.stat_mod_duration_type === 'battle_end' ? '(tout le combat)' : `(${rule.stat_mod_duration_turns} tours)`
+    const usesSuffix = rule.stat_mod_max_uses ? ` max ${rule.stat_mod_max_uses}×` : ''
+    const typeSuffix = rule.stat_mod_type_filter ? ` — ${rule.stat_mod_type_filter} uniquement` : ''
     const weatherCond = describeWeatherCondition(rule.stat_mod_weather_condition, weatherNom(rule.stat_mod_weather_id))
     const weatherSuffix = weatherCond ? ` — ${weatherCond}` : ''
-    lines.push(`${verb} les ${statLabel} ${targetLabel} de ${amount} ${duration}${usesSuffix}${typeSuffix}${weatherSuffix}`)
+    lines.push(`${statLabel} ${targetLabel} ${sign}${amount} ${duration}${usesSuffix}${typeSuffix}${weatherSuffix}`)
   }
   if (rule.percent_hp_damage_percent) {
-    lines.push(`Inflige ${rule.percent_hp_damage_percent}% des PV restants de la cible (remplace les dégâts habituels)`)
+    lines.push(rule.percent_hp_damage_basis === 'max'
+      ? `Inflige ${rule.percent_hp_damage_percent}% des PV max de la cible (au lieu des dégâts)`
+      : `Inflige ${rule.percent_hp_damage_percent}% des PV restants (au lieu des dégâts)`)
   }
   if (rule.recoil_type === 'range' && rule.recoil_min != null && rule.recoil_max != null) {
-    lines.push(rule.recoil_min === rule.recoil_max ? `Contre-coup de ${rule.recoil_min} PV` : `Contre-coup de ${rule.recoil_min}-${rule.recoil_max} PV`)
+    lines.push(rule.recoil_min === rule.recoil_max ? `Contre-coup ${rule.recoil_min} PV` : `Contre-coup ${rule.recoil_min}-${rule.recoil_max} PV`)
   } else if (rule.recoil_type === 'percent_damage' && rule.recoil_percent) {
-    lines.push(`Contre-coup de ${rule.recoil_percent}% des dégâts infligés`)
+    lines.push(`Contre-coup ${rule.recoil_percent}% des dégâts`)
   }
   if (rule.bonus_damage_type) {
-    const conditionLabel = rule.bonus_damage_condition === 'took_damage_last_turn' ? "s'il a subi des dégâts au tour adverse précédent"
-      : rule.bonus_damage_condition === 'first_use' ? "à la 1ère utilisation"
-      : rule.bonus_damage_condition === 'dice_equals' ? `si le dé tombe sur ${rule.bonus_damage_condition_dice_value}`
+    const conditionLabel = rule.bonus_damage_condition === 'took_damage_last_turn' ? 'si touché au tour précédent'
+      : rule.bonus_damage_condition === 'first_use' ? 'à la 1ère utilisation'
+      : rule.bonus_damage_condition === 'dice_equals' ? `si le dé fait ${rule.bonus_damage_condition_dice_value}`
       : rule.bonus_damage_condition === 'has_status'
-        ? (rule.bonus_damage_status_filter ? `si l'adversaire est ${STATUS_EFFECT_LABEL[rule.bonus_damage_status_filter].toLowerCase()}` : "si l'adversaire est affecté par un statut (n'importe lequel)")
+        ? (rule.bonus_damage_status_filter ? `si l'adversaire est ${STATUS_EFFECT_LABEL[rule.bonus_damage_status_filter].toLowerCase()}` : "si l'adversaire a un statut")
       : rule.bonus_damage_condition === 'self_has_status'
-        ? (rule.bonus_damage_status_filter ? `s'il est lui-même ${STATUS_EFFECT_LABEL[rule.bonus_damage_status_filter].toLowerCase()}` : "s'il est lui-même affecté par un statut (n'importe lequel)")
+        ? (rule.bonus_damage_status_filter ? `si lui-même ${STATUS_EFFECT_LABEL[rule.bonus_damage_status_filter].toLowerCase()}` : "s'il a un statut")
+      : rule.bonus_damage_condition === 'weight_ratio' ? describeWeightCondition(rule)
       : ''
-    const bonusLabel = rule.bonus_damage_type === 'multiply' ? `dégâts ×${rule.bonus_damage_multiplier}`
+    const bonusLabel = rule.bonus_damage_type === 'multiply' ? `Dégâts ×${rule.bonus_damage_multiplier}`
       : rule.bonus_damage_type === 'flat' ? `+${rule.bonus_damage_flat} dégâts`
       : `+${rule.bonus_damage_min}-${rule.bonus_damage_max} dégâts`
-    lines.push(`Bonus : ${bonusLabel} ${conditionLabel}`)
+    lines.push(`${bonusLabel} ${conditionLabel}`.trim())
   }
   if (rule.prevention_duration_turns) {
-    lines.push(`Prévention : bloque les dégâts supplémentaires "super efficace" pendant ${rule.prevention_duration_turns} tours`)
+    lines.push(`Bloque le bonus "super efficace" ${rule.prevention_duration_turns} tours`)
   }
   if (rule.ignore_status_block) {
     lines.push(`Utilisable même sous ${STATUS_EFFECT_LABEL[rule.ignore_status_block].toLowerCase()}`)
   }
   if (rule.invulnerable_next_turn) {
-    lines.push('Rend invulnérable au prochain tour adverse')
+    lines.push('Invulnérable pour 1 tour')
   }
   if (rule.weather_id != null) {
-    lines.push(`${rule.weather_chance ?? 0} % de déclencher ${weatherNom(rule.weather_id) ?? 'une météo'} en touchant`)
+    lines.push(`${rule.weather_chance ?? 0} % de lever ${weatherNom(rule.weather_id) ?? 'une météo'} en touchant`)
   }
   if (ability.status_effect && rule.status_reversed) {
-    lines.push('Le statut affecte son utilisateur, pas l\'adversaire')
+    lines.push('Le statut le touche lui, pas l\'adversaire')
   }
   return lines
 }
@@ -450,6 +517,9 @@ function weatherTypeList(list: string[] | null, allTypes?: string[]): string {
  */
 export function getActiveWeather(turns: AutoBattleTurn[]): AutoBattleTurn | null {
   for (let i = turns.length - 1; i >= 0; i--) {
+    // Une dissipation (voir AutoBattleAbilityRule.clear_weather) rencontrée
+    // avant toute levée signifie qu'il n'y a plus de météo du tout.
+    if (turns[i].weather_cleared) return null
     if (turns[i].weather_set) return turns[i]
   }
   return null

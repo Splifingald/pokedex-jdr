@@ -3,6 +3,7 @@ import { getStatusEffectDisplay, describeAbilityRule } from '../lib/autoBattle'
 import { TypeBadge } from './TypeBadge'
 import { PixelIcon } from './icons/PixelIcon'
 import { CloseIcon } from './icons/CloseIcon'
+import { AbilityEffectLines } from './autoBattle/AbilityEffectLines'
 import { STAT_ICON, DICE_GENERIC_ICON } from '../lib/icons'
 import { getPrecisionColor, formatPrecision } from '../lib/precisionColor'
 import { PANEL } from '../lib/panelStyles'
@@ -155,13 +156,7 @@ export function PvpAbilityLoadoutPicker({
                       </span>
                     )
                   })()}
-                  {effectLines.length > 0 && (
-                    <div className="w-full flex flex-col gap-0.5 mt-0.5">
-                      {effectLines.map((line, i) => (
-                        <span key={i} className="text-ink-muted-2 text-sm leading-tight">{line}</span>
-                      ))}
-                    </div>
-                  )}
+                  <AbilityEffectLines lines={effectLines} textClassName="text-sm" />
                 </>
               )}
             </button>

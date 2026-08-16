@@ -62,7 +62,9 @@ export function MagikarpGame({
   const [countdownStep, setCountdownStep] = useState(0)
   const [taps, setTaps] = useState(0)
   const [jumpKey, setJumpKey] = useState(0)
-  const [lastTapFlipped, setLastTapFlipped] = useState(false)
+  // Sens dans lequel Magicarpe regarde : chaque palier d'étoiles franchi le retourne
+  // définitivement (demi-tour), il ne revient pas à son orientation précédente.
+  const [facing, setFacing] = useState<1 | -1>(1)
   const [timeLeftMs, setTimeLeftMs] = useState(config.magikarp_duration_seconds * 1000)
 
   const [isNewHighScore, setIsNewHighScore] = useState(false)
@@ -152,7 +154,7 @@ export function MagikarpGame({
       const nextTaps = prev + 1
       const crossedThreshold = computeStars(nextTaps, config) > computeStars(prev, config)
       setJumpKey((k) => k + 1)
-      setLastTapFlipped(crossedThreshold)
+      if (crossedThreshold) setFacing((f) => (f === 1 ? -1 : 1))
       return nextTaps
     })
   }
@@ -180,9 +182,6 @@ export function MagikarpGame({
   }
 
   const progressPct = Math.max(0, Math.min(100, (timeLeftMs / (config.magikarp_duration_seconds * 1000)) * 100))
-  const spriteAnimation = lastTapFlipped
-    ? 'jump-pop 0.35s ease-out 1, sprite-flip 0.3s ease-out 1'
-    : 'jump-pop 0.35s ease-out 1'
 
   return (
     <div className="flex flex-col items-center select-none">
@@ -214,13 +213,18 @@ export function MagikarpGame({
                 Tape ici !
               </p>
 
-              <img
-                key={jumpKey}
-                src={MAGIKARP_JUMP_ICON}
-                alt=""
-                className="absolute bottom-9 left-1/2 -translate-x-1/2 pixelated w-28 h-28 object-contain pointer-events-none"
-                style={{ animation: spriteAnimation }}
-              />
+              {/* Saut (remonté sur un conteneur) et demi-tour (sur l'image) sont séparés :
+                  les deux jouent sur `transform`, ils s'écraseraient sur un même élément. */}
+              <div className="absolute bottom-9 left-1/2 -translate-x-1/2 w-28 h-28 pointer-events-none">
+                <div key={jumpKey} className="w-full h-full" style={{ animation: 'jump-pop 0.35s ease-out 1' }}>
+                  <img
+                    src={MAGIKARP_JUMP_ICON}
+                    alt=""
+                    className="pixelated w-full h-full object-contain transition-transform duration-300 ease-out"
+                    style={{ transform: `scaleX(${facing})` }}
+                  />
+                </div>
+              </div>
 
               <div className="absolute bottom-3 left-3 right-3 h-2.5 rounded-full bg-white/30 overflow-hidden">
                 <div

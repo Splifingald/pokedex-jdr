@@ -33,7 +33,7 @@ import { usePensionXpGroups } from '../hooks/usePensionXpGroups'
 import { computeProjectedDaycareXp, resolveApplicableXpGroup } from '../lib/pension'
 import { getStatusInfo } from '../lib/status'
 import { StatusSelect } from './StatusSelect'
-import { getSuperEfficace, getLocalisations, getAttaquesWithPreEvolutions } from '../lib/pokemonFacts'
+import { getLocalisations, getAttaquesWithPreEvolutions, sortMovesByType } from '../lib/pokemonFacts'
 import { toDatetimeLocalInput, fromDatetimeLocalInput } from '../lib/gifting'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
@@ -473,11 +473,14 @@ export function PokemonDetailSheet({
   const nom = (playerPokemon ? ownedPokemonName(playerPokemon) : pokemon?.nom) ?? '???'
   const numero = pokemon?.numero ?? playerPokemon?.pokemon_numero ?? '???'
 
-  const superEfficace = getSuperEfficace(pokemon)
   const localisations = getLocalisations(pokemon)
   const learnableAttaques = useMemo(
-    () => getAttaquesWithPreEvolutions(pokemon, pokemonByName ?? EMPTY_POKEMON_MAP, evolutionsByPokemonNom ?? EMPTY_EVOLUTIONS_MAP),
-    [pokemon, pokemonByName, evolutionsByPokemonNom]
+    () => sortMovesByType(
+      getAttaquesWithPreEvolutions(pokemon, pokemonByName ?? EMPTY_POKEMON_MAP, evolutionsByPokemonNom ?? EMPTY_EVOLUTIONS_MAP),
+      attacksByName,
+      pokemon?.type
+    ),
+    [pokemon, pokemonByName, evolutionsByPokemonNom, attacksByName]
   )
   const canShowAttaques = isAdmin || isDiscovered
 
@@ -492,14 +495,23 @@ export function PokemonDetailSheet({
     : pokemon?.degats_base ?? '—'
 
   const knownMoves = useMemo(() => playerPokemon?.moves ?? [], [playerPokemon?.moves])
+  // Ordre d'affichage uniquement : knownMoves garde l'ordre d'apprentissage
+  // (utilisé pour le compteur et les tests d'appartenance).
+  const sortedKnownMoves = useMemo(
+    () => sortMovesByType(knownMoves, attacksByName, pokemon?.type),
+    [knownMoves, attacksByName, pokemon?.type]
+  )
   const addableMoves = useMemo(
     () => [...attacksByName.values()].filter((a) => !knownMoves.includes(a.nom)),
     [attacksByName, knownMoves]
   )
   const atMoveCap = maxMoves != null && knownMoves.length >= maxMoves
+  // Re-trié APRÈS le filtre : le classement des types se calcule sur les
+  // capacités réellement affichées, pas sur la liste complète (sinon un type
+  // dopé par des capacités déjà apprises passerait devant).
   const notYetKnownLearnableAttaques = useMemo(
-    () => learnableAttaques.filter((m) => !knownMoves.includes(m)),
-    [learnableAttaques, knownMoves]
+    () => sortMovesByType(learnableAttaques.filter((m) => !knownMoves.includes(m)), attacksByName, pokemon?.type),
+    [learnableAttaques, knownMoves, attacksByName, pokemon?.type]
   )
 
   return (
@@ -587,21 +599,12 @@ export function PokemonDetailSheet({
               />
             )}
 
-            <StatRow
-              icon={<PixelIcon src={STAT_ICON.supereffective} size={22} />}
-              title="Super efficace contre"
-              value={
-                superEfficace.length > 0 ? (
-                  <div className="flex flex-wrap gap-1">
-                    {superEfficace.map((t) => (
-                      <TypeBadge key={t} type={t} small />
-                    ))}
-                  </div>
-                ) : (
-                  <span className="text-ink-muted-2">—</span>
-                )
-              }
-            />
+            {/* Plus de ligne "Super efficace contre" ici : l'efficacité ne
+                dépend plus de l'ESPÈCE mais du TYPE DE LA CAPACITÉ jouée face
+                au type adverse (voir src/lib/typeChart.ts et l'onglet admin
+                "Types"), une fiche d'espèce n'a donc plus rien à en dire. Les
+                colonnes pokemon.super_efficace_1..4 restent importées du CSV,
+                mais ne servent plus nulle part. */}
 
             {(pokemon.nom_talent || pokemon.description_talent) && (
               <div className="flex items-start gap-3 py-2 border-b border-ink/20">
@@ -656,7 +659,7 @@ export function PokemonDetailSheet({
                   <p className="text-ink-muted-2 text-sm mb-2">Aucune capacité apprise.</p>
                 ) : (
                   <div className="flex flex-col gap-2 mb-2">
-                    {knownMoves.map((moveName) => {
+                    {sortedKnownMoves.map((moveName) => {
                       const atk = attacksByName.get(moveName)
                       return atk ? (
                         <AbilityCard

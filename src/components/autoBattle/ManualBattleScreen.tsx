@@ -6,6 +6,7 @@ import { PixelIcon } from '../icons/PixelIcon'
 import { AUTOBATTLE_TICKET_ICON } from '../../lib/icons'
 import { BUTTON_STYLE } from '../../lib/buttonStyles'
 import { getActiveWeather } from '../../lib/autoBattle'
+import { isAbilityBlockedByType } from '../../lib/typeChart'
 
 // Nombre de rounds complets (chacun résout jusqu'à 2 flips, un tour de
 // chaque camp — voir autobattle_resolve_manual_round) sans le moindre PV
@@ -89,11 +90,6 @@ export function ManualBattleScreen({
     () => isPlayerMetamorph ? [...new Set(opponentAbilityPool)] : playerPokemon.moves,
     [isPlayerMetamorph, opponentAbilityPool, playerPokemon.moves]
   )
-  // Badge Super Efficace par capacité (voir ManualBattleAbilityGrid) : type
-  // et liste "super efficace" EFFECTIFS, ceux copiés de l'adversaire si
-  // Métamorph — jamais les siens propres dans ce cas (voir autobattle_
-  // resolve_manual_round, même règle côté serveur pour le calcul réel).
-  const effectivePlayerSpecies = isPlayerMetamorph ? opponentSpecies : playerSpecies
 
   // Météo en cours, pour marquer les capacités concernées dans la grille (voir
   // weatherAffectsAbility). Dérivée des tours plutôt que remontée par
@@ -109,13 +105,28 @@ export function ManualBattleScreen({
   // cette capacité — la grille reste affichée (grisée) pour transparence,
   // mais onSelect est déclenché automatiquement à chaque tour au lieu
   // d'attendre un tap (voir l'effet ci-dessous).
+  // Les capacités sans effet sur le type adverse (voir isAbilityBlockedByType,
+  // grisées dans la grille) comptent comme injouables ici aussi : elles ne
+  // peuvent ni être jouées automatiquement, ni faire croire qu'un choix reste
+  // possible.
+  // Perce-immunité encore actif côté joueur, tel que renvoyé par le serveur au
+  // tour précédent (voir AutoBattleManualRoundResult.player_pierce_immunity_
+  // type) : tant qu'il dure, les capacités que ce type bloquerait redeviennent
+  // jouables — ici comme dans la grille.
+  const [piercedImmunityType, setPiercedImmunityType] = useState<string | null>(null)
   const eligibleAbilities = useMemo(
     () => abilityNoms
       .map((nom) => attacksByName.get(nom))
-      .filter((a): a is Attack => a != null && !bannedAttacks.has(a.nom)),
-    [abilityNoms, attacksByName, bannedAttacks]
+      .filter((a): a is Attack => a != null && !bannedAttacks.has(a.nom)
+        && !isAbilityBlockedByType(a, abilityRulesByName.get(a.nom), opponentSpecies?.type, piercedImmunityType)),
+    [abilityNoms, attacksByName, bannedAttacks, abilityRulesByName, opponentSpecies, piercedImmunityType]
   )
   const autoPlayAbility = eligibleAbilities.length === 1 ? eligibleAbilities[0] : null
+  // Aucune capacité jouable du tout (mouvepool entièrement banni ou entièrement
+  // sans effet sur ce type) : le combat ne peut pas avancer, on propose tout de
+  // suite la sortie en match nul plutôt que de laisser le joueur bloqué devant
+  // une grille grisée (voir isStalemate plus bas).
+  const noPlayableAbility = eligibleAbilities.length === 0
 
   // Capacités dont le tour suivant est ENTIÈREMENT déterminé par le serveur
   // (2e tour d'un cycle 'prepare_release'/'skip', ou réutilisation forcée
@@ -146,6 +157,7 @@ export function ManualBattleScreen({
     setTurns((prev) => [...prev, ...taggedTurns])
     setPendingResult(result)
     setRoundCount((c) => c + 1)
+    setPiercedImmunityType(result.player_pierce_immunity_type ?? null)
 
     if (!autoPlayAbility) {
       const forcedNom = result.player_forced_ability_nom
@@ -182,9 +194,11 @@ export function ManualBattleScreen({
   // que d'abandonner. pendingResult.outcome !IS NULL exclurait cet écran de
   // toute façon (transition vers récompense/défaite), pas besoin de le
   // revérifier ici.
-  const isStalemate = roundCount >= STALEMATE_ROUNDS_THRESHOLD
+  const isStalemate = noPlayableAbility || (
+    roundCount >= STALEMATE_ROUNDS_THRESHOLD
     && pendingResult?.player_hp === playerMaxHp
     && pendingResult?.opponent_hp === opponentMaxHp
+  )
 
   return (
     <AutoBattleScreen
@@ -209,7 +223,11 @@ export function ManualBattleScreen({
       abilityRulesByName={abilityRulesByName}
       midSlot={
         <div className="flex flex-col gap-2">
-          {autoPlayAbility ? (
+          {noPlayableAbility ? (
+            <p className="text-ink text-sm font-bold text-center">
+              Aucune capacité ne peut affecter ce pokémon — tu peux déclarer égalité.
+            </p>
+          ) : autoPlayAbility ? (
             <p className="text-ink text-sm font-bold text-center">Partie Automatique, une seule capacité possible</p>
           ) : !busy && !forcedAbility && (
             <p className="text-ink text-sm font-bold text-center">
@@ -223,7 +241,6 @@ export function ManualBattleScreen({
           )}
           <ManualBattleAbilityGrid
             abilityNoms={abilityNoms}
-            playerSpecies={effectivePlayerSpecies}
             opponentSpecies={opponentSpecies}
             attacksByName={attacksByName}
             abilityRulesByName={abilityRulesByName}
@@ -232,6 +249,7 @@ export function ManualBattleScreen({
             weatherIcon={activeWeather?.weather_icon ?? null}
             weatherNom={activeWeather?.weather_nom ?? null}
             weatherEffects={activeWeather?.weather_effects}
+            piercedImmunityType={piercedImmunityType}
             disabled={busy || !!autoPlayAbility || !!forcedAbility}
             onSelect={(ability) => void handleSelect(ability)}
           />

@@ -7,6 +7,8 @@ export interface Pokemon {
   type: string
   degats_base: number
   pv_base: number
+  /** Poids de l'espèce en kg (colonne « Poids » du CSV, décimales acceptées) — null si la colonne est absente de l'import. Lu en combat par la condition de dégâts additionnels 'weight_ratio' (voir AutoBattleAbilityRule.bonus_damage_weight_*). */
+  poids: number | null
   super_efficace_1: string | null
   super_efficace_2: string | null
   super_efficace_3: string | null
@@ -58,6 +60,8 @@ export interface CsvRow {
   'Type': string
   'Dégâts de base': string
   'PV de base': string
+  /** Colonne FACULTATIVE : poids en kg. Absente = poids inconnu (null). */
+  'Poids': string
   'Super Efficace 1': string
   'Super Efficace 2': string
   'Super Efficace 3': string
@@ -1017,6 +1021,17 @@ export type AutoBattleHealType = 'static' | 'percent_damage' | 'use_stats'
 // dégâts infligés par le coup qui a accordé l'effet. Résolu en un entier fixe
 // une seule fois à l'octroi, jamais recalculé à chaque tick.
 export type AutoBattleHealDotType = 'flat' | 'percent_max_hp' | 'percent_damage'
+// Type de montant des deux effets persistants OFFENSIFS (damage_dot_* et
+// leech_dot_* ci-dessous) : 'flat' (ou NULL) = montant fixe par tour ;
+// 'percent_max_hp' = % des PV MAX de la VICTIME (l'adversaire du lanceur —
+// « % des PV de l'adversaire »). Comme pour le soin passif, le montant est
+// résolu en un entier fixe une seule fois au moment où l'effet est posé,
+// jamais recalculé à chaque tick.
+export type AutoBattleDotType = 'flat' | 'percent_max_hp'
+// Base des dégâts en % des PV de la cible (voir
+// AutoBattleAbilityRule.percent_hp_damage_basis) : ses PV RESTANTS avant le
+// coup, ou ses PV MAX.
+export type AutoBattlePercentHpBasis = 'current' | 'max'
 // paralysis/frozen : passe le prochain tour, une seule fois. fear/confusion :
 // précision réduite de 3/5 au prochain tour, une seule fois. sleep : passe
 // son tour tant qu'un dé à 6 faces ne tombe pas sur 4/5/6 (relancé à chaque
@@ -1041,11 +1056,26 @@ export type AutoBattleBonusDamageType = 'multiply' | 'flat' | 'range'
 // de la capacité qui l'est (frapper plus fort en étant soi-même empoisonné,
 // brûlé…). Ces deux dernières partagent bonus_damage_status_filter, qui
 // restreint la condition à un statut précis (NULL = n'importe lequel).
-export type AutoBattleBonusDamageCondition = 'took_damage_last_turn' | 'first_use' | 'dice_equals' | 'has_status' | 'self_has_status'
-// Modificateur de stat (dégâts de base ou précision) — 'opponent' = débuff
-// (appliqué à l'adversaire du lanceur), 'self' = buff (appliqué au lanceur
-// lui-même) : le sens (hausse/baisse) découle directement de la cible, pas
-// un champ séparé. 'percent' n'est valable que pour stat = 'damage' (la
+// weight_ratio : compare les POIDS des deux espèces (pokemon.poids, colonne
+// « Poids » du CSV) — voir bonus_damage_weight_* pour les trois réglages.
+export type AutoBattleBonusDamageCondition = 'took_damage_last_turn' | 'first_use' | 'dice_equals' | 'has_status' | 'self_has_status' | 'weight_ratio'
+// Réglages de la condition 'weight_ratio' : « poids(target) <comparaison>
+// percent % du poids de l'autre ». target = qui est comparé à l'autre ('self'
+// = le lanceur), comparison = > ou <. Exemples : self/greater/200 = « pèse plus
+// de 200 % du poids de l'adversaire » ; opponent/lower/100 = « l'adversaire
+// pèse moins que lui » ; opponent/greater/200 = « l'adversaire pèse plus du
+// double ». Poids manquant d'un côté = condition jamais remplie.
+export type AutoBattleWeightTarget = 'self' | 'opponent'
+export type AutoBattleWeightComparison = 'greater' | 'lower'
+// Modificateur de stat (dégâts de base ou précision) — la CIBLE ('opponent' =
+// l'adversaire du lanceur, 'self' = le lanceur lui-même) et le SENS
+// (stat_mod_direction : 'buff' = hausse, 'debuff' = baisse) sont deux réglages
+// INDÉPENDANTS : les quatre combinaisons existent, dont le malus qu'une
+// capacité s'inflige à elle-même (façon Close Combat). direction NULL = règle
+// écrite avant l'ajout du sens explicite : le moteur retombe alors sur
+// l'ancienne convention (adversaire = baisse, soi = hausse), voir
+// autobattle_stat_mod_signed côté SQL.
+// 'percent' n'est valable que pour stat = 'damage' (la
 // précision n'a pas d'équivalent "stat de base" en %, voir requirement).
 // Les modificateurs se CUMULENT : chaque application s'empile avec sa propre
 // échéance, donc deux "+2 dégâts pendant 3 tours" joués coup sur coup donnent
@@ -1057,6 +1087,7 @@ export type AutoBattleBonusDamageCondition = 'took_damage_last_turn' | 'first_us
 // s'utiliser normalement mais n'applique plus le modificateur (voir
 // AutoBattleTurn.stat_mod_limit_reached).
 export type AutoBattleStatModTarget = 'self' | 'opponent'
+export type AutoBattleStatModDirection = 'buff' | 'debuff'
 export type AutoBattleStatModStat = 'damage' | 'precision'
 export type AutoBattleStatModValueType = 'flat' | 'range' | 'percent'
 export type AutoBattleStatModDurationType = 'turns' | 'battle_end'
@@ -1086,7 +1117,14 @@ export interface AutoBattleAbilityRule {
   // "n'importe quel statut" (comportement historique), sinon la condition
   // n'est vérifiée que pour ce statut précis.
   bonus_damage_status_filter: AutoBattleStatusEffect | null
+  // Réglages de la condition 'weight_ratio' ci-dessus — ignorés par les autres
+  // conditions, obligatoires pour celle-là.
+  bonus_damage_weight_target: AutoBattleWeightTarget | null
+  bonus_damage_weight_comparison: AutoBattleWeightComparison | null
+  bonus_damage_weight_percent: number | null
   stat_mod_target: AutoBattleStatModTarget | null
+  /** NULL sur les règles antérieures au sens explicite : traité comme 'debuff' si la cible est l'adversaire, 'buff' si c'est le lanceur. */
+  stat_mod_direction: AutoBattleStatModDirection | null
   stat_mod_stat: AutoBattleStatModStat | null
   stat_mod_value_type: AutoBattleStatModValueType | null
   stat_mod_flat: number | null
@@ -1110,16 +1148,79 @@ export interface AutoBattleAbilityRule {
   heal_dot_amount: number | null
   heal_dot_percent: number | null
   heal_dot_duration_turns: number | null
+  // Dégâts persistants ("damage over time") : posés sur l'ADVERSAIRE par un
+  // coup réussi, ils lui rongent des PV au début de chacun de ses propres
+  // tours pendant damage_dot_duration_turns tours de combat (compteur global,
+  // comme heal_dot_duration_turns) — que ce tour soit joué ou passé à cause
+  // d'un statut. Miroir offensif du soin passif ci-dessus, avec les mêmes
+  // conventions de montant (voir AutoBattleDotType) :
+  // damage_dot_type = 'flat' (ou NULL) : damage_dot_amount PV par tour ;
+  // damage_dot_type = 'percent_max_hp' : damage_dot_percent % des PV MAX de
+  // la victime (damage_dot_amount reste NULL). Un tick peut mettre K.O.
+  damage_dot_type: AutoBattleDotType | null
+  damage_dot_amount: number | null
+  damage_dot_percent: number | null
+  damage_dot_duration_turns: number | null
+  // Vol de vie persistant ("life steal over time") : même mécanique que les
+  // dégâts persistants ci-dessus (posé sur l'adversaire, tick au début de
+  // CHACUN DE SES tours pendant leech_dot_duration_turns tours de combat),
+  // mais les PV perdus sont RENDUS au lanceur — plafonnés à ce qu'il reste à
+  // la victime (on ne vole jamais plus de vie qu'elle n'en a) et aux PV max du
+  // voleur. La part "soin" est annulée si le VOLEUR subit un Anti-Soin
+  // (cancel_heal_duration_turns) : la victime perd quand même ses PV.
+  leech_dot_type: AutoBattleDotType | null
+  leech_dot_amount: number | null
+  leech_dot_percent: number | null
+  leech_dot_duration_turns: number | null
+  // Tentative de statut persistante : troisième effet du même moule (posé sur
+  // l'adversaire par un coup réussi, actif status_dot_duration_turns tours de
+  // combat) — à chacun des tours de la VICTIME, status_dot_chance % de chances
+  // de lui infliger status_dot_status. Deux règles : rien n'est tenté tant
+  // qu'elle a déjà un statut (un seul à la fois), et le jet a lieu APRÈS son
+  // tick de statut — le statut posé ne mord donc qu'à son tour suivant, comme
+  // un statut infligé par une attaque. Un jet raté est silencieux.
+  status_dot_status: AutoBattleStatusEffect | null
+  status_dot_chance: number | null
+  status_dot_duration_turns: number | null
+  // Perce-immunité : lève l'immunité de type d'un type de pokémon PRÉCIS
+  // (pierce_immunity_type — le type qui EN BÉNÉFICIE d'ordinaire, ex.
+  // « Spectre » pour qu'une capacité Normal puisse enfin le toucher, voir
+  // TYPE_NO_EFFECT/type_no_effect) au profit de son lanceur, pendant
+  // pierce_immunity_turns tours de combat. La capacité perce déjà l'immunité
+  // POUR SON PROPRE COUP (sinon, immunisée elle-même, elle ne pourrait jamais
+  // toucher pour poser l'effet), puis toutes les capacités de son lanceur en
+  // profitent jusqu'à l'échéance. null = désactivé.
+  pierce_immunity_type: string | null
+  pierce_immunity_turns: number | null
+  // « Ne fonctionne que sur une cible atteinte de [statut] » : si la cible
+  // n'est pas affectée par EXACTEMENT ce statut au moment du coup, la capacité
+  // échoue (traitée comme un raté, sans dégât ni effet). null = aucune
+  // condition.
+  requires_target_status: AutoBattleStatusEffect | null
+  // Purges jouées sur un coup réussi, cumulables :
+  // clear_damage_dot = retire les DÉGÂTS SUR LA DURÉE que subit son lanceur
+  //   (damage_dot et leech_dot) — ni les statuts brûlure/poison, qui gardent
+  //   leurs propres ticks, ni la météo ;
+  // clear_weather = dissipe la météo en cours (terrain partagé : pour les deux
+  //   camps) ;
+  // cure_status = guérit le statut de son lanceur, quel qu'il soit.
+  clear_damage_dot: boolean
+  clear_weather: boolean
+  cure_status: boolean
   // Anti-Soin : sur un coup réussi, annule TOUS les effets de soin de
   // l'adversaire (heal_type instantané, heal_dot, guérison du poison par un
   // soin) pendant cancel_heal_duration_turns tours de combat.
   cancel_heal_duration_turns: number | null
-  // Dégâts en % des PV restants (comme Super Fang) : remplace ENTIÈREMENT le
-  // calcul de dégâts habituel par floor(PV actuels de la cible AVANT ce coup
-  // × percent_hp_damage_percent / 100) — les dégâts additionnels
-  // conditionnels/contre-coup/soin s'appliquent ensuite normalement sur ce
-  // total. NULL = désactivé.
+  // Dégâts en % des PV de la cible : remplace ENTIÈREMENT le calcul de dégâts
+  // habituel par floor(PV de la cible × percent_hp_damage_percent / 100) — les
+  // dégâts additionnels conditionnels/contre-coup/soin s'appliquent ensuite
+  // normalement sur ce total. NULL = désactivé.
+  // percent_hp_damage_basis dit QUELS PV servent de base : 'current' (ou NULL,
+  // valeur historique) = les PV RESTANTS avant le coup, à la Super Fang —
+  // dégâts décroissants, incapables d'achever seuls ; 'max' = ses PV MAX, donc
+  // un montant constant tout le combat, qui peut mettre K.O.
   percent_hp_damage_percent: number | null
+  percent_hp_damage_basis: AutoBattlePercentHpBasis | null
   // Filtre de TYPE du modificateur de stat ci-dessus (uniquement pour
   // stat_mod_stat = 'damage') : NULL = s'applique à toutes les capacités,
   // sinon uniquement à celles de ce type élémentaire (attacks.type). Permet
@@ -1303,7 +1404,10 @@ export interface AutoBattleWeather {
 // = 1er tour de 'prepare_release' (texte "Préparation", jamais de dégâts) ;
 // missed = l'attaque a raté (système de précision) ; invulnerable_miss =
 // l'attaque a raté car la cible était invulnérable ce tour-là (pas un raté
-// de précision normal, texte distinct côté client) ; heal/attacker_hp_after
+// de précision normal, texte distinct côté client) ; no_effect = l'attaque
+// n'a rien fait car le type de la CAPACITÉ ne peut rien contre le type du
+// défenseur (immunité, voir src/lib/typeChart.ts et type_no_effect côté SQL)
+// — même forme qu'un raté, texte "Aucun effet !" côté client ; heal/attacker_hp_after
 // ne sont présents que si l'attaquant s'est soigné ce tour-là ; recoil =
 // dégâts de contre-coup sur l'attaquant lui-même (attacker_hp_after reflète
 // alors l'état final, après soin ET contre-coup le cas échéant) ;
@@ -1332,6 +1436,8 @@ export interface AutoBattleTurn {
   preparing?: boolean
   missed?: boolean
   invulnerable_miss?: boolean
+  /** Immunité de type : la capacité ne pouvait rien faire au type du défenseur (voir isTypeNoEffect). Toujours accompagné de missed. */
+  no_effect?: boolean
   invulnerable_granted?: boolean
   /** Modificateur de précision (buff/debuff, voir AutoBattleAbilityRule.stat_mod_stat = 'precision') actif sur l'ATTAQUANT au moment de ce tour — déjà signé (négatif = malus), 0 si aucun actif. Absent sur les coups où la précision n'entre pas en jeu (statuts, invulnérabilité...). Permet de reconstruire le détail complet en debug admin (voir AutoBattleScreen), au même titre que damage_species_xp pour les dégâts. */
   precision_mod_amount?: number
@@ -1363,6 +1469,34 @@ export interface AutoBattleTurn {
   heal_dot_granted?: boolean
   cancel_heal_applied?: boolean
   heal_blocked?: boolean
+  // Effets persistants OFFENSIFS (voir AutoBattleAbilityRule.damage_dot_* /
+  // leech_dot_*), miroirs de heal_dot_tick/heal_dot_granted :
+  // damage_dot_tick = tick de dégâts persistants — `attacker` est la VICTIME
+  // (le camp dont c'est le tour, comme un tick de brûlure), montant dans
+  // `damage`, PV de la victime dans attacker_hp_after ; peut porter ko.
+  // leech_dot_tick = tick de vol de vie : mêmes conventions, plus `heal` (PV
+  // réellement rendus au voleur, 0 si son soin est bloqué) et
+  // defender_hp_after (PV du VOLEUR après le vol — le client remonte sa barre
+  // avec, contrairement aux autres ticks où ce champ est décoratif).
+  // *_granted = ce coup réussi vient de poser l'effet sur l'adversaire.
+  damage_dot_tick?: boolean
+  leech_dot_tick?: boolean
+  damage_dot_granted?: boolean
+  leech_dot_granted?: boolean
+  /** Tick d'une tentative de statut persistante QUI A ABOUTI (les jets ratés n'émettent aucun tour) : `attacker` est la victime, status_dot_applied le statut infligé. Un talent peut encore le guérir aussitôt — les tours du talent suivent celui-ci. */
+  status_dot_tick?: boolean
+  status_dot_applied?: AutoBattleStatusEffect
+  /** Ce coup réussi a posé la tentative de statut persistante sur l'adversaire. */
+  status_dot_granted?: boolean
+  /** Ce coup réussi a accordé le perce-immunité à son auteur (voir AutoBattleAbilityRule.pierce_immunity_type) — le type percé est celui de la règle de la capacité. */
+  pierce_immunity_granted?: boolean
+  /** La capacité a échoué faute du statut exigé sur la cible (voir AutoBattleAbilityRule.requires_target_status) : toujours accompagné de missed, avec le statut attendu dans requires_status. */
+  requires_status_failed?: boolean
+  requires_status?: AutoBattleStatusEffect
+  /** Ce coup réussi a purgé les dégâts sur la durée que subissait son auteur (voir clear_damage_dot). */
+  cleanse_dot?: boolean
+  /** Ce coup réussi a guéri le statut de son auteur (voir cure_status) — porte le statut ainsi levé. */
+  cleanse_status?: AutoBattleStatusEffect
   // percent_hp_damage = les dégâts de ce coup viennent du calcul "% des PV
   // restants" (voir AutoBattleAbilityRule.percent_hp_damage_percent) plutôt
   // que du calcul habituel dégâts de base + dé.
@@ -1415,6 +1549,8 @@ export interface AutoBattleTurn {
   weather_effects?: AutoBattleWeatherEffect[]
   weather_set?: boolean
   weather_replaced?: boolean
+  /** La météo décrite par ce tour vient d'être DISSIPÉE par une capacité (voir AutoBattleAbilityRule.clear_weather) : le client retire le bandeau au lieu de le remplacer. */
+  weather_cleared?: boolean
   weather_damage?: number
   weather_inflicted_status?: AutoBattleStatusEffect
   // Décoration CLIENT UNIQUEMENT (jamais renvoyée par le serveur) — voir
@@ -1538,6 +1674,8 @@ export interface AutoBattleManualRoundResult {
   opponent_image_override?: string | null
   /** Cas Métamorph JOUEUR : sprite de l'adversaire copié pour ce combat — jamais présent sinon. */
   player_image_override?: string | null
+  /** Type de pokémon dont le JOUEUR perce actuellement l'immunité pour le prochain tour (voir AutoBattleAbilityRule.pierce_immunity_type) — null/absent = aucun. Le client s'en sert pour dégriser les capacités que ce type bloquerait normalement (voir isAbilityBlockedByType). */
+  player_pierce_immunity_type?: string | null
 }
 
 // ── Défi PvP (bannières de défi joueur contre joueur) ─────────

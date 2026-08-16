@@ -740,7 +740,6 @@ export function AutoBattlePopup({
           {view === 'pick-ability' && selectedPokemon && (
             <AutoBattleAbilityPicker
               playerPokemon={selectedPokemon}
-              playerSpecies={activeSpecies}
               opponentSpecies={activeLevelOpponentSpecies}
               opponentDiscovered={activeLevel ? (stateByLevel.get(activeLevel.id)?.discovered ?? false) : false}
               attacksByName={attacksByName}

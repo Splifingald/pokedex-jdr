@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   Attack, AutoBattleAbilityRule, AutoBattleTurnEffect, AutoBattleHealType, AutoBattleHealDotType,
   AutoBattleRecoilType, AutoBattleBonusDamageType, AutoBattleBonusDamageCondition,
-  AutoBattleStatModTarget, AutoBattleStatModStat, AutoBattleStatModValueType, AutoBattleStatModDurationType,
+  AutoBattleStatModTarget, AutoBattleStatModDirection, AutoBattleStatModStat, AutoBattleStatModValueType, AutoBattleStatModDurationType,
   AutoBattleStatusEffect, AutoBattleKeepGoingBonusType, AutoBattleIgnoreStatusBlock,
-  AutoBattleWeather,
+  AutoBattleWeather, AutoBattleDotType, AutoBattleWeightTarget, AutoBattleWeightComparison,
+  AutoBattlePercentHpBasis,
 } from '../types'
+import { ALL_TYPES } from '../lib/typeChart'
 import { useAutoBattleAbilityRules } from '../hooks/useAutoBattleAbilityRules'
 import { useAutoBattleWeathers } from '../hooks/useAutoBattleWeathers'
 import { useAttacks } from '../hooks/useAttacks'
@@ -66,11 +68,45 @@ const BONUS_DAMAGE_CONDITION_LABEL: Record<AutoBattleBonusDamageCondition, strin
   dice_equals: 'Le dé de dégâts de cette capacité tombe sur une valeur précise',
   has_status: "L'adversaire est actuellement affecté par un statut",
   self_has_status: "L'utilisateur de la capacité est lui-même affecté par un statut",
+  weight_ratio: 'Comparaison des poids des deux pokémon',
 }
 
+// Condition 'weight_ratio' : « poids(cible du test) <comparaison> X % du poids
+// de l'autre » — voir autobattle_weight_condition côté SQL.
+const WEIGHT_TARGET_LABEL: Record<AutoBattleWeightTarget, string> = {
+  self: "L'utilisateur de la capacité pèse",
+  opponent: "L'adversaire pèse",
+}
+
+const WEIGHT_COMPARISON_LABEL: Record<AutoBattleWeightComparison, string> = {
+  greater: 'plus de',
+  lower: 'moins de',
+}
+
+// Base des dégâts en % des PV de la cible (voir percent_hp_damage_basis).
+const PERCENT_HP_BASIS_LABEL: Record<AutoBattlePercentHpBasis, string> = {
+  current: 'PV restants de la cible (dégâts décroissants)',
+  max: 'PV max de la cible (montant constant)',
+}
+
+// Effets persistants offensifs : mêmes deux formes de montant pour les dégâts
+// par tour et le vol de vie par tour (voir AutoBattleDotType).
+const DOT_TYPE_LABEL: Record<AutoBattleDotType, string> = {
+  flat: 'Montant fixe',
+  percent_max_hp: "% des PV max de l'adversaire",
+}
+
+// Cible et sens sont deux réglages INDÉPENDANTS : les quatre combinaisons sont
+// permises, dont le malus qu'une capacité s'inflige à elle-même (façon Close
+// Combat) ou le bonus offert à l'adversaire.
 const STAT_MOD_TARGET_LABEL: Record<AutoBattleStatModTarget, string> = {
-  opponent: "Baisse une stat de l'adversaire",
-  self: 'Augmente une stat de son utilisateur',
+  opponent: "Sur l'adversaire",
+  self: 'Sur son utilisateur',
+}
+
+const STAT_MOD_DIRECTION_LABEL: Record<AutoBattleStatModDirection, string> = {
+  debuff: 'Baisse la stat (malus)',
+  buff: 'Augmente la stat (bonus)',
 }
 
 const STAT_MOD_STAT_LABEL: Record<AutoBattleStatModStat, string> = {
@@ -93,10 +129,110 @@ const SELECT_CLASS = 'bg-white border-2 border-ink rounded px-2 py-1.5 text-ink 
 const NUM_CLASS_SM = 'w-14 bg-white border-2 border-ink rounded px-1 py-1 text-ink text-sm text-center outline-none'
 const NUM_CLASS_MD = 'w-16 bg-white border-2 border-ink rounded px-1 py-1 text-ink text-sm text-center outline-none'
 
+// Catalogue des effets spéciaux : leur libellé, leur regroupement thématique et
+// le test qui dit si une capacité l'a DÉJÀ posé (son réglage « racine »). Une
+// seule table pour deux usages, qui doivent rester d'accord :
+//  - le menu « + Ajouter un effet spécial » d'une carte = les effets INACTIFS ;
+//  - le repérage des capacités décrites dans le CSV mais encore sans aucun
+//    effet configuré (voir hasAnyEffect / missingEffect dans le panneau).
+type EffectDef = {
+  value: string
+  label: string
+  group: string
+  isActive: (rule: AutoBattleAbilityRule) => boolean
+}
+
+const EFFECT_DEFS: EffectDef[] = [
+  { value: 'turn', label: 'Effet sur les tours', group: 'Rythme des tours', isActive: (r) => r.turn_effect != null },
+  { value: 'percenthp', label: 'Dégâts en % des PV de la cible', group: 'Dégâts', isActive: (r) => r.percent_hp_damage_percent != null },
+  { value: 'bonus', label: 'Dégâts additionnels conditionnels', group: 'Dégâts', isActive: (r) => r.bonus_damage_type != null },
+  { value: 'recoil', label: 'Contre-coup', group: 'Dégâts', isActive: (r) => r.recoil_type != null },
+  { value: 'heal', label: 'Soin instantané', group: 'Soins', isActive: (r) => r.heal_type != null },
+  // L'effet est actif dès qu'il a une durée, QUELLE QU'ELLE SOIT : un nombre de
+  // tours, ou « jusqu'au réveil » (auquel cas heal_dot_duration_turns est
+  // justement nul — ne tester que cette colonne faisait disparaître toute la
+  // carte de réglages dès qu'on cochait la case, en donnant l'impression que la
+  // configuration avait été effacée).
+  { value: 'healdot', label: 'Soin passif (heal over time)', group: 'Soins', isActive: (r) => r.heal_dot_duration_turns != null || r.heal_dot_until_awake },
+  { value: 'cancelheal', label: 'Anti-Soin', group: 'Soins', isActive: (r) => r.cancel_heal_duration_turns != null },
+  { value: 'damagedot', label: 'Dégâts persistants (damage over time)', group: 'Dégâts', isActive: (r) => r.damage_dot_duration_turns != null },
+  { value: 'leechdot', label: 'Vol de vie persistant (life steal over time)', group: 'Dégâts', isActive: (r) => r.leech_dot_duration_turns != null },
+  { value: 'statusdot', label: 'Tentative de statut persistante (status over time)', group: 'Dégâts', isActive: (r) => r.status_dot_duration_turns != null },
+  { value: 'cleardot', label: 'Dissipe les effets persistants subis', group: 'Soins', isActive: (r) => r.clear_damage_dot },
+  { value: 'curestatus', label: 'Guérit son propre statut', group: 'Soins', isActive: (r) => r.cure_status },
+  { value: 'clearweather', label: 'Dissipe la météo en cours', group: 'Terrain', isActive: (r) => r.clear_weather },
+  { value: 'pierceimmunity', label: "Perce l'immunité d'un type", group: 'Dégâts', isActive: (r) => r.pierce_immunity_type != null },
+  { value: 'requirestatus', label: 'Ne marche que sur une cible sous statut', group: 'Rythme des tours', isActive: (r) => r.requires_target_status != null },
+  // Même raisonnement que pour le soin passif : en mode « jusqu'au premier
+  // raté », keep_going_turns est nul par construction.
+  { value: 'keepgoing', label: 'Continue sur sa lancée (rejeu automatique)', group: 'Rythme des tours', isActive: (r) => r.keep_going_turns != null || r.keep_going_until_fail },
+  { value: 'ignorestatus', label: 'Utilisable malgré un statut bloquant', group: 'Rythme des tours', isActive: (r) => r.ignore_status_block != null },
+  { value: 'statmod', label: 'Modificateur de stat', group: 'Statistiques', isActive: (r) => r.stat_mod_target != null },
+  { value: 'invuln', label: 'Invulnérabilité au prochain tour adverse', group: 'Défense', isActive: (r) => r.invulnerable_next_turn },
+  { value: 'prevention', label: 'Prévention (bloque les dégâts super efficaces)', group: 'Défense', isActive: (r) => r.prevention_duration_turns != null },
+  { value: 'weather', label: 'Déclenche une météo', group: 'Terrain', isActive: (r) => r.weather_id != null },
+]
+
+/** Vrai dès qu'un effet spécial quelconque est configuré sur cette capacité. */
+function hasAnyEffect(rule: AutoBattleAbilityRule): boolean {
+  // status_reversed ne figure pas dans EFFECT_DEFS (il n'est pas « ajoutable »,
+  // il ne s'affiche que si le CSV donne un statut à la capacité) mais le cocher
+  // reste un réglage de combat à part entière.
+  return rule.status_reversed || EFFECT_DEFS.some((def) => def.isActive(rule))
+}
+
+/** Une ligne de la liste : la capacité du catalogue et ses effets (réels ou vides). */
+type AbilityRow = {
+  nom: string
+  /** Absent pour une règle orpheline : capacité disparue du catalogue depuis. */
+  attack: Attack | undefined
+  rule: AutoBattleAbilityRule
+  configured: boolean
+  missingEffect: boolean
+}
+
+// Toutes les capacités du catalogue sont désormais listées, y compris celles
+// qui n'ont aucune ligne en base : elles s'affichent sur cette règle vide, et
+// la ligne n'est réellement créée qu'au premier réglage (voir handleUpdate).
+function emptyRule(attackNom: string): AutoBattleAbilityRule {
+  return {
+    attack_nom: attackNom,
+    turn_effect: null, turn_random_min: null, turn_random_max: null, repeat_max_iterations: null,
+    heal_type: null, heal_amount: null, heal_percent: null,
+    status_reversed: false,
+    recoil_type: null, recoil_min: null, recoil_max: null, recoil_percent: null,
+    invulnerable_next_turn: false,
+    bonus_damage_type: null, bonus_damage_multiplier: null, bonus_damage_flat: null,
+    bonus_damage_min: null, bonus_damage_max: null,
+    bonus_damage_condition: null, bonus_damage_condition_dice_value: null, bonus_damage_status_filter: null,
+    bonus_damage_weight_target: null, bonus_damage_weight_comparison: null, bonus_damage_weight_percent: null,
+    stat_mod_target: null, stat_mod_direction: null, stat_mod_stat: null, stat_mod_value_type: null,
+    stat_mod_flat: null, stat_mod_min: null, stat_mod_max: null, stat_mod_percent: null,
+    stat_mod_duration_type: null, stat_mod_duration_turns: null, stat_mod_max_uses: null,
+    stat_mod_type_filter: null, stat_mod_weather_condition: null, stat_mod_weather_id: null,
+    heal_dot_type: null, heal_dot_amount: null, heal_dot_percent: null, heal_dot_duration_turns: null,
+    heal_dot_until_awake: false,
+    damage_dot_type: null, damage_dot_amount: null, damage_dot_percent: null, damage_dot_duration_turns: null,
+    leech_dot_type: null, leech_dot_amount: null, leech_dot_percent: null, leech_dot_duration_turns: null,
+    status_dot_status: null, status_dot_chance: null, status_dot_duration_turns: null,
+    pierce_immunity_type: null, pierce_immunity_turns: null,
+    requires_target_status: null,
+    clear_damage_dot: false, clear_weather: false, cure_status: false,
+    cancel_heal_duration_turns: null,
+    percent_hp_damage_percent: null, percent_hp_damage_basis: null,
+    prevention_duration_turns: null,
+    keep_going_turns: null, keep_going_until_fail: false,
+    keep_going_bonus_type: null, keep_going_bonus_flat: null, keep_going_bonus_percent: null,
+    ignore_status_block: null,
+    weather_id: null, weather_chance: null,
+    created_at: '',
+  }
+}
+
 // Un effet actif est affiché dans une carte avec son propre bouton de
 // retrait — les effets inactifs ne s'affichent nulle part par défaut, ils
 // n'apparaissent que dans le menu "+ Ajouter un effet spécial" en bas de
-// carte (voir INACTIVE_EFFECT_DEFS dans AbilityRuleRow). Ça évite d'avoir 11
+// carte (voir EFFECT_DEFS ci-dessus). Ça évite d'avoir 11
 // sections quasi-vides ("Aucun") visibles en permanence pour chaque capacité.
 function EffectSection({ label, onRemove, children }: { label: string; onRemove: () => void; children: React.ReactNode }) {
   return (
@@ -128,9 +264,14 @@ function EffectCategory({ label, children }: { label: string; children: React.Re
 
 function AbilityRuleRow({
   rule, attack, attackTypes, weathers, onUpdate, onRemove, rowRef, highlighted, expanded, onToggle,
+  configured, missingEffect,
 }: {
   rule: AutoBattleAbilityRule
   attack: Attack | undefined
+  /** La capacité a-t-elle vraiment une ligne en base ? Sinon `rule` est une règle vide, créée à la volée au premier réglage. */
+  configured: boolean
+  /** Le CSV décrit un effet spécial pour cette capacité, mais rien n'est configuré ici. */
+  missingEffect: boolean
   /** Types élémentaires réellement présents dans le catalogue d'attaques — seule source fiable pour le filtre de type du modificateur de stat, qui est comparé côté SQL à attacks.type. */
   attackTypes: string[]
   /** Météos configurées (voir AdminAutoBattleWeathersPanel), triées par nom — la règle n'en stocke que l'id. */
@@ -193,6 +334,7 @@ function AbilityRuleRow({
         bonus_damage_type: null, bonus_damage_multiplier: null, bonus_damage_flat: null,
         bonus_damage_min: null, bonus_damage_max: null, bonus_damage_condition: null, bonus_damage_condition_dice_value: null,
         bonus_damage_status_filter: null,
+        bonus_damage_weight_target: null, bonus_damage_weight_comparison: null, bonus_damage_weight_percent: null,
       })
       return
     }
@@ -209,13 +351,24 @@ function AbilityRuleRow({
 
   const handleBonusConditionChange = (value: string) => {
     if (value === 'dice_equals') {
-      onUpdate(rule.attack_nom, { bonus_damage_condition: 'dice_equals', bonus_damage_condition_dice_value: rule.bonus_damage_condition_dice_value ?? 6, bonus_damage_status_filter: null })
+      onUpdate(rule.attack_nom, { bonus_damage_condition: 'dice_equals', bonus_damage_condition_dice_value: rule.bonus_damage_condition_dice_value ?? 6, bonus_damage_status_filter: null, bonus_damage_weight_target: null, bonus_damage_weight_comparison: null, bonus_damage_weight_percent: null })
     } else if (value === 'has_status' || value === 'self_has_status') {
       // Les deux conditions de statut partagent bonus_damage_status_filter :
       // passer de l'une à l'autre garde le statut déjà choisi.
-      onUpdate(rule.attack_nom, { bonus_damage_condition: value, bonus_damage_condition_dice_value: null })
+      onUpdate(rule.attack_nom, { bonus_damage_condition: value, bonus_damage_condition_dice_value: null, bonus_damage_weight_target: null, bonus_damage_weight_comparison: null, bonus_damage_weight_percent: null })
+    } else if (value === 'weight_ratio') {
+      // La condition de poids exige ses trois réglages (voir la contrainte
+      // autobattle_ability_rules_bonus_damage_weight_check) : posés d'un coup
+      // avec des valeurs par défaut lisibles (« pèse plus de 200 % du poids de
+      // l'adversaire »).
+      onUpdate(rule.attack_nom, {
+        bonus_damage_condition: 'weight_ratio', bonus_damage_condition_dice_value: null, bonus_damage_status_filter: null,
+        bonus_damage_weight_target: rule.bonus_damage_weight_target ?? 'self',
+        bonus_damage_weight_comparison: rule.bonus_damage_weight_comparison ?? 'greater',
+        bonus_damage_weight_percent: rule.bonus_damage_weight_percent ?? 200,
+      })
     } else {
-      onUpdate(rule.attack_nom, { bonus_damage_condition: value as AutoBattleBonusDamageCondition, bonus_damage_condition_dice_value: null, bonus_damage_status_filter: null })
+      onUpdate(rule.attack_nom, { bonus_damage_condition: value as AutoBattleBonusDamageCondition, bonus_damage_condition_dice_value: null, bonus_damage_status_filter: null, bonus_damage_weight_target: null, bonus_damage_weight_comparison: null, bonus_damage_weight_percent: null })
     }
   }
 
@@ -226,14 +379,19 @@ function AbilityRuleRow({
   const handleStatModTargetChange = (value: string) => {
     if (value === '') {
       onUpdate(rule.attack_nom, {
-        stat_mod_target: null, stat_mod_stat: null, stat_mod_value_type: null,
+        stat_mod_target: null, stat_mod_direction: null, stat_mod_stat: null, stat_mod_value_type: null,
         stat_mod_flat: null, stat_mod_min: null, stat_mod_max: null, stat_mod_percent: null,
         stat_mod_duration_type: null, stat_mod_duration_turns: null, stat_mod_max_uses: null,
       })
       return
     }
+    const target = value as AutoBattleStatModTarget
     onUpdate(rule.attack_nom, {
-      stat_mod_target: value as AutoBattleStatModTarget,
+      stat_mod_target: target,
+      // Sens jamais laissé implicite à l'écriture : à défaut de choix déjà fait,
+      // on pose celui de l'ancienne convention (adversaire = malus, soi = bonus),
+      // que l'admin peut ensuite inverser librement.
+      stat_mod_direction: rule.stat_mod_direction ?? (target === 'opponent' ? 'debuff' : 'buff'),
       stat_mod_stat: rule.stat_mod_stat ?? 'damage',
       stat_mod_value_type: rule.stat_mod_value_type ?? 'flat',
       stat_mod_flat: rule.stat_mod_flat ?? 3,
@@ -357,41 +515,80 @@ function AbilityRuleRow({
   }
 
   const handlePercentHpDamageToggle = (enabled: boolean) => {
-    onUpdate(rule.attack_nom, { percent_hp_damage_percent: enabled ? (rule.percent_hp_damage_percent ?? 50) : null })
+    onUpdate(rule.attack_nom, enabled
+      ? { percent_hp_damage_percent: rule.percent_hp_damage_percent ?? 50, percent_hp_damage_basis: rule.percent_hp_damage_basis ?? 'current' }
+      : { percent_hp_damage_percent: null, percent_hp_damage_basis: null })
   }
 
-  // L'effet est actif dès qu'il a une durée, QUELLE QU'ELLE SOIT : un nombre
-  // de tours, ou "jusqu'au réveil" (auquel cas heal_dot_duration_turns est
-  // justement nul — ne tester que cette colonne faisait disparaître toute la
-  // carte de réglages dès qu'on cochait la case, en donnant l'impression que
-  // la configuration avait été effacée).
+  // Effets persistants OFFENSIFS (dégâts par tour, vol de vie par tour) : même
+  // structure que le soin passif — un type de montant, la valeur associée
+  // (l'autre restant nulle, voir les contraintes autobattle_ability_rules_
+  // damage_dot_fields/_leech_dot_fields) et une durée en tours.
+  const handleDamageDotTypeChange = (value: string) => {
+    const duration = rule.damage_dot_duration_turns ?? 3
+    if (value === 'percent_max_hp') {
+      onUpdate(rule.attack_nom, { damage_dot_type: 'percent_max_hp', damage_dot_percent: rule.damage_dot_percent ?? 10, damage_dot_amount: null, damage_dot_duration_turns: duration })
+    } else {
+      onUpdate(rule.attack_nom, { damage_dot_type: 'flat', damage_dot_amount: rule.damage_dot_amount ?? 5, damage_dot_percent: null, damage_dot_duration_turns: duration })
+    }
+  }
+
+  const handleDamageDotRemove = () => {
+    onUpdate(rule.attack_nom, { damage_dot_type: null, damage_dot_amount: null, damage_dot_percent: null, damage_dot_duration_turns: null })
+  }
+
+  const handleLeechDotTypeChange = (value: string) => {
+    const duration = rule.leech_dot_duration_turns ?? 3
+    if (value === 'percent_max_hp') {
+      onUpdate(rule.attack_nom, { leech_dot_type: 'percent_max_hp', leech_dot_percent: rule.leech_dot_percent ?? 10, leech_dot_amount: null, leech_dot_duration_turns: duration })
+    } else {
+      onUpdate(rule.attack_nom, { leech_dot_type: 'flat', leech_dot_amount: rule.leech_dot_amount ?? 5, leech_dot_percent: null, leech_dot_duration_turns: duration })
+    }
+  }
+
+  const handleLeechDotRemove = () => {
+    onUpdate(rule.attack_nom, { leech_dot_type: null, leech_dot_amount: null, leech_dot_percent: null, leech_dot_duration_turns: null })
+  }
+
+  // Tentative de statut persistante : statut, probabilité et durée vont
+  // toujours ensemble (contrainte autobattle_ability_rules_status_dot_fields).
+  const handleStatusDotToggle = (enabled: boolean) => {
+    onUpdate(rule.attack_nom, enabled
+      ? {
+        status_dot_status: rule.status_dot_status ?? 'sleep',
+        status_dot_chance: rule.status_dot_chance ?? 30,
+        status_dot_duration_turns: rule.status_dot_duration_turns ?? 3,
+      }
+      : { status_dot_status: null, status_dot_chance: null, status_dot_duration_turns: null })
+  }
+
+  // Perce-immunité : le type et la durée vont toujours ensemble (contrainte
+  // autobattle_ability_rules_pierce_immunity_fields).
+  const handlePierceImmunityToggle = (enabled: boolean) => {
+    onUpdate(rule.attack_nom, enabled
+      ? { pierce_immunity_type: rule.pierce_immunity_type ?? 'Spectre', pierce_immunity_turns: rule.pierce_immunity_turns ?? 3 }
+      : { pierce_immunity_type: null, pierce_immunity_turns: null })
+  }
+
+  const handleRequiresTargetStatusToggle = (enabled: boolean) => {
+    onUpdate(rule.attack_nom, { requires_target_status: enabled ? (rule.requires_target_status ?? 'sleep') : null })
+  }
+
   const isHealDotActive = rule.heal_dot_duration_turns != null || rule.heal_dot_until_awake
-  // Même raisonnement pour la chaîne "Continue sur sa lancée" : en mode
-  // "jusqu'au premier raté", keep_going_turns est nul par construction.
   const isKeepGoingActive = rule.keep_going_turns != null || rule.keep_going_until_fail
   const healDotType = rule.heal_dot_type ?? 'flat'
 
   // Effets inactifs proposés dans le menu "+ Ajouter un effet spécial" en bas
   // de carte, groupés par thème (mêmes groupes que EffectCategory ci-dessus).
-  // Un effet retiré de sa carte réapparaît automatiquement ici.
-  const addableEffects: { value: string; label: string; group: string }[] = []
-  if (rule.turn_effect == null) addableEffects.push({ value: 'turn', label: 'Effet sur les tours', group: 'Rythme des tours' })
-  if (rule.percent_hp_damage_percent == null) addableEffects.push({ value: 'percenthp', label: 'Dégâts en % des PV restants', group: 'Dégâts' })
-  if (rule.bonus_damage_type == null) addableEffects.push({ value: 'bonus', label: 'Dégâts additionnels conditionnels', group: 'Dégâts' })
-  if (rule.recoil_type == null) addableEffects.push({ value: 'recoil', label: 'Contre-coup', group: 'Dégâts' })
-  if (rule.heal_type == null) addableEffects.push({ value: 'heal', label: 'Soin instantané', group: 'Soins' })
-  if (!isHealDotActive) addableEffects.push({ value: 'healdot', label: 'Soin passif (heal over time)', group: 'Soins' })
-  if (rule.cancel_heal_duration_turns == null) addableEffects.push({ value: 'cancelheal', label: 'Anti-Soin', group: 'Soins' })
-  if (!isKeepGoingActive) addableEffects.push({ value: 'keepgoing', label: 'Continue sur sa lancée (rejeu automatique)', group: 'Rythme des tours' })
-  if (rule.ignore_status_block == null) addableEffects.push({ value: 'ignorestatus', label: 'Utilisable malgré un statut bloquant', group: 'Rythme des tours' })
-  if (rule.stat_mod_target == null) addableEffects.push({ value: 'statmod', label: 'Modificateur de stat', group: 'Statistiques' })
-  if (!rule.invulnerable_next_turn) addableEffects.push({ value: 'invuln', label: 'Invulnérabilité au prochain tour adverse', group: 'Défense' })
-  if (rule.prevention_duration_turns == null) addableEffects.push({ value: 'prevention', label: 'Prévention (bloque les dégâts super efficaces)', group: 'Défense' })
-  // Proposé seulement s'il existe au moins une météo à lever — sinon l'effet
-  // serait inerte et l'admin n'aurait rien à choisir.
-  if (rule.weather_id == null && weathers.length > 0) addableEffects.push({ value: 'weather', label: 'Déclenche une météo', group: 'Terrain' })
+  // Un effet retiré de sa carte réapparaît automatiquement ici. La météo n'est
+  // proposée que s'il en existe au moins une à lever — sinon l'effet serait
+  // inerte et l'admin n'aurait rien à choisir. Rien à calculer tant que la
+  // ligne est repliée : tout le catalogue de capacités est rendu d'un bloc.
+  const addableEffects = expanded
+    ? EFFECT_DEFS.filter((def) => !def.isActive(rule) && (def.value !== 'weather' || weathers.length > 0))
+    : []
 
-  const groupedAddableEffects = new Map<string, typeof addableEffects>()
+  const groupedAddableEffects = new Map<string, EffectDef[]>()
   for (const opt of addableEffects) {
     const list = groupedAddableEffects.get(opt.group) ?? []
     list.push(opt)
@@ -413,6 +610,14 @@ function AbilityRuleRow({
       case 'ignorestatus': onUpdate(rule.attack_nom, { ignore_status_block: 'sleep' }); break
       case 'prevention': handlePreventionToggle(true); break
       case 'weather': handleWeatherToggle(true); break
+      case 'damagedot': handleDamageDotTypeChange('flat'); break
+      case 'leechdot': handleLeechDotTypeChange('flat'); break
+      case 'statusdot': handleStatusDotToggle(true); break
+      case 'cleardot': onUpdate(rule.attack_nom, { clear_damage_dot: true }); break
+      case 'curestatus': onUpdate(rule.attack_nom, { cure_status: true }); break
+      case 'clearweather': onUpdate(rule.attack_nom, { clear_weather: true }); break
+      case 'pierceimmunity': handlePierceImmunityToggle(true); break
+      case 'requirestatus': handleRequiresTargetStatusToggle(true); break
     }
   }
 
@@ -420,11 +625,15 @@ function AbilityRuleRow({
     <div
       ref={rowRef}
       data-attack-nom={rule.attack_nom}
-      className={`flex flex-col gap-2 p-3 rounded ${PIXEL_BORDER_SM} bg-white transition-shadow duration-500 ${highlighted ? 'ring-4 ring-[#f0c419]' : ''}`}
+      className={`flex flex-col gap-2 p-3 rounded transition-shadow duration-500 ${
+        missingEffect ? 'border-2 border-[#c0392b] bg-[#fdecea]' : `${PIXEL_BORDER_SM} bg-white`
+      } ${highlighted ? 'ring-4 ring-[#f0c419]' : ''}`}
     >
-      {/* Vue repliée : type + nom, rien d'autre. Toute la ligne est cliquable
-          pour déplier ; la suppression n'est offerte qu'une fois dépliée, pour
-          ne pas risquer un clic malheureux en parcourant la liste. */}
+      {/* Vue repliée : type + nom, plus un rappel « effet manquant » quand le
+          CSV décrit un effet spécial qu'aucun réglage ne traduit encore. Toute
+          la ligne est cliquable pour déplier ; la suppression n'est offerte
+          qu'une fois dépliée, pour ne pas risquer un clic malheureux en
+          parcourant la liste. */}
       <button
         type="button"
         onClick={onToggle}
@@ -433,11 +642,22 @@ function AbilityRuleRow({
       >
         <span className="text-ink-muted-2 text-xs w-3 shrink-0">{expanded ? '▾' : '▸'}</span>
         <TypeBadge type={attack?.type ?? '?'} small />
-        <span className="text-ink text-sm font-bold flex-1 truncate">{rule.attack_nom}</span>
+        <span className={`text-sm flex-1 truncate ${configured ? 'text-ink font-bold' : 'text-ink-muted-2'}`}>{rule.attack_nom}</span>
+        {missingEffect && (
+          <span className="shrink-0 text-[#c0392b] text-[11px] font-bold whitespace-nowrap">⚠ effet à configurer</span>
+        )}
       </button>
 
       {!expanded ? null : (
       <>
+      {/* L'effet décrit dans le CSV (colonne « Effet ») : c'est la consigne à
+          traduire en réglages ci-dessous. */}
+      {attack?.effet && attack.effet.trim() !== '' && (
+        <p className={`text-xs italic px-2 py-1.5 rounded border-2 ${missingEffect ? 'border-[#c0392b]/40 text-[#c0392b]' : 'border-ink/15 text-ink-muted-2'}`}>
+          {attack.effet}
+        </p>
+      )}
+
       {/* Plus de réglage d'animation ici : elle vient désormais uniquement des
           colonnes « Animation » / « Animation 2 » du CSV des attaques (voir
           src/lib/battleAnimations.ts). */}
@@ -575,12 +795,41 @@ function AbilityRuleRow({
             </span>
           </EffectSection>
         )}
+        {rule.requires_target_status != null && (
+          <EffectSection
+            label="Ne fonctionne que sur une cible sous statut"
+            onRemove={() => handleRequiresTargetStatusToggle(false)}
+          >
+            <select
+              value={rule.requires_target_status}
+              onChange={(e) => onUpdate(rule.attack_nom, { requires_target_status: e.target.value as AutoBattleStatusEffect })}
+              className={SELECT_CLASS}
+            >
+              {(Object.keys(STATUS_EFFECT_LABEL) as AutoBattleStatusEffect[]).map((s) => (
+                <option key={s} value={s}>{STATUS_EFFECT_LABEL[s]}</option>
+              ))}
+            </select>
+            <span className="text-ink-muted-2 text-xs mt-1">
+              Si la cible n'est pas affectée par exactement ce statut au moment du coup, la capacité échoue :
+              aucun dégât, aucun effet, et le tour est consommé (comme un raté).
+            </span>
+          </EffectSection>
+        )}
       </EffectCategory>
 
       <EffectCategory label="Dégâts">
         {rule.percent_hp_damage_percent != null && (
-          <EffectSection label="Dégâts en % des PV restants (remplace les dégâts habituels)" onRemove={() => handlePercentHpDamageToggle(false)}>
-            <div className="flex items-center gap-2">
+          <EffectSection label="Dégâts en % des PV de la cible (remplace les dégâts habituels)" onRemove={() => handlePercentHpDamageToggle(false)}>
+            <select
+              value={rule.percent_hp_damage_basis ?? 'current'}
+              onChange={(e) => onUpdate(rule.attack_nom, { percent_hp_damage_basis: e.target.value as AutoBattlePercentHpBasis })}
+              className={SELECT_CLASS}
+            >
+              {(Object.keys(PERCENT_HP_BASIS_LABEL) as AutoBattlePercentHpBasis[]).map((b) => (
+                <option key={b} value={b}>{PERCENT_HP_BASIS_LABEL[b]}</option>
+              ))}
+            </select>
+            <div className="flex items-center gap-2 mt-1">
               <span className="text-ink-muted-2 text-xs">Inflige</span>
               <NumberInput
                 min={1}
@@ -589,8 +838,15 @@ function AbilityRuleRow({
                 onCommit={(v) => onUpdate(rule.attack_nom, { percent_hp_damage_percent: Math.max(1, Math.min(100, v)) })}
                 className={NUM_CLASS_SM}
               />
-              <span className="text-ink-muted-2 text-xs">% des PV restants de la cible</span>
+              <span className="text-ink-muted-2 text-xs">
+                {rule.percent_hp_damage_basis === 'max' ? '% des PV max de la cible' : '% des PV restants de la cible'}
+              </span>
             </div>
+            <span className="text-ink-muted-2 text-[11px] mt-1">
+              {rule.percent_hp_damage_basis === 'max'
+                ? 'Montant constant tout le combat : ces dégâts-là peuvent mettre K.O.'
+                : "Dégâts décroissants à mesure que la cible s'affaiblit — ils ne peuvent jamais l'achever seuls (façon Ultimapoing)."}
+            </span>
           </EffectSection>
         )}
         {rule.bonus_damage_type != null && (
@@ -683,6 +939,201 @@ function AbilityRuleRow({
                   </select>
                 </div>
               )}
+              {/* Comparaison des poids (pokemon.poids, colonne « Poids » du
+                  CSV) : se lit comme une phrase — « L'utilisateur pèse plus de
+                  200 % du poids de l'adversaire ». */}
+              {rule.bonus_damage_condition === 'weight_ratio' && (
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <select
+                    value={rule.bonus_damage_weight_target ?? 'self'}
+                    onChange={(e) => onUpdate(rule.attack_nom, { bonus_damage_weight_target: e.target.value as AutoBattleWeightTarget })}
+                    className={SELECT_CLASS}
+                  >
+                    {(Object.keys(WEIGHT_TARGET_LABEL) as AutoBattleWeightTarget[]).map((t) => (
+                      <option key={t} value={t}>{WEIGHT_TARGET_LABEL[t]}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={rule.bonus_damage_weight_comparison ?? 'greater'}
+                    onChange={(e) => onUpdate(rule.attack_nom, { bonus_damage_weight_comparison: e.target.value as AutoBattleWeightComparison })}
+                    className={SELECT_CLASS}
+                  >
+                    {(Object.keys(WEIGHT_COMPARISON_LABEL) as AutoBattleWeightComparison[]).map((c) => (
+                      <option key={c} value={c}>{WEIGHT_COMPARISON_LABEL[c]}</option>
+                    ))}
+                  </select>
+                  <NumberInput
+                    min={1}
+                    fallback={rule.bonus_damage_weight_percent ?? 100}
+                    value={rule.bonus_damage_weight_percent ?? 100}
+                    onCommit={(v) => onUpdate(rule.attack_nom, { bonus_damage_weight_percent: Math.max(1, v) })}
+                    className={NUM_CLASS_MD}
+                  />
+                  <span className="text-ink-muted-2 text-xs">
+                    % du poids {rule.bonus_damage_weight_target === 'opponent' ? "de l'utilisateur" : "de l'adversaire"}
+                  </span>
+                </div>
+              )}
+            </div>
+          </EffectSection>
+        )}
+        {rule.damage_dot_duration_turns != null && (
+          <EffectSection label="Dégâts persistants (rongent l'adversaire à chaque début de SON tour)" onRemove={handleDamageDotRemove}>
+            <select value={rule.damage_dot_type ?? 'flat'} onChange={(e) => handleDamageDotTypeChange(e.target.value)} className={SELECT_CLASS}>
+              {(Object.keys(DOT_TYPE_LABEL) as AutoBattleDotType[]).map((t) => (
+                <option key={t} value={t}>{DOT_TYPE_LABEL[t]}</option>
+              ))}
+            </select>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-ink-muted-2 text-xs">Inflige</span>
+              {(rule.damage_dot_type ?? 'flat') === 'flat' ? (
+                <>
+                  <NumberInput
+                    min={1}
+                    fallback={rule.damage_dot_amount ?? 5}
+                    value={rule.damage_dot_amount ?? 5}
+                    onCommit={(v) => onUpdate(rule.attack_nom, { damage_dot_amount: Math.max(1, v) })}
+                    className={NUM_CLASS_SM}
+                  />
+                  <span className="text-ink-muted-2 text-xs">PV par tour</span>
+                </>
+              ) : (
+                <>
+                  <NumberInput
+                    min={1}
+                    fallback={rule.damage_dot_percent ?? 10}
+                    value={rule.damage_dot_percent ?? 10}
+                    onCommit={(v) => onUpdate(rule.attack_nom, { damage_dot_percent: Math.max(1, Math.min(100, v)) })}
+                    className={NUM_CLASS_SM}
+                  />
+                  <span className="text-ink-muted-2 text-xs">% des PV max de l'adversaire, par tour</span>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-ink-muted-2 text-xs">Pendant</span>
+              <NumberInput
+                min={1}
+                fallback={rule.damage_dot_duration_turns ?? 3}
+                value={rule.damage_dot_duration_turns ?? 3}
+                onCommit={(v) => onUpdate(rule.attack_nom, { damage_dot_duration_turns: Math.max(1, v) })}
+                className={NUM_CLASS_SM}
+              />
+              <span className="text-ink-muted-2 text-xs">tours de combat</span>
+            </div>
+          </EffectSection>
+        )}
+        {rule.leech_dot_duration_turns != null && (
+          <EffectSection label="Vol de vie persistant (les PV volés à l'adversaire reviennent à son utilisateur)" onRemove={handleLeechDotRemove}>
+            <select value={rule.leech_dot_type ?? 'flat'} onChange={(e) => handleLeechDotTypeChange(e.target.value)} className={SELECT_CLASS}>
+              {(Object.keys(DOT_TYPE_LABEL) as AutoBattleDotType[]).map((t) => (
+                <option key={t} value={t}>{DOT_TYPE_LABEL[t]}</option>
+              ))}
+            </select>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-ink-muted-2 text-xs">Vole</span>
+              {(rule.leech_dot_type ?? 'flat') === 'flat' ? (
+                <>
+                  <NumberInput
+                    min={1}
+                    fallback={rule.leech_dot_amount ?? 5}
+                    value={rule.leech_dot_amount ?? 5}
+                    onCommit={(v) => onUpdate(rule.attack_nom, { leech_dot_amount: Math.max(1, v) })}
+                    className={NUM_CLASS_SM}
+                  />
+                  <span className="text-ink-muted-2 text-xs">PV par tour</span>
+                </>
+              ) : (
+                <>
+                  <NumberInput
+                    min={1}
+                    fallback={rule.leech_dot_percent ?? 10}
+                    value={rule.leech_dot_percent ?? 10}
+                    onCommit={(v) => onUpdate(rule.attack_nom, { leech_dot_percent: Math.max(1, Math.min(100, v)) })}
+                    className={NUM_CLASS_SM}
+                  />
+                  <span className="text-ink-muted-2 text-xs">% des PV max de l'adversaire, par tour</span>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-ink-muted-2 text-xs">Pendant</span>
+              <NumberInput
+                min={1}
+                fallback={rule.leech_dot_duration_turns ?? 3}
+                value={rule.leech_dot_duration_turns ?? 3}
+                onCommit={(v) => onUpdate(rule.attack_nom, { leech_dot_duration_turns: Math.max(1, v) })}
+                className={NUM_CLASS_SM}
+              />
+              <span className="text-ink-muted-2 text-xs">tours de combat</span>
+            </div>
+          </EffectSection>
+        )}
+        {rule.status_dot_duration_turns != null && (
+          <EffectSection
+            label="Tentative de statut persistante (un jet à chaque début de tour de l'adversaire)"
+            onRemove={() => handleStatusDotToggle(false)}
+          >
+            <div className="flex items-center gap-2 flex-wrap">
+              <select
+                value={rule.status_dot_status ?? 'sleep'}
+                onChange={(e) => onUpdate(rule.attack_nom, { status_dot_status: e.target.value as AutoBattleStatusEffect })}
+                className={SELECT_CLASS}
+              >
+                {(Object.keys(STATUS_EFFECT_LABEL) as AutoBattleStatusEffect[]).map((s) => (
+                  <option key={s} value={s}>{STATUS_EFFECT_LABEL[s]}</option>
+                ))}
+              </select>
+              <NumberInput
+                min={1}
+                fallback={rule.status_dot_chance ?? 30}
+                value={rule.status_dot_chance ?? 30}
+                onCommit={(v) => onUpdate(rule.attack_nom, { status_dot_chance: Math.max(1, Math.min(100, v)) })}
+                className={NUM_CLASS_SM}
+              />
+              <span className="text-ink-muted-2 text-xs">% de chances par tour</span>
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-ink-muted-2 text-xs">Pendant</span>
+              <NumberInput
+                min={1}
+                fallback={rule.status_dot_duration_turns ?? 3}
+                value={rule.status_dot_duration_turns ?? 3}
+                onCommit={(v) => onUpdate(rule.attack_nom, { status_dot_duration_turns: Math.max(1, v) })}
+                className={NUM_CLASS_SM}
+              />
+              <span className="text-ink-muted-2 text-xs">tours de combat</span>
+            </div>
+            <span className="text-ink-muted-2 text-[11px] mt-1">
+              Aucun jet tant que l'adversaire a déjà un statut (un seul à la fois) : l'effet le guette jusqu'à
+              expiration. Un statut posé ainsi ne se manifeste qu'au tour suivant de sa victime.
+            </span>
+          </EffectSection>
+        )}
+        {rule.pierce_immunity_type != null && (
+          <EffectSection label="Perce-immunité (lève l'immunité d'un type, dès ce coup-ci)" onRemove={() => handlePierceImmunityToggle(false)}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-ink-muted-2 text-xs">Immunité levée pour les pokémon de type</span>
+              <select
+                value={rule.pierce_immunity_type}
+                onChange={(e) => onUpdate(rule.attack_nom, { pierce_immunity_type: e.target.value })}
+                className={SELECT_CLASS}
+              >
+                {ALL_TYPES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-ink-muted-2 text-xs">Pendant</span>
+              <NumberInput
+                min={1}
+                fallback={rule.pierce_immunity_turns ?? 3}
+                value={rule.pierce_immunity_turns ?? 3}
+                onCommit={(v) => onUpdate(rule.attack_nom, { pierce_immunity_turns: Math.max(1, v) })}
+                className={NUM_CLASS_SM}
+              />
+              <span className="text-ink-muted-2 text-xs">tours de combat</span>
             </div>
           </EffectSection>
         )}
@@ -824,6 +1275,28 @@ function AbilityRuleRow({
             </label>
           </EffectSection>
         )}
+        {rule.clear_damage_dot && (
+          <EffectSection
+            label="Purge des effets persistants (sur son utilisateur, coup réussi)"
+            onRemove={() => onUpdate(rule.attack_nom, { clear_damage_dot: false })}
+          >
+            <p className="text-ink-muted-2 text-xs">
+              Retire les trois effets persistants posés par une capacité et qu'il subit : dégâts persistants,
+              vol de vie persistant et tentative de statut persistante. Ne touche ni aux statuts eux-mêmes
+              (brûlure, poison — voir « Guérit son statut »), ni à la météo.
+            </p>
+          </EffectSection>
+        )}
+        {rule.cure_status && (
+          <EffectSection
+            label="Guérit son statut (n'importe lequel, sur un coup réussi)"
+            onRemove={() => onUpdate(rule.attack_nom, { cure_status: false })}
+          >
+            <p className="text-ink-muted-2 text-xs">
+              Le statut de son utilisateur est levé, quel qu'il soit — paralysie, sommeil, brûlure, poison…
+            </p>
+          </EffectSection>
+        )}
         {rule.cancel_heal_duration_turns != null && (
           <EffectSection label="Anti-Soin (annule tous les soins adverses, sur un coup réussi)" onRemove={() => handleCancelHealToggle(false)}>
             <div className="flex items-center gap-2">
@@ -843,12 +1316,25 @@ function AbilityRuleRow({
 
       <EffectCategory label="Statistiques">
         {rule.stat_mod_target != null && (
-          <EffectSection label="Modificateur de stat (baisse adverse ou hausse sur soi, sur un coup réussi)" onRemove={() => handleStatModTargetChange('')}>
-            <select value={rule.stat_mod_target} onChange={(e) => handleStatModTargetChange(e.target.value)} className={SELECT_CLASS}>
-              {(Object.keys(STAT_MOD_TARGET_LABEL) as AutoBattleStatModTarget[]).map((t) => (
-                <option key={t} value={t}>{STAT_MOD_TARGET_LABEL[t]}</option>
-              ))}
-            </select>
+          <EffectSection label="Modificateur de stat (bonus ou malus, sur un coup réussi)" onRemove={() => handleStatModTargetChange('')}>
+            {/* Cible et sens sont indépendants : « sur son utilisateur » +
+                « baisse » donne le malus qu'une capacité s'inflige à elle-même. */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <select value={rule.stat_mod_target} onChange={(e) => handleStatModTargetChange(e.target.value)} className={SELECT_CLASS}>
+                {(Object.keys(STAT_MOD_TARGET_LABEL) as AutoBattleStatModTarget[]).map((t) => (
+                  <option key={t} value={t}>{STAT_MOD_TARGET_LABEL[t]}</option>
+                ))}
+              </select>
+              <select
+                value={rule.stat_mod_direction ?? (rule.stat_mod_target === 'opponent' ? 'debuff' : 'buff')}
+                onChange={(e) => onUpdate(rule.attack_nom, { stat_mod_direction: e.target.value as AutoBattleStatModDirection })}
+                className={SELECT_CLASS}
+              >
+                {(Object.keys(STAT_MOD_DIRECTION_LABEL) as AutoBattleStatModDirection[]).map((d) => (
+                  <option key={d} value={d}>{STAT_MOD_DIRECTION_LABEL[d]}</option>
+                ))}
+              </select>
+            </div>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-ink-muted-2 text-xs">Stat visée</span>
               <select
@@ -1018,6 +1504,17 @@ function AbilityRuleRow({
             </span>
           </EffectSection>
         )}
+        {rule.clear_weather && (
+          <EffectSection
+            label="Dissipe la météo en cours"
+            onRemove={() => onUpdate(rule.attack_nom, { clear_weather: false })}
+          >
+            <p className="text-ink-muted-2 text-xs">
+              Sur un coup réussi, la météo en cours (quelle qu'elle soit) disparaît — c'est un état de terrain
+              partagé, elle cesse donc pour les deux camps.
+            </p>
+          </EffectSection>
+        )}
       </EffectCategory>
 
       <EffectCategory label="Défense">
@@ -1061,15 +1558,19 @@ function AbilityRuleRow({
         </select>
       )}
 
-      <div className="flex justify-end border-t-2 border-[#cfc7a8] pt-2 mt-1">
-        <button
-          onClick={() => onRemove(rule.attack_nom)}
-          className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}
-        >
-          <CloseIcon className="w-3 h-3" />
-          Retirer cette capacité
-        </button>
-      </div>
+      {/* La capacité ne quitte plus la liste (tout le catalogue est affiché) :
+          ce bouton efface simplement tous ses réglages d'un coup. */}
+      {configured && (
+        <div className="flex justify-end border-t-2 border-[#cfc7a8] pt-2 mt-1">
+          <button
+            onClick={() => onRemove(rule.attack_nom)}
+            className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}
+          >
+            <CloseIcon className="w-3 h-3" />
+            Effacer tous les effets de cette capacité
+          </button>
+        </div>
+      )}
       </>
       )}
     </div>
@@ -1106,30 +1607,78 @@ export function AdminAutoBattleAbilityRulesPanel() {
     [attacks]
   )
 
-  // La recherche porte sur TOUT le catalogue, y compris les capacités déjà
-  // configurées : sélectionner une capacité déjà présente sert à la RETROUVER
-  // (on déplie sa ligne et on scrolle jusqu'à elle) plutôt qu'à la recréer.
-  const configuredNames = useMemo(() => new Set(rules.map((r) => r.attack_nom)), [rules])
+  const rulesByName = useMemo(() => {
+    const map = new Map<string, AutoBattleAbilityRule>()
+    for (const r of rules) map.set(r.attack_nom, r)
+    return map
+  }, [rules])
 
   const [sortMode, setSortMode] = useState<'name' | 'type'>('name')
-  const sortedRules = useMemo(() => {
-    const list = [...rules]
+  const [onlyMissing, setOnlyMissing] = useState(false)
+
+  // TOUT le catalogue d'attaques est listé, configuré ou non : une capacité
+  // sans ligne en base s'affiche sur une règle vide et n'est réellement créée
+  // qu'au premier réglage (voir handleUpdate). S'y ajoutent les éventuelles
+  // règles orphelines (capacité disparue du CSV depuis) pour pouvoir les
+  // nettoyer, elles ne disparaissent donc pas de l'écran.
+  const rows = useMemo(() => {
+    const list: AbilityRow[] = attacks.map((attack) => {
+      const rule = rulesByName.get(attack.nom)
+      const effectiveRule = rule ?? emptyRule(attack.nom)
+      return {
+        nom: attack.nom,
+        attack,
+        rule: effectiveRule,
+        configured: rule != null,
+        // « Effet manquant » = le CSV décrit un effet spécial (colonne
+        // « Effet ») alors qu'aucun réglage ne le traduit ici et que la
+        // capacité n'a pas non plus de statut mini-jeu venu du CSV (auquel cas
+        // la description est déjà couverte). Description vide = capacité sans
+        // effet spécial prévu : rien à signaler.
+        missingEffect: (attack.effet ?? '').trim() !== '' && attack.status_effect == null && !hasAnyEffect(effectiveRule),
+      }
+    })
+    for (const rule of rules) {
+      if (!attacksByName.has(rule.attack_nom)) {
+        list.push({ nom: rule.attack_nom, attack: undefined, rule, configured: true, missingEffect: false })
+      }
+    }
     if (sortMode === 'name') {
-      list.sort((a, b) => a.attack_nom.localeCompare(b.attack_nom, 'fr'))
+      list.sort((a, b) => a.nom.localeCompare(b.nom, 'fr'))
     } else {
       list.sort((a, b) => {
-        const typeA = attacksByName.get(a.attack_nom)?.type ?? ''
-        const typeB = attacksByName.get(b.attack_nom)?.type ?? ''
-        const cmp = typeA.localeCompare(typeB, 'fr')
-        return cmp !== 0 ? cmp : a.attack_nom.localeCompare(b.attack_nom, 'fr')
+        const cmp = (a.attack?.type ?? '').localeCompare(b.attack?.type ?? '', 'fr')
+        return cmp !== 0 ? cmp : a.nom.localeCompare(b.nom, 'fr')
       })
     }
     return list
-  }, [rules, sortMode, attacksByName])
+  }, [attacks, rules, rulesByName, attacksByName, sortMode])
 
-  // Ajouter une capacité l'insère quelque part dans la liste triée (pas
-  // forcément en fin de liste) : on la retrouve après le tri et on scrolle
-  // jusqu'à elle, avec un bref halo pour la repérer facilement.
+  const missingCount = useMemo(() => rows.filter((r) => r.missingEffect).length, [rows])
+
+  // La ligne en base n'est créée qu'au premier réglage réellement posé : tant
+  // qu'on ne fait que parcourir ou déplier la liste (qui contient maintenant
+  // tout le catalogue), rien n'est écrit. Le ref évite un second INSERT si
+  // deux réglages partent avant que l'état `rules` ne soit rafraîchi.
+  const createdRef = useRef(new Set<string>())
+  const handleUpdate = useCallback(async (attackNom: string, patch: Partial<Omit<AutoBattleAbilityRule, 'attack_nom' | 'created_at'>>) => {
+    if (!rulesByName.has(attackNom) && !createdRef.current.has(attackNom)) {
+      createdRef.current.add(attackNom)
+      await addRule(attackNom)
+    }
+    await updateRule(attackNom, patch)
+  }, [rulesByName, addRule, updateRule])
+
+  const handleRemove = useCallback((attackNom: string) => {
+    // La ligne redevient « non configurée » : il faudra la recréer au prochain
+    // réglage, sinon l'UPDATE porterait sur une ligne inexistante.
+    createdRef.current.delete(attackNom)
+    void removeRule(attackNom)
+  }, [removeRule])
+
+  // Sélectionner une capacité dans la recherche sert à la RETROUVER : on
+  // retrouve sa ligne après le tri et on scrolle jusqu'à elle, avec un bref
+  // halo pour la repérer facilement.
   const rowRefs = useRef(new Map<string, HTMLDivElement>())
   // Callback ref stable (pas recréée à chaque rendu) : lit le nom de la
   // capacité depuis data-attack-nom plutôt que de fermer sur `rule` dans le
@@ -1140,10 +1689,18 @@ export function AdminAutoBattleAbilityRulesPanel() {
     const nom = el.dataset.attackNom
     if (nom) rowRefs.current.set(nom, el)
   }, [])
-  const [justAddedNom, setJustAddedNom] = useState<string | null>(null)
+  const [revealedNom, setRevealedNom] = useState<string | null>(null)
   // Lignes dépliées (repliées par défaut) — l'ajout et la recherche déplient
   // automatiquement la ligne concernée.
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  // Sous filtre « à configurer », une ligne DÉPLIÉE reste visible même une fois
+  // son premier effet posé : sinon la carte disparaîtrait sous les doigts au
+  // moment précis où on commence à la régler. Elle quitte la liste au repli.
+  const visibleRows = useMemo(
+    () => (onlyMissing ? rows.filter((r) => r.missingEffect || expanded.has(r.nom)) : rows),
+    [rows, onlyMissing, expanded]
+  )
+
   const toggleExpanded = useCallback((nom: string) => {
     setExpanded((prev) => {
       const next = new Set(prev)
@@ -1153,21 +1710,22 @@ export function AdminAutoBattleAbilityRulesPanel() {
     })
   }, [])
 
-  /** Sélection depuis la barre de recherche : crée la règle si besoin, puis la révèle. */
-  const handleSelectAttack = async (attackNom: string) => {
-    if (!configuredNames.has(attackNom)) await addRule(attackNom)
+  /** Sélection depuis la barre de recherche : déplie la capacité et défile jusqu'à elle. */
+  const handleSelectAttack = (attackNom: string) => {
+    // Le filtre « à configurer » masquerait la ligne cherchée : on le lève.
+    setOnlyMissing(false)
     setExpanded((prev) => new Set(prev).add(attackNom))
-    setJustAddedNom(attackNom)
+    setRevealedNom(attackNom)
   }
 
   useEffect(() => {
-    if (!justAddedNom) return
-    const el = rowRefs.current.get(justAddedNom)
+    if (!revealedNom) return
+    const el = rowRefs.current.get(revealedNom)
     if (!el) return
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    const timeout = window.setTimeout(() => setJustAddedNom(null), 1500)
+    const timeout = window.setTimeout(() => setRevealedNom(null), 1500)
     return () => window.clearTimeout(timeout)
-  }, [justAddedNom, sortedRules])
+  }, [revealedNom, visibleRows])
 
   if (rulesLoading || attacksLoading || weathersLoading) {
     return (
@@ -1185,12 +1743,36 @@ export function AdminAutoBattleAbilityRulesPanel() {
       </div>
       <p className="text-ink-muted-2 text-sm mb-3">
         S'appliquent que la capacité soit choisie par un joueur ou configurée pour un opposant.
-        La recherche sert aussi à retrouver une capacité déjà configurée : elle se déplie et défile jusqu'à toi.
+        Toutes les capacités du catalogue sont listées : déplie celle que tu veux régler, ou passe par la
+        recherche pour défiler directement jusqu'à elle.
       </p>
 
-      <MoveSearchInput options={attacks} disabled={false} showDamage onSelect={(a) => void handleSelectAttack(a.nom)} />
+      <MoveSearchInput options={attacks} disabled={false} showDamage onSelect={(a) => handleSelectAttack(a.nom)} />
 
-      {rules.length > 1 && (
+      {/* Indicateur de travail restant : les capacités dont le CSV décrit un
+          effet spécial sans qu'aucun réglage ne le traduise encore. */}
+      {missingCount > 0 ? (
+        <div className="flex items-center gap-2 flex-wrap mt-3 p-2 rounded border-2 border-[#c0392b] bg-[#fdecea]">
+          <span className="text-[#c0392b] text-sm font-bold">
+            ⚠ {missingCount} capacité{missingCount > 1 ? 's' : ''} sans effet configuré
+          </span>
+          <span className="text-ink-muted-2 text-xs flex-1">
+            (le CSV leur décrit un effet, mais rien n'est réglé ici)
+          </span>
+          <button
+            onClick={() => setOnlyMissing((v) => !v)}
+            className={`text-xs px-2.5 py-1 rounded font-bold ${onlyMissing ? BUTTON_STYLE.yellow : BUTTON_STYLE.gray}`}
+          >
+            {onlyMissing ? 'Tout afficher' : 'Voir uniquement celles-ci'}
+          </button>
+        </div>
+      ) : (
+        <p className="text-ink-muted-2 text-xs mt-3">
+          Toutes les capacités décrites dans le CSV ont un effet configuré.
+        </p>
+      )}
+
+      {rows.length > 1 && (
         <div className="flex items-center gap-2 mt-3">
           <span className="text-ink-muted-2 text-xs">Trier par</span>
           <button
@@ -1209,28 +1791,32 @@ export function AdminAutoBattleAbilityRulesPanel() {
       )}
 
       <div className="flex flex-col gap-2 mt-4">
-        {sortedRules.length === 0 ? (
-          <p className="text-ink-muted-2 text-sm italic">Aucun effet spécial configuré pour l'instant.</p>
+        {visibleRows.length === 0 ? (
+          <p className="text-ink-muted-2 text-sm italic">
+            {rows.length === 0 ? 'Aucune capacité dans le catalogue.' : 'Aucune capacité à configurer.'}
+          </p>
         ) : (
-          sortedRules.map((rule) => (
+          visibleRows.map((row) => (
             <AbilityRuleRow
-              key={rule.attack_nom}
-              rule={rule}
-              attack={attacksByName.get(rule.attack_nom)}
+              key={row.nom}
+              rule={row.rule}
+              attack={row.attack}
+              configured={row.configured}
+              missingEffect={row.missingEffect}
               attackTypes={attackTypes}
               weathers={sortedWeathers}
-              onUpdate={updateRule}
-              onRemove={removeRule}
+              onUpdate={(nom, patch) => void handleUpdate(nom, patch)}
+              onRemove={handleRemove}
               rowRef={setRowRef}
-              highlighted={rule.attack_nom === justAddedNom}
-              expanded={expanded.has(rule.attack_nom)}
-              onToggle={() => toggleExpanded(rule.attack_nom)}
+              highlighted={row.nom === revealedNom}
+              expanded={expanded.has(row.nom)}
+              onToggle={() => toggleExpanded(row.nom)}
             />
           ))
         )}
       </div>
 
-      <MoveSearchInput options={attacks} disabled={false} showDamage onSelect={(a) => void handleSelectAttack(a.nom)} className="mt-4" />
+      <MoveSearchInput options={attacks} disabled={false} showDamage onSelect={(a) => handleSelectAttack(a.nom)} className="mt-4" />
     </div>
   )
 }

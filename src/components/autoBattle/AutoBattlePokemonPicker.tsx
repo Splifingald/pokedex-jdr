@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import type { Pokemon, PlayerPokemon, Attack, AutoBattleTalent } from '../../types'
 import { ownedPokemonName } from '../../types'
 import { getEligiblePlayerPokemon, describeTalent } from '../../lib/autoBattle'
-import { getSuperEfficace } from '../../lib/pokemonFacts'
+import { isTypeSuperEffective } from '../../lib/typeChart'
 import { getHpBreakdown, getDamageBreakdown } from '../../lib/xpBonuses'
 import { normalizeSearch } from '../../lib/normalizeSearch'
 import { PANEL, PIXEL_BORDER_SM } from '../../lib/panelStyles'
@@ -118,9 +118,16 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
     [roster, attacksByName, bannedAttacks]
   )
 
+  // L'efficacité se joue désormais au niveau de la CAPACITÉ (voir
+  // src/lib/typeChart.ts) : un pokémon est annoncé "Super Efficace" dès qu'au
+  // moins une de ses capacités apprises (non bannie) est avantageuse contre le
+  // type adverse — c'est bien ce que le joueur pourra jouer à l'écran suivant.
   const isSuperEffective = (pp: PlayerPokemon) => {
-    const species = pokemonByName.get(pp.pokemon_nom)
-    return opponentDiscovered && opponentSpecies != null && getSuperEfficace(species).includes(opponentSpecies.type)
+    if (!opponentDiscovered || opponentSpecies == null) return false
+    return pp.moves.some((nom) => {
+      const attack = attacksByName.get(nom)
+      return attack != null && !bannedAttacks.has(nom) && isTypeSuperEffective(attack.type, opponentSpecies.type)
+    })
   }
 
   const sortedAndFiltered = useMemo(() => {
@@ -156,8 +163,8 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
       filtered.sort((a, b) => (b.in_team ? 1 : 0) - (a.in_team ? 1 : 0) || byNumero(a, b))
     }
     return filtered
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- isSuperEffective ferme sur opponentSpecies/opponentDiscovered/pokemonByName, déjà dans les deps
-  }, [eligible, sortKey, query, pokemonByName, opponentSpecies, opponentDiscovered])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- isSuperEffective ferme sur opponentSpecies/opponentDiscovered/attacksByName/bannedAttacks, déjà dans les deps
+  }, [eligible, sortKey, query, pokemonByName, opponentSpecies, opponentDiscovered, attacksByName, bannedAttacks])
 
   if (eligible.length === 0) {
     return (

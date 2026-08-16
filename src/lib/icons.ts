@@ -9,6 +9,7 @@ export const NAV_ICON: Partial<Record<string, string>> = {
   sac: `${BASE}/icon_navbar_bag.png`,
   carte: `${BASE}/icon_navbar_map.png`,
   attaques: `${BASE}/icon_navbar_abilities.png`,
+  types: `${BASE}/icon_navbar_types.png`,
   campagne: `${BASE}/icon_navbar_journal.png`,
   admin: `${BASE}/icon_navbar_admin.png`,
   rencontres: `${BASE}/icon_navbar_encounters.png`,

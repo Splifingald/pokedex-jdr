@@ -1,7 +1,7 @@
 import { NAV_ICON } from '../lib/icons'
 import { PixelIcon } from './icons/PixelIcon'
 
-export type TabId = 'accueil' | 'pokedex' | 'equipe' | 'sac' | 'carte' | 'attaques' | 'rencontres' | 'campagne' | 'admin'
+export type TabId = 'accueil' | 'pokedex' | 'equipe' | 'sac' | 'carte' | 'attaques' | 'types' | 'rencontres' | 'campagne' | 'admin'
 
 interface Tab {
   id: TabId
@@ -29,6 +29,8 @@ interface Props {
   showSacTab: boolean
   showCarteTab: boolean
   showAttacksTab: boolean
+  /** Table des types (voir TypeChartTab) — admin uniquement, comme Capacités. */
+  showTypesTab: boolean
   showRencontresTab: boolean
   showCampagneTab: boolean
   showAdminTab: boolean
@@ -36,7 +38,7 @@ interface Props {
   variant: 'bottom' | 'side'
 }
 
-export function TabBar({ activeTab, onTabChange, showPokedexTab, showTeamTab, showSacTab, showCarteTab, showAttacksTab, showRencontresTab, showCampagneTab, showAdminTab, variant }: Props) {
+export function TabBar({ activeTab, onTabChange, showPokedexTab, showTeamTab, showSacTab, showCarteTab, showAttacksTab, showTypesTab, showRencontresTab, showCampagneTab, showAdminTab, variant }: Props) {
   const tabs: Tab[] = [
     { id: 'pokedex', icon: '📖', label: 'Pokédex', visible: showPokedexTab },
     { id: 'equipe', icon: '🐾', label: 'Pokémon', visible: showTeamTab },
@@ -44,6 +46,7 @@ export function TabBar({ activeTab, onTabChange, showPokedexTab, showTeamTab, sh
     { id: 'sac', icon: '🎒', label: 'Sac', visible: showSacTab },
     { id: 'carte', icon: '🗺️', label: 'Carte', visible: showCarteTab },
     { id: 'attaques', icon: '💥', label: 'Capacités', visible: showAttacksTab },
+    { id: 'types', icon: '🔰', label: 'Types', visible: showTypesTab },
     { id: 'rencontres', icon: '🎲', label: 'Rencontres', visible: showRencontresTab },
     { id: 'campagne', icon: '📓', label: 'Journal', visible: showCampagneTab },
     { id: 'admin', icon: '🛠️', label: 'Admin', visible: showAdminTab },

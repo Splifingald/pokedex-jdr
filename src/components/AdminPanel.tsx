@@ -29,6 +29,10 @@ function mapCsvRow(row: CsvRow) {
     type:                 row['Type']?.trim() ?? '',
     degats_base:          parseInt(row['Dégâts de base']) || 0,
     pv_base:              parseInt(row['PV de base']) || 0,
+    // Colonne facultative (voir CsvRow) : absente/vide/illisible = poids
+    // inconnu, la condition de dégâts 'weight_ratio' ne se déclenchera jamais
+    // pour cette espèce. Virgule décimale acceptée, comme "Dégâts moyens".
+    poids:                Number.isFinite(parseFloat((row['Poids'] ?? '').replace(',', '.'))) ? parseFloat(row['Poids'].replace(',', '.')) : null,
     super_efficace_1:     row['Super Efficace 1']?.trim() || null,
     super_efficace_2:     row['Super Efficace 2']?.trim() || null,
     super_efficace_3:     row['Super Efficace 3']?.trim() || null,

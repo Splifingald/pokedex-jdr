@@ -131,6 +131,10 @@ CREATE TABLE IF NOT EXISTS pokemon (
   type                  text NOT NULL,
   degats_base           integer NOT NULL DEFAULT 0,
   pv_base               integer NOT NULL DEFAULT 0,
+  -- Colonnes historiques « Super Efficace 1..4 » du CSV : conservées et
+  -- toujours importées (voir AdminPanel), mais PLUS LUES NULLE PART depuis que
+  -- l'efficacité se calcule entre le type de la CAPACITÉ et celui du défenseur
+  -- (voir type_super_effective plus bas).
   super_efficace_1      text,
   super_efficace_2      text,
   super_efficace_3      text,
@@ -217,6 +221,13 @@ CREATE INDEX IF NOT EXISTS idx_pokemon_numero ON pokemon(numero);
 -- ============================================================
 -- Row Level Security
 -- ============================================================
+
+-- Poids de l'espèce (colonne « Poids » du CSV, en kg — décimales acceptées) :
+-- purement informatif à l'affichage, mais lu en combat par la condition de
+-- dégâts additionnels 'weight_ratio' (voir autobattle_ability_rules.
+-- bonus_damage_weight_*). Colonne CSV facultative : absente = NULL, la
+-- condition ne se déclenche alors jamais.
+ALTER TABLE pokemon ADD COLUMN IF NOT EXISTS poids numeric;
 
 ALTER TABLE pokemon ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attacks ENABLE ROW LEVEL SECURITY;
@@ -2719,6 +2730,29 @@ ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS opponent_keep_goi
 ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS player_keep_going_count integer NOT NULL DEFAULT 0;
 ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS opponent_keep_going_count integer NOT NULL DEFAULT 0;
 
+-- Effets persistants offensifs SUBIS par chaque camp (dégâts par tour, vol de
+-- vie par tour) et perce-immunité ACCORDÉ à chaque camp — voir
+-- autobattle_ability_rules.damage_dot_*/leech_dot_*/pierce_immunity_* et les
+-- champs de même nom dans autobattle_combatant_state.
+ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS player_damage_dot_amount integer;
+ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS player_damage_dot_expires integer;
+ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS opponent_damage_dot_amount integer;
+ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS opponent_damage_dot_expires integer;
+ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS player_leech_dot_amount integer;
+ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS player_leech_dot_expires integer;
+ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS opponent_leech_dot_amount integer;
+ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS opponent_leech_dot_expires integer;
+ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS player_pierce_immunity_type text;
+ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS player_pierce_immunity_expires integer;
+ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS opponent_pierce_immunity_type text;
+ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS opponent_pierce_immunity_expires integer;
+ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS player_status_dot_status text;
+ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS player_status_dot_chance integer;
+ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS player_status_dot_expires integer;
+ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS opponent_status_dot_status text;
+ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS opponent_status_dot_chance integer;
+ALTER TABLE autobattle_manual_battles ADD COLUMN IF NOT EXISTS opponent_status_dot_expires integer;
+
 -- Piles de modificateurs de stat (voir autobattle_mod_total) : remplacent les
 -- colonnes *_damage_mod_amount/_expires/_type_filter et *_precision_mod_amount/
 -- _expires, qui ne portaient qu'UN modificateur écrasable par camp et par stat.
@@ -2954,7 +2988,7 @@ ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_bon
   CHECK (bonus_damage_type IS NULL OR bonus_damage_type IN ('multiply', 'flat', 'range'));
 ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_bonus_damage_condition_check;
 ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_bonus_damage_condition_check
-  CHECK (bonus_damage_condition IS NULL OR bonus_damage_condition IN ('took_damage_last_turn', 'first_use', 'dice_equals', 'has_status', 'self_has_status'));
+  CHECK (bonus_damage_condition IS NULL OR bonus_damage_condition IN ('took_damage_last_turn', 'first_use', 'dice_equals', 'has_status', 'self_has_status', 'weight_ratio'));
 ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_bonus_damage_fields;
 ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_bonus_damage_fields
   CHECK (
@@ -2981,11 +3015,43 @@ ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_abilit
 ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_bonus_damage_status_filter_check
   CHECK (bonus_damage_status_filter IS NULL OR bonus_damage_status_filter IN ('paralysis', 'fear', 'confusion', 'sleep', 'burn', 'poison', 'frozen'));
 
+-- Réglages de la condition 'weight_ratio' ci-dessus : comparaison des POIDS
+-- des deux espèces (pokemon.poids, importé du CSV) au moment du coup.
+--   bonus_damage_weight_target     = qui est comparé À L'AUTRE ('self' = le
+--                                    lanceur, 'opponent' = sa cible) ;
+--   bonus_damage_weight_comparison = 'greater' (>) ou 'lower' (<) ;
+--   bonus_damage_weight_percent    = pourcentage appliqué au poids de L'AUTRE.
+-- Lu : « poids(target) <comparaison> percent % du poids de l'autre ». Les trois
+-- exemples de référence : self/greater/200 = « le lanceur pèse plus de 200 % du
+-- poids de sa cible » ; opponent/lower/100 = « la cible pèse moins que le
+-- lanceur » ; opponent/greater/200 = « la cible pèse plus du double du
+-- lanceur ». Poids manquant ou nul d'un côté = condition simplement non
+-- remplie (aucun bonus), jamais une erreur. Sans effet pour les autres
+-- conditions.
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS bonus_damage_weight_target text;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS bonus_damage_weight_comparison text;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS bonus_damage_weight_percent integer;
+ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_bonus_damage_weight_check;
+ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_bonus_damage_weight_check
+  CHECK (
+    (bonus_damage_weight_target IS NULL OR bonus_damage_weight_target IN ('self', 'opponent'))
+    AND (bonus_damage_weight_comparison IS NULL OR bonus_damage_weight_comparison IN ('greater', 'lower'))
+    AND (bonus_damage_weight_percent IS NULL OR bonus_damage_weight_percent >= 1)
+    -- La condition 'weight_ratio' exige ses trois réglages (les autres
+    -- conditions les ignorent et peuvent les laisser à NULL).
+    AND (bonus_damage_condition IS DISTINCT FROM 'weight_ratio'
+      OR (bonus_damage_weight_target IS NOT NULL AND bonus_damage_weight_comparison IS NOT NULL AND bonus_damage_weight_percent IS NOT NULL))
+  );
+
 -- Modificateur de stat (dégâts de base ou précision), appliqué sur un coup
--- réussi soit à l'adversaire du lanceur (stat_mod_target = 'opponent', un
--- débuff), soit au lanceur lui-même (stat_mod_target = 'self', un buff) — le
--- sens hausse/baisse découle directement de la cible, voir
--- autobattle_resolve_battle. 'percent' (stat_mod_percent) n'est valable que
+-- réussi soit à l'adversaire du lanceur (stat_mod_target = 'opponent'), soit au
+-- lanceur lui-même (stat_mod_target = 'self'). La CIBLE et le SENS sont deux
+-- réglages indépendants : stat_mod_direction = 'buff' (hausse) ou 'debuff'
+-- (baisse) autorise les quatre combinaisons, dont le malus qu'une capacité
+-- s'inflige à elle-même (façon Close Combat). NULL = ancien comportement, où le
+-- sens découlait de la cible (adversaire = baisse, soi = hausse) : c'est la
+-- valeur de repli du moteur, voir autobattle_stat_mod_signed.
+-- 'percent' (stat_mod_percent) n'est valable que
 -- pour stat = 'damage', calculé sur les dégâts de base DE COMBAT de la cible
 -- tels que calculés en tout début de combat (avant tout modificateur), fixes
 -- pour tout le combat. Dure stat_mod_duration_turns tours de combat (compteur
@@ -3008,9 +3074,18 @@ ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS stat_mod_percent i
 ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS stat_mod_duration_type text;
 ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS stat_mod_duration_turns integer;
 ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS stat_mod_max_uses integer;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS stat_mod_direction text;
 ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_stat_mod_target_check;
 ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_stat_mod_target_check
   CHECK (stat_mod_target IS NULL OR stat_mod_target IN ('self', 'opponent'));
+ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_stat_mod_direction_check;
+ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_stat_mod_direction_check
+  CHECK (stat_mod_direction IS NULL OR stat_mod_direction IN ('buff', 'debuff'));
+-- Reprise des règles existantes, écrites quand le sens découlait de la cible :
+-- elles gardent exactement le même comportement, désormais explicite.
+UPDATE autobattle_ability_rules
+   SET stat_mod_direction = CASE WHEN stat_mod_target = 'opponent' THEN 'debuff' ELSE 'buff' END
+ WHERE stat_mod_target IS NOT NULL AND stat_mod_direction IS NULL;
 ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_stat_mod_stat_check;
 ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_stat_mod_stat_check
   CHECK (stat_mod_stat IS NULL OR stat_mod_stat IN ('damage', 'precision'));
@@ -3077,17 +3152,27 @@ ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_abilit
 ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_cancel_heal_duration_turns_check
   CHECK (cancel_heal_duration_turns IS NULL OR cancel_heal_duration_turns >= 1);
 
--- Dégâts en % des PV restants : sur un coup réussi, remplace ENTIÈREMENT le
+-- Dégâts en % des PV de la cible : sur un coup réussi, remplace ENTIÈREMENT le
 -- calcul de dégâts habituel (dégâts de base + dé + modificateur de stat) par
--- floor(PV ACTUELS de la cible AVANT ce coup × percent_hp_damage_percent /
--- 100) — comme "Ultimapoing"/Super Fang côté jeux officiels. Les dégâts
+-- floor(PV de la cible × percent_hp_damage_percent / 100). Les dégâts
 -- additionnels conditionnels (bonus_damage_*), le contre-coup, le soin, etc.
 -- s'appliquent ensuite normalement, sur CE total. 50 par défaut côté admin
 -- (AdminAutoBattleAbilityRulesPanel), pas de défaut SQL forcé.
+--
+-- percent_hp_damage_basis choisit QUELS PV servent de base :
+--   'current' (ou NULL, valeur historique) : les PV ACTUELS de la cible AVANT
+--     ce coup — comme "Ultimapoing"/Super Fang, des dégâts qui s'amenuisent à
+--     mesure que la cible s'affaiblit et ne peuvent jamais l'achever seuls ;
+--   'max' : ses PV MAX, donc un montant CONSTANT pendant tout le combat, qui
+--     lui peut mettre K.O.
 ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS percent_hp_damage_percent integer;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS percent_hp_damage_basis text;
 ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_percent_hp_damage_percent_check;
 ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_percent_hp_damage_percent_check
   CHECK (percent_hp_damage_percent IS NULL OR (percent_hp_damage_percent >= 1 AND percent_hp_damage_percent <= 100));
+ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_percent_hp_damage_basis_check;
+ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_percent_hp_damage_basis_check
+  CHECK (percent_hp_damage_basis IS NULL OR percent_hp_damage_basis IN ('current', 'max'));
 
 -- Filtre de TYPE sur le modificateur de stat (stat_mod_*, uniquement pour
 -- stat = 'damage') : NULL = le modificateur s'applique à toutes les capacités
@@ -3179,6 +3264,130 @@ ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_hea
         OR (heal_dot_type IN ('percent_max_hp', 'percent_damage') AND heal_dot_percent IS NOT NULL AND heal_dot_percent >= 1 AND heal_dot_percent <= 100 AND heal_dot_amount IS NULL)
       )
     )
+  );
+
+-- ── Effets persistants OFFENSIFS : dégâts et vol de vie par tour ────────────
+-- Miroirs exacts du soin passif ci-dessus, mais posés sur l'ADVERSAIRE par un
+-- coup réussi (voir la branche d'octroi de autobattle_resolve_round_core) :
+--   damage_dot_* = "damage over time", la victime perd des PV au début de
+--                  CHACUN DE SES tours pendant damage_dot_duration_turns tours
+--                  de combat (un tick peut mettre K.O.) ;
+--   leech_dot_*  = "life steal over time", mêmes règles, mais les PV perdus
+--                  sont rendus au LANCEUR (plafonnés à ce qu'il reste à la
+--                  victime, et à ses propres PV max) ; la part soin est
+--                  annulée si le voleur subit un Anti-Soin.
+-- Montant résolu UNE FOIS à l'octroi, jamais recalculé au tick :
+--   type 'flat' (ou NULL) : *_amount PV par tour ;
+--   type 'percent_max_hp' : *_percent % des PV MAX de la VICTIME (« % des PV
+--                           de l'adversaire »), *_amount restant NULL.
+-- Réutiliser la capacité REMPOSE l'effet (montant et échéance réécrits), comme
+-- le soin passif.
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS damage_dot_type text;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS damage_dot_amount integer;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS damage_dot_percent integer;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS damage_dot_duration_turns integer;
+ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_damage_dot_fields;
+ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_damage_dot_fields
+  CHECK (
+    (damage_dot_type IS NULL AND damage_dot_amount IS NULL AND damage_dot_percent IS NULL AND damage_dot_duration_turns IS NULL)
+    OR (
+      damage_dot_duration_turns IS NOT NULL AND damage_dot_duration_turns >= 1
+      AND (
+        ((damage_dot_type IS NULL OR damage_dot_type = 'flat') AND damage_dot_amount IS NOT NULL AND damage_dot_amount > 0 AND damage_dot_percent IS NULL)
+        OR (damage_dot_type = 'percent_max_hp' AND damage_dot_percent IS NOT NULL AND damage_dot_percent >= 1 AND damage_dot_percent <= 100 AND damage_dot_amount IS NULL)
+      )
+    )
+  );
+
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS leech_dot_type text;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS leech_dot_amount integer;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS leech_dot_percent integer;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS leech_dot_duration_turns integer;
+ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_leech_dot_fields;
+ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_leech_dot_fields
+  CHECK (
+    (leech_dot_type IS NULL AND leech_dot_amount IS NULL AND leech_dot_percent IS NULL AND leech_dot_duration_turns IS NULL)
+    OR (
+      leech_dot_duration_turns IS NOT NULL AND leech_dot_duration_turns >= 1
+      AND (
+        ((leech_dot_type IS NULL OR leech_dot_type = 'flat') AND leech_dot_amount IS NOT NULL AND leech_dot_amount > 0 AND leech_dot_percent IS NULL)
+        OR (leech_dot_type = 'percent_max_hp' AND leech_dot_percent IS NOT NULL AND leech_dot_percent >= 1 AND leech_dot_percent <= 100 AND leech_dot_amount IS NULL)
+      )
+    )
+  );
+
+-- ── Tentative de statut persistante ─────────────────────────────────────────
+-- Troisième effet persistant OFFENSIF, sur le même modèle que les deux
+-- ci-dessus (posé sur l'adversaire par un coup réussi, actif pendant
+-- status_dot_duration_turns tours de combat) : à chacun des tours de la
+-- VICTIME, status_dot_chance % de chances de lui infliger status_dot_status.
+-- Deux règles, alignées sur le statut de terrain de la météo :
+--   * la tentative n'a lieu QUE si la victime n'a aucun statut (un seul statut
+--     à la fois, et un effet qui écraserait le sien à chaque tour serait
+--     ingérable) — l'effet continue donc de « guetter » tant qu'il dure ;
+--   * la cible peut encore le neutraliser par un talent (autobattle_talent_
+--     status_guard : 'status_immunity', 'auto_cure_first_status').
+-- Le jet a lieu APRÈS le tick de statut de la victime, comme un statut infligé
+-- par une attaque : il ne mord donc qu'à partir de son tour suivant. Un jet
+-- raté ne produit aucun tour de journal (sinon une ligne inutile par tour).
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS status_dot_status text;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS status_dot_chance integer;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS status_dot_duration_turns integer;
+ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_status_dot_fields;
+ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_status_dot_fields
+  CHECK (
+    (status_dot_status IS NULL AND status_dot_chance IS NULL AND status_dot_duration_turns IS NULL)
+    OR (
+      status_dot_status IN ('paralysis', 'fear', 'confusion', 'sleep', 'burn', 'poison', 'frozen')
+      AND status_dot_chance IS NOT NULL AND status_dot_chance >= 1 AND status_dot_chance <= 100
+      AND status_dot_duration_turns IS NOT NULL AND status_dot_duration_turns >= 1
+    )
+  );
+
+-- ── Purges (capacités de « nettoyage ») ─────────────────────────────────────
+-- Trois effets indépendants, appliqués sur un coup réussi et cumulables entre
+-- eux comme avec le reste :
+--   clear_damage_dot = retire les EFFETS PERSISTANTS que subit son LANCEUR :
+--                      les trois posés par une capacité (damage_dot, leech_dot
+--                      et la tentative de statut status_dot). Ne touche NI aux
+--                      statuts eux-mêmes (brûlure, poison — ils gardent leurs
+--                      propres ticks et leurs propres guérisons, voir
+--                      cure_status), NI à la météo, qui a sa purge dédiée ;
+--   clear_weather    = dissipe la météo en cours, quelle qu'elle soit — état
+--                      de TERRAIN partagé, donc pour les deux camps ;
+--   cure_status      = guérit le statut de son LANCEUR, quel qu'il soit.
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS clear_damage_dot boolean NOT NULL DEFAULT false;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS clear_weather boolean NOT NULL DEFAULT false;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS cure_status boolean NOT NULL DEFAULT false;
+
+-- ── Capacité conditionnée au statut de la cible ─────────────────────────────
+-- « Ne fonctionne que sur une cible atteinte de [statut] » (genre "Croque
+-- Rêve", inutilisable sur une cible éveillée) : si la cible n'est PAS affectée
+-- par exactement ce statut au moment du coup, la capacité échoue purement et
+-- simplement — traité comme un raté (texte dédié côté client, chaîne "Continue
+-- sur sa lancée" interrompue, rafale stoppée), sans aucun effet ni dégât.
+-- NULL = aucune condition (comportement historique).
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS requires_target_status text;
+ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_requires_target_status_check;
+ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_requires_target_status_check
+  CHECK (requires_target_status IS NULL OR requires_target_status IN ('paralysis', 'fear', 'confusion', 'sleep', 'burn', 'poison', 'frozen'));
+
+-- ── Perce-immunité (lève une immunité de type pendant X tours) ──────────────
+-- pierce_immunity_type = le type de POKÉMON dont l'immunité tombe (« Spectre »
+-- pour qu'une capacité Normal puisse enfin le toucher, voir type_no_effect) —
+-- pas le type de la capacité, qui est déjà connu. L'effet profite au LANCEUR
+-- seul : dès ce coup-ci (sans quoi, immunisée elle-même, la capacité ne
+-- pourrait jamais toucher pour poser l'effet) puis pendant
+-- pierce_immunity_turns tours de combat, toutes ses capacités ignorent
+-- l'immunité de ce type-là. Aucune contrainte sur le libellé du type : il est
+-- comparé normalisé (voir type_norm), comme partout ailleurs.
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS pierce_immunity_type text;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS pierce_immunity_turns integer;
+ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_pierce_immunity_fields;
+ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_pierce_immunity_fields
+  CHECK (
+    (pierce_immunity_type IS NULL AND pierce_immunity_turns IS NULL)
+    OR (btrim(COALESCE(pierce_immunity_type, '')) <> '' AND pierce_immunity_turns IS NOT NULL AND pierce_immunity_turns >= 1)
   );
 
 -- Capacité utilisable malgré UN statut bloquant précis (genre "Ronflement",
@@ -3416,7 +3625,7 @@ ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_sta
 --                          de ses PV max (montant : value_type/amount/amount_max/
 --                          percent).
 --   'transform'            copie l'ADVERSAIRE pour tout le combat : sprite, type,
---                          liste « super efficace », dégâts de base et movepool —
+--                          dégâts de base et movepool —
 --                          jamais les PV, ni l'XP, ni le talent adverse. C'est
 --                          l'ancien cas spécial « Métamorph », devenu un talent
 --                          ordinaire pour que tout passe par la même mécanique.
@@ -3668,6 +3877,103 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION autobattle_ability_burst(text) TO anon, authenticated;
+
+-- ============================================================
+-- Table des types (efficacité et immunités)
+-- ============================================================
+-- L'efficacité dépend du TYPE DE LA CAPACITÉ jouée face au TYPE DU POKÉMON
+-- DÉFENSEUR — plus des colonnes pokemon.super_efficace_1..4 de l'espèce
+-- attaquante (toujours importées depuis le CSV, mais devenues inutilisées),
+-- et plus d'aucune condition « la capacité doit être du type de son lanceur ».
+--   type_super_effective = dégâts de base x2 (voir *_type_bonus chez les
+--                          appelants, le x2 lui-même n'a pas changé) ;
+--   type_no_effect       = immunité TOTALE : la capacité ne fait rien du tout
+--                          si elle vise l'adversaire (voir la branche
+--                          « aucun effet » de autobattle_resolve_round_core /
+--                          autobattle_resolve_battle) ; une capacité
+--                          auto-ciblée (soin/buff sur soi, météo) reste jouée
+--                          normalement.
+-- Doublon assumé côté client dans src/lib/typeChart.ts (badges des écrans de
+-- sélection + tableau récapitulatif admin) : toute modification de la table
+-- doit être faite AUX DEUX ENDROITS.
+
+-- Libellé de type normalisé : minuscules, sans accent, alias ramenés au
+-- libellé canonique — les données mélangent « Électrik »/« Electrik »,
+-- « Fée »/« Fee », « Ténèbres »/« Tenebr » (CSV des attaques),
+-- « Fantôme »/« Spectre » (voir TYPE_COLORS côté client, mêmes alias).
+CREATE OR REPLACE FUNCTION type_norm(p_type text)
+RETURNS text
+LANGUAGE sql IMMUTABLE
+AS $$
+  WITH n AS (
+    SELECT lower(translate(trim(COALESCE(p_type, '')),
+      'ÀÁÂÄÃÉÈÊËÍÌÎÏÓÒÔÖÕÚÙÛÜÇàáâäãéèêëíìîïóòôöõúùûüç',
+      'AAAAAEEEEIIIIOOOOOUUUUCaaaaaeeeeiiiiooooouuuuc')) AS t
+  )
+  SELECT CASE t
+    WHEN 'fantome' THEN 'spectre'
+    WHEN 'tenebr'  THEN 'tenebres'
+    WHEN 'metal'   THEN 'acier'
+    ELSE t
+  END
+  FROM n
+$$;
+
+GRANT EXECUTE ON FUNCTION type_norm(text) TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION type_super_effective(p_ability_type text, p_defender_type text)
+RETURNS boolean
+LANGUAGE sql IMMUTABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM (VALUES
+      ('acier', 'fee'), ('acier', 'glace'), ('acier', 'roche'),
+      ('combat', 'acier'), ('combat', 'glace'), ('combat', 'normal'), ('combat', 'roche'), ('combat', 'tenebres'),
+      ('dragon', 'dragon'),
+      ('eau', 'feu'), ('eau', 'roche'), ('eau', 'sol'),
+      ('electrik', 'eau'), ('electrik', 'vol'),
+      ('fee', 'combat'), ('fee', 'dragon'), ('fee', 'tenebres'),
+      ('feu', 'acier'), ('feu', 'glace'), ('feu', 'insecte'), ('feu', 'plante'),
+      ('glace', 'dragon'), ('glace', 'plante'), ('glace', 'sol'), ('glace', 'vol'),
+      ('insecte', 'plante'), ('insecte', 'psy'), ('insecte', 'tenebres'),
+      -- Normal : super efficace contre aucun type.
+      ('plante', 'eau'), ('plante', 'roche'), ('plante', 'sol'),
+      ('poison', 'combat'), ('poison', 'plante'),
+      ('psy', 'combat'), ('psy', 'poison'),
+      ('roche', 'feu'), ('roche', 'glace'), ('roche', 'insecte'), ('roche', 'vol'),
+      ('sol', 'acier'), ('sol', 'electrik'), ('sol', 'feu'), ('sol', 'poison'), ('sol', 'roche'),
+      ('spectre', 'psy'), ('spectre', 'spectre'),
+      ('tenebres', 'psy'), ('tenebres', 'spectre'),
+      ('vol', 'combat'), ('vol', 'insecte'), ('vol', 'plante')
+    ) AS t(atk, def)
+    WHERE t.atk = type_norm(p_ability_type)
+      AND t.def = type_norm(p_defender_type)
+  )
+$$;
+
+GRANT EXECUTE ON FUNCTION type_super_effective(text, text) TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION type_no_effect(p_ability_type text, p_defender_type text)
+RETURNS boolean
+LANGUAGE sql IMMUTABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM (VALUES
+      ('combat', 'spectre'),
+      ('dragon', 'fee'),
+      ('electrik', 'sol'),
+      ('normal', 'spectre'),
+      ('poison', 'acier'),
+      ('psy', 'tenebres'),
+      ('sol', 'vol'),
+      ('spectre', 'normal')
+    ) AS t(atk, def)
+    WHERE t.atk = type_norm(p_ability_type)
+      AND t.def = type_norm(p_defender_type)
+  )
+$$;
+
+GRANT EXECUTE ON FUNCTION type_no_effect(text, text) TO anon, authenticated;
 
 -- ============================================================
 -- Modificateurs de stat EMPILABLES (voir autobattle_ability_rules.stat_mod_*)
@@ -4823,6 +5129,219 @@ GRANT EXECUTE ON FUNCTION autobattle_weather_set(bigint, boolean, jsonb, text, i
 GRANT EXECUTE ON FUNCTION autobattle_weather_tick(jsonb, text, text, integer, integer, text, jsonb, jsonb, integer) TO anon, authenticated;
 
 -- ============================================================
+-- Effets persistants OFFENSIFS : dégâts par tour et vol de vie par tour
+-- (voir autobattle_ability_rules.damage_dot_* / leech_dot_*)
+-- ============================================================
+-- UN tick, pour le camp qui SUBIT (p_side = celui dont c'est le tour, comme un
+-- tick de brûlure/poison), joué au tout début de son tour — avant même son
+-- tick de statut, et qu'il agisse ou non ensuite (un tour passé sur paralysie/
+-- gel/sommeil le subit quand même, exactement comme le soin passif tique
+-- malgré un tour sauté).
+--
+-- Les deux effets sont indépendants et peuvent coexister sur la même victime :
+-- les dégâts persistants d'abord, le vol de vie ensuite. Comme un tick de
+-- statut, chacun peut mettre K.O. — et donc déclencher les talents de survie
+-- ('endure_ko', 'heal_below_hp') via autobattle_talent_survive, dont les tours
+-- sont émis juste après celui du tick (les PV ANNONCÉS restent ceux d'avant le
+-- soin de seuil, hp_before_heal, pour que la chute soit visible).
+--
+-- Vol de vie : on ne prend jamais plus de PV qu'il n'en reste à la victime, et
+-- le voleur ne dépasse pas ses propres PV max ; si le VOLEUR subit un Anti-Soin
+-- (p_other_heal_blocked), la victime perd quand même ses PV mais rien n'est
+-- rendu ('heal' = 0 et 'heal_blocked' sur le tour). N'importe quel soin guérit
+-- le poison, celui-ci compris — d'où p_other_status en entrée/sortie.
+--
+-- Retour : { hp, other_hp, status, other_status, state, turns }.
+CREATE OR REPLACE FUNCTION autobattle_dot_tick(
+  p_side text, p_turn_no integer,
+  p_hp integer, p_max_hp integer, p_other_hp integer, p_other_max_hp integer,
+  p_status text, p_other_status text,
+  p_damage_dot integer, p_leech_dot integer,
+  p_talents jsonb, p_state jsonb, p_other_heal_blocked boolean)
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_hp          integer := COALESCE(p_hp, 0);
+  v_other_hp    integer := COALESCE(p_other_hp, 0);
+  v_status      text    := p_status;
+  v_other_status text   := p_other_status;
+  v_state       jsonb   := COALESCE(p_state, autobattle_talent_state_init());
+  v_turns       jsonb   := '[]'::jsonb;
+  v_damage      integer;
+  v_gain        integer;
+  v_res         jsonb;
+BEGIN
+  IF v_hp <= 0 THEN
+    RETURN jsonb_build_object(
+      'hp', v_hp, 'other_hp', v_other_hp, 'status', v_status,
+      'other_status', v_other_status, 'state', v_state, 'turns', v_turns);
+  END IF;
+
+  -- Dégâts persistants.
+  IF COALESCE(p_damage_dot, 0) > 0 THEN
+    v_damage := p_damage_dot;
+    v_hp := v_hp - v_damage;
+    v_res := autobattle_talent_survive(p_talents, v_state, p_side, v_hp, p_max_hp, p_turn_no, v_status);
+    v_hp := (v_res ->> 'hp')::integer;
+    v_state := v_res -> 'state';
+    v_status := v_res ->> 'status';
+    v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+      'turn', p_turn_no, 'attacker', p_side, 'damage', v_damage, 'skipped', false,
+      'damage_dot_tick', true,
+      'attacker_hp_after', GREATEST(0, (v_res ->> 'hp_before_heal')::integer),
+      'defender_hp_after', GREATEST(0, v_other_hp), 'ko', v_hp <= 0
+    )) || (v_res -> 'turns');
+  END IF;
+
+  -- Vol de vie persistant : seulement si la victime est encore debout après
+  -- les dégâts persistants ci-dessus (rien à voler à un pokémon déjà K.O.).
+  IF v_hp > 0 AND COALESCE(p_leech_dot, 0) > 0 THEN
+    v_damage := LEAST(p_leech_dot, v_hp);
+    v_hp := v_hp - v_damage;
+    v_gain := CASE WHEN COALESCE(p_other_heal_blocked, false) THEN 0
+                   ELSE LEAST(v_damage, GREATEST(0, COALESCE(p_other_max_hp, v_other_hp) - v_other_hp)) END;
+    v_other_hp := v_other_hp + v_gain;
+    IF v_gain > 0 AND v_other_status = 'poison' THEN v_other_status := NULL; END IF;
+    v_res := autobattle_talent_survive(p_talents, v_state, p_side, v_hp, p_max_hp, p_turn_no, v_status);
+    v_hp := (v_res ->> 'hp')::integer;
+    v_state := v_res -> 'state';
+    v_status := v_res ->> 'status';
+    v_turns := v_turns || jsonb_build_array(jsonb_build_object(
+      'turn', p_turn_no, 'attacker', p_side, 'damage', v_damage, 'skipped', false,
+      'leech_dot_tick', true, 'heal', v_gain,
+      'heal_blocked', COALESCE(p_other_heal_blocked, false),
+      'attacker_hp_after', GREATEST(0, (v_res ->> 'hp_before_heal')::integer),
+      'defender_hp_after', GREATEST(0, v_other_hp), 'ko', v_hp <= 0
+    )) || (v_res -> 'turns');
+  END IF;
+
+  RETURN jsonb_build_object(
+    'hp', v_hp, 'other_hp', v_other_hp, 'status', v_status,
+    'other_status', v_other_status, 'state', v_state, 'turns', v_turns);
+END;
+$$;
+
+-- Tentative de statut persistante (voir autobattle_ability_rules.status_dot_*)
+-- pour le camp qui la SUBIT, jouée à chacun de ses tours — mais APRÈS son tick
+-- de statut, contrairement aux deux effets ci-dessus : un statut posé ici ne
+-- mord donc qu'à son tour suivant, exactement comme un statut infligé par une
+-- attaque adverse. L'appelant n'appelle cette fonction que si la victime n'a
+-- aucun statut (un seul statut à la fois par camp).
+--
+-- Un jet raté ne produit AUCUN tour de journal. Un jet réussi passe encore par
+-- autobattle_talent_status_guard : la cible peut y être immunisée
+-- ('status_immunity', silencieux) ou guérir aussitôt ('auto_cure_first_status',
+-- qui émet ses propres tours) — même garde et même précaution que le statut de
+-- terrain de la météo (ne rien annoncer quand rien ne s'applique, sinon le
+-- client allume un badge que plus aucun tick ne viendra éteindre).
+--
+-- Retour : { status, state, turns }.
+CREATE OR REPLACE FUNCTION autobattle_status_dot_tick(
+  p_side text, p_turn_no integer, p_hp integer, p_status text,
+  p_status_dot text, p_chance integer, p_talents jsonb, p_state jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_status text  := p_status;
+  v_state  jsonb := COALESCE(p_state, autobattle_talent_state_init());
+  v_turns  jsonb := '[]'::jsonb;
+  v_res    jsonb;
+BEGIN
+  IF p_status_dot IS NULL OR v_status IS NOT NULL OR COALESCE(p_hp, 0) <= 0
+     OR random() * 100 >= COALESCE(p_chance, 0) THEN
+    RETURN jsonb_build_object('status', v_status, 'state', v_state, 'turns', v_turns);
+  END IF;
+
+  v_res := autobattle_talent_status_guard(p_talents, v_state, p_side, p_status_dot, p_hp, p_turn_no);
+  v_state := v_res -> 'state';
+  IF (v_res ->> 'blocked')::boolean AND jsonb_array_length(v_res -> 'turns') = 0 THEN
+    RETURN jsonb_build_object('status', v_status, 'state', v_state, 'turns', v_turns);
+  END IF;
+
+  v_turns := jsonb_build_array(jsonb_build_object(
+    'turn', p_turn_no, 'attacker', p_side, 'damage', 0, 'skipped', false,
+    'status_dot_tick', true, 'status_dot_applied', p_status_dot,
+    'attacker_hp_after', GREATEST(0, COALESCE(p_hp, 0)),
+    'defender_hp_after', GREATEST(0, COALESCE(p_hp, 0)), 'ko', false
+  )) || (v_res -> 'turns');
+  IF NOT (v_res ->> 'blocked')::boolean THEN
+    v_status := p_status_dot;
+  END IF;
+  RETURN jsonb_build_object('status', v_status, 'state', v_state, 'turns', v_turns);
+END;
+$$;
+
+-- Immunité de type EFFECTIVE d'un coup : l'immunité de la table des types
+-- (type_no_effect), sauf si l'attaquant la perce — soit par la capacité qu'il
+-- joue à cet instant (p_ability_pierce_type, qui vaut donc dès ce coup-ci),
+-- soit par un perce-immunité encore actif accordé par une capacité précédente
+-- (p_state_pierce_type/p_state_pierce_expires, comparés au round en cours).
+-- Voir autobattle_ability_rules.pierce_immunity_type.
+CREATE OR REPLACE FUNCTION autobattle_type_immune(
+  p_ability_type text, p_defender_type text,
+  p_ability_pierce_type text, p_state_pierce_type text,
+  p_state_pierce_expires integer, p_round_no integer)
+RETURNS boolean
+LANGUAGE sql IMMUTABLE
+AS $$
+  SELECT type_no_effect(p_ability_type, p_defender_type)
+     AND NOT (
+       (p_ability_pierce_type IS NOT NULL AND type_norm(p_ability_pierce_type) = type_norm(p_defender_type))
+       OR (p_state_pierce_type IS NOT NULL
+           AND type_norm(p_state_pierce_type) = type_norm(p_defender_type)
+           AND p_state_pierce_expires IS NOT NULL
+           AND p_round_no <= p_state_pierce_expires)
+     )
+$$;
+
+-- Condition de dégâts additionnels 'weight_ratio' (voir autobattle_ability_
+-- rules.bonus_damage_weight_*) : « poids(target) <comparaison> percent % du
+-- poids de l'autre », du point de vue du camp qui ATTAQUE (p_self_weight).
+-- Un poids manquant ou nul d'un côté ne remplit jamais la condition.
+CREATE OR REPLACE FUNCTION autobattle_weight_condition(
+  p_target text, p_comparison text, p_percent integer,
+  p_self_weight numeric, p_opponent_weight numeric)
+RETURNS boolean
+LANGUAGE sql IMMUTABLE
+AS $$
+  SELECT CASE
+    WHEN COALESCE(p_self_weight, 0) <= 0 OR COALESCE(p_opponent_weight, 0) <= 0 THEN false
+    WHEN p_target = 'opponent' THEN
+      CASE WHEN p_comparison = 'lower'
+        THEN p_opponent_weight < p_self_weight * COALESCE(p_percent, 100) / 100.0
+        ELSE p_opponent_weight > p_self_weight * COALESCE(p_percent, 100) / 100.0 END
+    ELSE
+      CASE WHEN p_comparison = 'lower'
+        THEN p_self_weight < p_opponent_weight * COALESCE(p_percent, 100) / 100.0
+        ELSE p_self_weight > p_opponent_weight * COALESCE(p_percent, 100) / 100.0 END
+  END
+$$;
+
+-- Signe d'un modificateur de stat (voir autobattle_ability_rules.stat_mod_*) :
+-- 'debuff' = baisse (montant négatif), 'buff' = hausse (montant positif), et ce
+-- INDÉPENDAMMENT de la cible — un lanceur peut donc se baisser une stat à
+-- lui-même. p_direction NULL = règles écrites avant l'ajout du sens explicite :
+-- on retombe sur l'ancienne convention (cible adverse = baisse, soi = hausse).
+CREATE OR REPLACE FUNCTION autobattle_stat_mod_signed(p_amount integer, p_target text, p_direction text)
+RETURNS integer
+LANGUAGE sql IMMUTABLE
+AS $$
+  SELECT CASE
+    WHEN COALESCE(p_direction, CASE WHEN p_target = 'opponent' THEN 'debuff' ELSE 'buff' END) = 'debuff'
+      THEN -abs(COALESCE(p_amount, 0))
+    ELSE abs(COALESCE(p_amount, 0))
+  END
+$$;
+
+GRANT EXECUTE ON FUNCTION autobattle_dot_tick(text, integer, integer, integer, integer, integer, text, text, integer, integer, jsonb, jsonb, boolean) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION autobattle_status_dot_tick(text, integer, integer, text, text, integer, jsonb, jsonb) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION autobattle_type_immune(text, text, text, text, integer, integer) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION autobattle_weight_condition(text, text, integer, numeric, numeric) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION autobattle_stat_mod_signed(integer, text, text) TO anon, authenticated;
+
+-- ============================================================
 -- Moteur de résolution de tour PARTAGÉ (utilisé par autobattle_resolve_
 -- manual_round ET pvp_resolve_round plus bas dans ce fichier — mêmes
 -- formules exactes, aucune duplication de la boucle de résolution
@@ -4854,6 +5373,24 @@ CREATE TYPE autobattle_combatant_state AS (
   precision_mods         jsonb,
   heal_dot_amount        integer,
   heal_dot_expires       integer,
+  -- Effets persistants OFFENSIFS subis par CE camp (posés par l'adversaire,
+  -- voir autobattle_ability_rules.damage_dot_*/leech_dot_*) : montant par
+  -- tick déjà résolu, et numéro de round d'échéance. Le vol de vie ne stocke
+  -- pas son bénéficiaire — c'est forcément l'autre camp.
+  damage_dot_amount      integer,
+  damage_dot_expires     integer,
+  leech_dot_amount       integer,
+  leech_dot_expires      integer,
+  -- Tentative de statut persistante subie par CE camp (voir
+  -- autobattle_ability_rules.status_dot_*) : statut guetté, probabilité par
+  -- tour, et round d'échéance.
+  status_dot_status      text,
+  status_dot_chance      integer,
+  status_dot_expires     integer,
+  -- Perce-immunité actif accordé à CE camp (voir pierce_immunity_type) : type
+  -- de pokémon dont il ignore l'immunité, et round d'échéance.
+  pierce_immunity_type   text,
+  pierce_immunity_expires integer,
   heal_disabled_expires  integer,
   invulnerable           boolean,
   invuln_granted_round   integer,
@@ -4923,6 +5460,10 @@ CREATE TYPE autobattle_combatant_ability AS (
   bonus_condition                text,
   bonus_dice_value               integer,
   bonus_status_filter            text,
+  -- Réglages de la condition 'weight_ratio' (voir autobattle_weight_condition).
+  bonus_weight_target            text,
+  bonus_weight_comparison        text,
+  bonus_weight_percent           integer,
   stat_mod_target                 text,
   stat_mod_stat                   text,
   stat_mod_value_type             text,
@@ -4937,8 +5478,33 @@ CREATE TYPE autobattle_combatant_ability AS (
   heal_dot_config_turns           integer,
   heal_dot_config_type            text,
   heal_dot_config_percent         integer,
+  -- Dégâts persistants / vol de vie persistant posés sur l'adversaire, et
+  -- perce-immunité accordé au lanceur (voir autobattle_ability_rules).
+  damage_dot_config_amount        integer,
+  damage_dot_config_turns         integer,
+  damage_dot_config_type          text,
+  damage_dot_config_percent       integer,
+  leech_dot_config_amount         integer,
+  leech_dot_config_turns          integer,
+  leech_dot_config_type           text,
+  leech_dot_config_percent        integer,
+  status_dot_config_status        text,
+  status_dot_config_chance        integer,
+  status_dot_config_turns         integer,
+  pierce_immunity_type            text,
+  pierce_immunity_turns           integer,
+  -- Statut exigé sur la CIBLE pour que la capacité fonctionne (voir
+  -- autobattle_ability_rules.requires_target_status) : hors condition, échec.
+  requires_target_status          text,
+  -- Purges jouées sur un coup réussi (voir autobattle_ability_rules) :
+  -- dégâts sur la durée subis par le lanceur, météo en cours, statut du
+  -- lanceur.
+  clear_damage_dot                boolean,
+  clear_weather                   boolean,
+  cure_status                     boolean,
   cancel_heal_duration            integer,
   percent_hp_damage_percent       integer,
+  percent_hp_damage_basis         text,
   -- Type élémentaire de la capacité (attacks.type) — sert au filtre de type
   -- du modificateur de dégâts (stat_mod_type_filter), pas au bonus super
   -- efficace (déjà résolu en amont par l'appelant, voir type_bonus).
@@ -4960,7 +5526,12 @@ CREATE TYPE autobattle_combatant_ability AS (
   weather_id                      bigint,
   weather_chance                  integer,
   stat_mod_weather_condition      text,
-  stat_mod_weather_id             bigint
+  stat_mod_weather_id             bigint,
+  -- Sens du modificateur de stat, INDÉPENDANT de sa cible ('buff' = hausse,
+  -- 'debuff' = baisse, NULL = ancienne convention déduite de la cible) — voir
+  -- autobattle_stat_mod_signed. Ajouté en fin de type pour rester aligné sur
+  -- l'ALTER TYPE ... ADD ATTRIBUTE joué sur les bases déjà en place.
+  stat_mod_direction              text
 );
 
 DROP TYPE IF EXISTS autobattle_round_result CASCADE;
@@ -5005,7 +5576,13 @@ CREATE OR REPLACE FUNCTION autobattle_resolve_round_core(
   p_weather_id bigint DEFAULT NULL,
   p_weather_enabled boolean DEFAULT true,
   p_player_pokemon_type text DEFAULT NULL,
-  p_opponent_pokemon_type text DEFAULT NULL
+  p_opponent_pokemon_type text DEFAULT NULL,
+  -- Poids des deux ESPÈCES (pokemon.poids) — même raison que les types
+  -- ci-dessus : le core ne connaît pas l'espèce, or la condition de dégâts
+  -- additionnels 'weight_ratio' compare justement les deux poids. NULL des
+  -- deux côtés (appelant qui ne les fournit pas) = condition jamais remplie.
+  p_player_weight numeric DEFAULT NULL,
+  p_opponent_weight numeric DEFAULT NULL
 )
 RETURNS autobattle_round_result
 LANGUAGE plpgsql
@@ -5034,6 +5611,18 @@ DECLARE
   v_percent_hp_damage_applied boolean;
   v_player_never_miss boolean := p_player_ability.precision IS NULL OR p_player_ability.precision = 0;
   v_opponent_never_miss boolean := p_opponent_ability.precision IS NULL OR p_opponent_ability.precision = 0;
+  -- Immunité de type (voir type_no_effect) : le type de la capacité jouée ce
+  -- round ne peut RIEN faire au type d'espèce d'en face. Calculée ici plutôt
+  -- que passée par l'appelant : le core connaît déjà les deux types d'espèce
+  -- (paramètres météo) et le type de chaque capacité. Traitée comme un raté
+  -- automatique (« aucun effet »), au même endroit que l'invulnérabilité, et
+  -- uniquement pour les capacités qui visent réellement l'adversaire — une
+  -- capacité auto-ciblée reste jouable (requirement).
+  -- Recalculée à CHAQUE tour (voir la tête de boucle) et non une fois pour
+  -- toutes : un perce-immunité (pierce_immunity_*) peut la lever en cours de
+  -- combat, et son échéance se compare au round en cours.
+  v_player_type_immune boolean;
+  v_opponent_type_immune boolean;
   v_stat_mod_amount integer;
   v_stat_mod_expiry integer;
   v_stat_mod_key text;
@@ -5084,6 +5673,13 @@ DECLARE
   v_weather jsonb;
   v_weather_res jsonb;
   v_weather_side text;
+  -- Retour d'un tick d'effet persistant offensif (voir autobattle_dot_tick) :
+  -- dégâts par tour et/ou vol de vie subis par le camp qui ouvre son tour.
+  v_dot_res jsonb;
+  -- La capacité du camp qui agit exige un statut sur sa cible (voir
+  -- autobattle_ability_rules.requires_target_status) et la cible ne l'a pas :
+  -- échec automatique de ce coup.
+  v_status_req_failed boolean;
 BEGIN
   v_weather := autobattle_weather_for(p_weather_id, p_weather_enabled);
   -- Talents déjà déclenchés : un appelant qui ne gère pas encore la colonne
@@ -5103,6 +5699,33 @@ BEGIN
   END IF;
   IF v_opponent.heal_dot_expires IS NOT NULL AND v_round_no > v_opponent.heal_dot_expires THEN
     v_opponent.heal_dot_amount := NULL; v_opponent.heal_dot_expires := NULL;
+  END IF;
+  -- Effets persistants OFFENSIFS subis (dégâts/vol de vie par tour) et
+  -- perce-immunité accordé : mêmes échéances par numéro de round que le soin
+  -- passif juste au-dessus.
+  IF v_player.damage_dot_expires IS NOT NULL AND v_round_no > v_player.damage_dot_expires THEN
+    v_player.damage_dot_amount := NULL; v_player.damage_dot_expires := NULL;
+  END IF;
+  IF v_opponent.damage_dot_expires IS NOT NULL AND v_round_no > v_opponent.damage_dot_expires THEN
+    v_opponent.damage_dot_amount := NULL; v_opponent.damage_dot_expires := NULL;
+  END IF;
+  IF v_player.leech_dot_expires IS NOT NULL AND v_round_no > v_player.leech_dot_expires THEN
+    v_player.leech_dot_amount := NULL; v_player.leech_dot_expires := NULL;
+  END IF;
+  IF v_opponent.leech_dot_expires IS NOT NULL AND v_round_no > v_opponent.leech_dot_expires THEN
+    v_opponent.leech_dot_amount := NULL; v_opponent.leech_dot_expires := NULL;
+  END IF;
+  IF v_player.status_dot_expires IS NOT NULL AND v_round_no > v_player.status_dot_expires THEN
+    v_player.status_dot_status := NULL; v_player.status_dot_chance := NULL; v_player.status_dot_expires := NULL;
+  END IF;
+  IF v_opponent.status_dot_expires IS NOT NULL AND v_round_no > v_opponent.status_dot_expires THEN
+    v_opponent.status_dot_status := NULL; v_opponent.status_dot_chance := NULL; v_opponent.status_dot_expires := NULL;
+  END IF;
+  IF v_player.pierce_immunity_expires IS NOT NULL AND v_round_no > v_player.pierce_immunity_expires THEN
+    v_player.pierce_immunity_type := NULL; v_player.pierce_immunity_expires := NULL;
+  END IF;
+  IF v_opponent.pierce_immunity_expires IS NOT NULL AND v_round_no > v_opponent.pierce_immunity_expires THEN
+    v_opponent.pierce_immunity_type := NULL; v_opponent.pierce_immunity_expires := NULL;
   END IF;
   IF v_player.heal_disabled_expires IS NOT NULL AND v_round_no > v_player.heal_disabled_expires THEN
     v_player.heal_disabled_expires := NULL;
@@ -5206,6 +5829,42 @@ BEGIN
     IF v_opponent.heal_dot_expires IS NOT NULL AND v_round_no > v_opponent.heal_dot_expires THEN
       v_opponent.heal_dot_amount := NULL; v_opponent.heal_dot_expires := NULL;
     END IF;
+    -- Voir les mêmes expirations avant la boucle.
+    IF v_player.damage_dot_expires IS NOT NULL AND v_round_no > v_player.damage_dot_expires THEN
+      v_player.damage_dot_amount := NULL; v_player.damage_dot_expires := NULL;
+    END IF;
+    IF v_opponent.damage_dot_expires IS NOT NULL AND v_round_no > v_opponent.damage_dot_expires THEN
+      v_opponent.damage_dot_amount := NULL; v_opponent.damage_dot_expires := NULL;
+    END IF;
+    IF v_player.leech_dot_expires IS NOT NULL AND v_round_no > v_player.leech_dot_expires THEN
+      v_player.leech_dot_amount := NULL; v_player.leech_dot_expires := NULL;
+    END IF;
+    IF v_opponent.leech_dot_expires IS NOT NULL AND v_round_no > v_opponent.leech_dot_expires THEN
+      v_opponent.leech_dot_amount := NULL; v_opponent.leech_dot_expires := NULL;
+    END IF;
+    IF v_player.status_dot_expires IS NOT NULL AND v_round_no > v_player.status_dot_expires THEN
+      v_player.status_dot_status := NULL; v_player.status_dot_chance := NULL; v_player.status_dot_expires := NULL;
+    END IF;
+    IF v_opponent.status_dot_expires IS NOT NULL AND v_round_no > v_opponent.status_dot_expires THEN
+      v_opponent.status_dot_status := NULL; v_opponent.status_dot_chance := NULL; v_opponent.status_dot_expires := NULL;
+    END IF;
+    IF v_player.pierce_immunity_expires IS NOT NULL AND v_round_no > v_player.pierce_immunity_expires THEN
+      v_player.pierce_immunity_type := NULL; v_player.pierce_immunity_expires := NULL;
+    END IF;
+    IF v_opponent.pierce_immunity_expires IS NOT NULL AND v_round_no > v_opponent.pierce_immunity_expires THEN
+      v_opponent.pierce_immunity_type := NULL; v_opponent.pierce_immunity_expires := NULL;
+    END IF;
+    -- Immunité de type effective de CE tour, perce-immunité compris (voir
+    -- autobattle_type_immune) : la capacité jouée perce déjà l'immunité pour
+    -- son propre coup, un perce-immunité encore actif couvre les suivants.
+    v_player_type_immune := autobattle_type_immune(
+      p_player_ability.ability_type, p_opponent_pokemon_type,
+      p_player_ability.pierce_immunity_type, v_player.pierce_immunity_type,
+      v_player.pierce_immunity_expires, v_round_no);
+    v_opponent_type_immune := autobattle_type_immune(
+      p_opponent_ability.ability_type, p_player_pokemon_type,
+      p_opponent_ability.pierce_immunity_type, v_opponent.pierce_immunity_type,
+      v_opponent.pierce_immunity_expires, v_round_no);
     IF v_player.heal_disabled_expires IS NOT NULL AND v_round_no > v_player.heal_disabled_expires THEN
       v_player.heal_disabled_expires := NULL;
     END IF;
@@ -5251,6 +5910,43 @@ BEGIN
         (CASE WHEN v_attacker = 'player' THEN p_player_ability.ignore_status_block ELSE p_opponent_ability.ignore_status_block END)
           = (CASE WHEN v_attacker = 'player' THEN v_player.status ELSE v_opponent.status END),
         false);
+
+      -- Effets persistants OFFENSIFS subis par le camp qui ouvre son tour
+      -- (dégâts par tour et vol de vie par tour, voir autobattle_dot_tick) :
+      -- tout premier événement de son tour, avant même son tick de statut, et
+      -- une seule fois par tour réel — d'où la place dans ce bloc
+      -- v_block_remaining IS NULL, jamais au milieu d'une rafale. Ils tiquent
+      -- que le tour soit joué ou non : un tour passé sur paralysie/gel/sommeil
+      -- les subit quand même, exactement comme il subit le tick de brûlure et
+      -- profite du soin passif. Un tick peut mettre K.O. : le round s'arrête
+      -- alors là, sans que personne n'agisse.
+      IF v_attacker = 'player' AND (v_player.damage_dot_amount IS NOT NULL OR v_player.leech_dot_amount IS NOT NULL) THEN
+        v_dot_res := autobattle_dot_tick(
+          'player', v_turn_no, v_player.hp, v_player.max_hp, v_opponent.hp, v_opponent.max_hp,
+          v_player.status, v_opponent.status, v_player.damage_dot_amount, v_player.leech_dot_amount,
+          p_player_talents, v_player.talent_state,
+          v_opponent.heal_disabled_expires IS NOT NULL AND v_round_no <= v_opponent.heal_disabled_expires);
+        v_player.hp := (v_dot_res ->> 'hp')::integer;
+        v_opponent.hp := (v_dot_res ->> 'other_hp')::integer;
+        v_player.status := v_dot_res ->> 'status';
+        v_opponent.status := v_dot_res ->> 'other_status';
+        v_player.talent_state := v_dot_res -> 'state';
+        v_turns := v_turns || (v_dot_res -> 'turns');
+        IF v_player.hp <= 0 THEN v_outcome := 'lose'; EXIT; END IF;
+      ELSIF v_attacker = 'opponent' AND (v_opponent.damage_dot_amount IS NOT NULL OR v_opponent.leech_dot_amount IS NOT NULL) THEN
+        v_dot_res := autobattle_dot_tick(
+          'opponent', v_turn_no, v_opponent.hp, v_opponent.max_hp, v_player.hp, v_player.max_hp,
+          v_opponent.status, v_player.status, v_opponent.damage_dot_amount, v_opponent.leech_dot_amount,
+          p_opponent_talents, v_opponent.talent_state,
+          v_player.heal_disabled_expires IS NOT NULL AND v_round_no <= v_player.heal_disabled_expires);
+        v_opponent.hp := (v_dot_res ->> 'hp')::integer;
+        v_player.hp := (v_dot_res ->> 'other_hp')::integer;
+        v_opponent.status := v_dot_res ->> 'status';
+        v_player.status := v_dot_res ->> 'other_status';
+        v_opponent.talent_state := v_dot_res -> 'state';
+        v_turns := v_turns || (v_dot_res -> 'turns');
+        IF v_opponent.hp <= 0 THEN v_outcome := 'win'; EXIT; END IF;
+      END IF;
 
       IF v_attacker = 'player' AND v_player.status IN ('paralysis', 'frozen') THEN
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
@@ -5561,6 +6257,26 @@ BEGIN
         IF v_opponent.status = 'poison' THEN v_opponent.status := NULL; END IF;
       END IF;
 
+      -- Tentative de statut persistante subie par le camp qui agit (voir
+      -- autobattle_status_dot_tick) : APRÈS son tick de statut, donc un statut
+      -- posé ici ne se manifestera qu'à son tour suivant — comme un statut
+      -- infligé par une attaque adverse. Le helper ne tente rien s'il a déjà un
+      -- statut ; un tour entièrement passé (paralysie/gel/sommeil) n'arrive
+      -- jamais jusqu'ici, mais c'est justement un tour où il en a un.
+      IF v_attacker = 'player' AND v_player.status_dot_status IS NOT NULL AND v_player.status IS NULL THEN
+        v_dot_res := autobattle_status_dot_tick('player', v_turn_no, v_player.hp, v_player.status,
+          v_player.status_dot_status, v_player.status_dot_chance, p_player_talents, v_player.talent_state);
+        v_player.status := v_dot_res ->> 'status';
+        v_player.talent_state := v_dot_res -> 'state';
+        v_turns := v_turns || (v_dot_res -> 'turns');
+      ELSIF v_attacker = 'opponent' AND v_opponent.status_dot_status IS NOT NULL AND v_opponent.status IS NULL THEN
+        v_dot_res := autobattle_status_dot_tick('opponent', v_turn_no, v_opponent.hp, v_opponent.status,
+          v_opponent.status_dot_status, v_opponent.status_dot_chance, p_opponent_talents, v_opponent.talent_state);
+        v_opponent.status := v_dot_res ->> 'status';
+        v_opponent.talent_state := v_dot_res -> 'state';
+        v_turns := v_turns || (v_dot_res -> 'turns');
+      END IF;
+
       -- Chaîne "Continue sur sa lancée" (voir autobattle_ability_rules.
       -- keep_going_turns) : la capacité s'auto-rejoue pendant X tours de son
       -- utilisateur. Le compteur avance ICI, sur toute activation réellement
@@ -5791,14 +6507,30 @@ BEGIN
         END IF;
       END IF;
 
-      IF (v_opponent.invulnerable OR autobattle_talent_shield_active(p_opponent_talents, v_opponent.talent_state)) AND (
+      -- Immunité de type (v_player_type_immune) traitée exactement comme
+      -- l'invulnérabilité : même condition « la capacité vise-t-elle vraiment
+      -- l'adversaire ? », même tour raté — seul le drapeau renvoyé change
+      -- ('no_effect' au lieu d'invulnerable_miss), pour que le client affiche
+      -- « Aucun effet ! » plutôt que « Invulnérable ! ».
+      -- Capacité conditionnée au statut de la CIBLE (voir
+      -- autobattle_ability_rules.requires_target_status) : hors condition, elle
+      -- échoue purement et simplement — traité comme un raté, au même endroit
+      -- que l'invulnérabilité et l'immunité de type, avec son propre texte.
+      v_status_req_failed := p_player_ability.requires_target_status IS NOT NULL
+        AND v_opponent.status IS DISTINCT FROM p_player_ability.requires_target_status;
+      IF v_status_req_failed
+         OR ((v_opponent.invulnerable OR v_player_type_immune OR autobattle_talent_shield_active(p_opponent_talents, v_opponent.talent_state)) AND (
         p_player_ability.deals_damage
         OR (p_player_ability.status_effect IS NOT NULL AND NOT p_player_ability.status_reversed)
         OR p_player_ability.stat_mod_target = 'opponent'
         OR p_player_ability.cancel_heal_duration IS NOT NULL
-      ) THEN
+      )) THEN
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
-          'turn', v_turn_no, 'attacker', 'player', 'damage', 0, 'missed', true, 'invulnerable_miss', true,
+          'turn', v_turn_no, 'attacker', 'player', 'damage', 0, 'missed', true,
+          'invulnerable_miss', NOT v_player_type_immune AND NOT v_status_req_failed,
+          'no_effect', v_player_type_immune AND NOT v_status_req_failed,
+          'requires_status_failed', v_status_req_failed,
+          'requires_status', p_player_ability.requires_target_status,
           'defender_hp_after', GREATEST(0, v_opponent.hp), 'ko', false
         ));
         IF p_player_ability.turn_effect = 'repeat_until_fail' THEN
@@ -5863,14 +6595,22 @@ BEGIN
 
             v_percent_hp_damage_applied := p_player_ability.percent_hp_damage_percent IS NOT NULL;
             IF v_percent_hp_damage_applied THEN
-              v_hit_damage := GREATEST(0, floor(v_opponent.hp * p_player_ability.percent_hp_damage_percent / 100.0)::integer);
+              v_hit_damage := GREATEST(0, floor(
+                (CASE WHEN p_player_ability.percent_hp_damage_basis = 'max' THEN v_opponent.max_hp ELSE v_opponent.hp END)
+                * p_player_ability.percent_hp_damage_percent / 100.0)::integer);
             END IF;
 
             v_bonus_condition_met := p_player_ability.bonus_condition = 'took_damage_last_turn' AND v_player.took_damage
               OR p_player_ability.bonus_condition = 'first_use' AND NOT v_player.used_ability
               OR p_player_ability.bonus_condition = 'dice_equals' AND v_hit_dice = p_player_ability.bonus_dice_value
               OR p_player_ability.bonus_condition = 'has_status' AND v_opponent.status IS NOT NULL AND (p_player_ability.bonus_status_filter IS NULL OR v_opponent.status = p_player_ability.bonus_status_filter)
-              OR p_player_ability.bonus_condition = 'self_has_status' AND v_player.status IS NOT NULL AND (p_player_ability.bonus_status_filter IS NULL OR v_player.status = p_player_ability.bonus_status_filter);
+              OR p_player_ability.bonus_condition = 'self_has_status' AND v_player.status IS NOT NULL AND (p_player_ability.bonus_status_filter IS NULL OR v_player.status = p_player_ability.bonus_status_filter)
+              -- Comparaison des POIDS des deux espèces (voir
+              -- autobattle_weight_condition) : « self » désigne ici le camp qui
+              -- attaque, donc le joueur.
+              OR p_player_ability.bonus_condition = 'weight_ratio' AND autobattle_weight_condition(
+                   p_player_ability.bonus_weight_target, p_player_ability.bonus_weight_comparison,
+                   p_player_ability.bonus_weight_percent, p_player_weight, p_opponent_weight);
             IF p_player_ability.bonus_type IS NOT NULL AND v_bonus_condition_met THEN
               IF p_player_ability.bonus_type = 'multiply' THEN
                 v_hit_damage := floor(v_hit_damage * COALESCE(p_player_ability.bonus_multiplier, 1))::integer;
@@ -6048,7 +6788,7 @@ BEGIN
                     * COALESCE(p_player_ability.stat_mod_percent, 0) / 100.0)::integer
                 ELSE 0
               END;
-              v_stat_mod_amount := CASE WHEN p_player_ability.stat_mod_target = 'opponent' THEN -abs(v_stat_mod_amount) ELSE abs(v_stat_mod_amount) END;
+              v_stat_mod_amount := autobattle_stat_mod_signed(v_stat_mod_amount, p_player_ability.stat_mod_target, p_player_ability.stat_mod_direction);
               v_stat_mod_expiry := CASE WHEN p_player_ability.stat_mod_duration_type = 'battle_end' THEN 999999 ELSE v_round_no + 2 * COALESCE(p_player_ability.stat_mod_duration_turns, 1) END;
               -- Chaque application est EMPILÉE avec sa propre échéance et son
               -- propre filtre de type (relu au moment d'infliger des dégâts,
@@ -6108,6 +6848,71 @@ BEGIN
             v_player.prevention_expires := v_round_no + 2 * p_player_ability.prevention_duration;
             v_turn_entry := v_turn_entry || jsonb_build_object('prevention_granted', true);
           END IF;
+          -- Effets persistants OFFENSIFS posés sur la CIBLE (voir
+          -- autobattle_ability_rules.damage_dot_*/leech_dot_*) : le montant par
+          -- tick est résolu UNE FOIS ici et jamais recalculé — un pourcentage
+          -- se compte sur les PV MAX de la VICTIME. Plancher à 1 PV pour qu'un
+          -- petit pourcentage sur une petite barre de vie ne donne pas un effet
+          -- inerte. x2 sur l'échéance pour la même raison que le soin passif
+          -- (compteur de rounds global, tick un tour sur deux). Réutiliser la
+          -- capacité repose l'effet à neuf.
+          IF p_player_ability.damage_dot_config_turns IS NOT NULL THEN
+            v_opponent.damage_dot_amount := GREATEST(1, CASE
+              WHEN p_player_ability.damage_dot_config_type = 'percent_max_hp'
+                THEN floor(v_opponent.max_hp * COALESCE(p_player_ability.damage_dot_config_percent, 0) / 100.0)::integer
+              ELSE COALESCE(p_player_ability.damage_dot_config_amount, 0) END);
+            v_opponent.damage_dot_expires := v_round_no + 2 * p_player_ability.damage_dot_config_turns;
+            v_turn_entry := v_turn_entry || jsonb_build_object('damage_dot_granted', true);
+          END IF;
+          IF p_player_ability.leech_dot_config_turns IS NOT NULL THEN
+            v_opponent.leech_dot_amount := GREATEST(1, CASE
+              WHEN p_player_ability.leech_dot_config_type = 'percent_max_hp'
+                THEN floor(v_opponent.max_hp * COALESCE(p_player_ability.leech_dot_config_percent, 0) / 100.0)::integer
+              ELSE COALESCE(p_player_ability.leech_dot_config_amount, 0) END);
+            v_opponent.leech_dot_expires := v_round_no + 2 * p_player_ability.leech_dot_config_turns;
+            v_turn_entry := v_turn_entry || jsonb_build_object('leech_dot_granted', true);
+          END IF;
+          -- Tentative de statut persistante : le statut guetté et sa
+          -- probabilité sont posés tels quels sur la cible, le jet a lieu à
+          -- chacun de SES tours (voir autobattle_status_dot_tick).
+          IF p_player_ability.status_dot_config_turns IS NOT NULL THEN
+            v_opponent.status_dot_status := p_player_ability.status_dot_config_status;
+            v_opponent.status_dot_chance := p_player_ability.status_dot_config_chance;
+            v_opponent.status_dot_expires := v_round_no + 2 * p_player_ability.status_dot_config_turns;
+            v_turn_entry := v_turn_entry || jsonb_build_object('status_dot_granted', true);
+          END IF;
+          -- Perce-immunité : accordé à son LANCEUR (voir autobattle_type_immune
+          -- — le coup en cours en profite déjà, sans quoi une capacité
+          -- immunisée ne pourrait jamais toucher pour le poser).
+          IF p_player_ability.pierce_immunity_type IS NOT NULL AND p_player_ability.pierce_immunity_turns IS NOT NULL THEN
+            v_player.pierce_immunity_type := p_player_ability.pierce_immunity_type;
+            v_player.pierce_immunity_expires := v_round_no + 2 * p_player_ability.pierce_immunity_turns;
+            v_turn_entry := v_turn_entry || jsonb_build_object('pierce_immunity_granted', true);
+          END IF;
+          -- Purges (voir clear_damage_dot / cure_status / clear_weather) :
+          -- elles visent leur LANCEUR — ses propres dégâts sur la durée, ses
+          -- propres statuts — sauf la météo, état de TERRAIN partagé qui
+          -- disparaît pour les deux camps. Les statuts à dégâts (brûlure,
+          -- poison) ne sont PAS concernés par la purge des dégâts sur la
+          -- durée : ils relèvent de cure_status.
+          IF COALESCE(p_player_ability.clear_damage_dot, false)
+             AND (v_player.damage_dot_amount IS NOT NULL OR v_player.leech_dot_amount IS NOT NULL
+                  OR v_player.status_dot_status IS NOT NULL) THEN
+            v_player.damage_dot_amount := NULL; v_player.damage_dot_expires := NULL;
+            v_player.leech_dot_amount := NULL; v_player.leech_dot_expires := NULL;
+            v_player.status_dot_status := NULL; v_player.status_dot_chance := NULL; v_player.status_dot_expires := NULL;
+            v_turn_entry := v_turn_entry || jsonb_build_object('cleanse_dot', true);
+          END IF;
+          IF COALESCE(p_player_ability.cure_status, false) AND v_player.status IS NOT NULL THEN
+            v_turn_entry := v_turn_entry || jsonb_build_object('cleanse_status', v_player.status);
+            v_player.status := NULL;
+          END IF;
+          IF COALESCE(p_player_ability.clear_weather, false) AND v_weather IS NOT NULL THEN
+            v_talent_pending := COALESCE(v_talent_pending, '[]'::jsonb) || jsonb_build_array(
+              autobattle_weather_turn(v_turn_no, 'player', v_player.hp, v_weather,
+                jsonb_build_object('weather_cleared', true)));
+            v_weather := NULL;
+          END IF;
           -- Invulnérabilité : déjà accordée au tour de préparation pour
           -- 'prepare_release' (voir plus haut), pas ré-accordée ici. IS
           -- DISTINCT FROM et surtout PAS <> : turn_effect est NULL pour toute
@@ -6166,14 +6971,24 @@ BEGIN
         END IF;
       END IF;
 
-      IF (v_player.invulnerable OR autobattle_talent_shield_active(p_player_talents, v_player.talent_state)) AND (
+      -- Immunité de type côté adverse : voir la branche symétrique du camp
+      -- joueur plus haut.
+      -- Voir la branche symétrique du camp joueur plus haut.
+      v_status_req_failed := p_opponent_ability.requires_target_status IS NOT NULL
+        AND v_player.status IS DISTINCT FROM p_opponent_ability.requires_target_status;
+      IF v_status_req_failed
+         OR ((v_player.invulnerable OR v_opponent_type_immune OR autobattle_talent_shield_active(p_player_talents, v_player.talent_state)) AND (
         p_opponent_ability.deals_damage
         OR (p_opponent_ability.status_effect IS NOT NULL AND NOT p_opponent_ability.status_reversed)
         OR p_opponent_ability.stat_mod_target = 'opponent'
         OR p_opponent_ability.cancel_heal_duration IS NOT NULL
-      ) THEN
+      )) THEN
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
-          'turn', v_turn_no, 'attacker', 'opponent', 'damage', 0, 'missed', true, 'invulnerable_miss', true,
+          'turn', v_turn_no, 'attacker', 'opponent', 'damage', 0, 'missed', true,
+          'invulnerable_miss', NOT v_opponent_type_immune AND NOT v_status_req_failed,
+          'no_effect', v_opponent_type_immune AND NOT v_status_req_failed,
+          'requires_status_failed', v_status_req_failed,
+          'requires_status', p_opponent_ability.requires_target_status,
           'defender_hp_after', GREATEST(0, v_player.hp), 'ko', false
         ));
         IF p_opponent_ability.turn_effect = 'repeat_until_fail' THEN
@@ -6228,14 +7043,20 @@ BEGIN
 
             v_percent_hp_damage_applied := p_opponent_ability.percent_hp_damage_percent IS NOT NULL;
             IF v_percent_hp_damage_applied THEN
-              v_hit_damage := GREATEST(0, floor(v_player.hp * p_opponent_ability.percent_hp_damage_percent / 100.0)::integer);
+              v_hit_damage := GREATEST(0, floor(
+                (CASE WHEN p_opponent_ability.percent_hp_damage_basis = 'max' THEN v_player.max_hp ELSE v_player.hp END)
+                * p_opponent_ability.percent_hp_damage_percent / 100.0)::integer);
             END IF;
 
             v_bonus_condition_met := p_opponent_ability.bonus_condition = 'took_damage_last_turn' AND v_opponent.took_damage
               OR p_opponent_ability.bonus_condition = 'first_use' AND NOT v_opponent.used_ability
               OR p_opponent_ability.bonus_condition = 'dice_equals' AND v_hit_dice = p_opponent_ability.bonus_dice_value
               OR p_opponent_ability.bonus_condition = 'has_status' AND v_player.status IS NOT NULL AND (p_opponent_ability.bonus_status_filter IS NULL OR v_player.status = p_opponent_ability.bonus_status_filter)
-              OR p_opponent_ability.bonus_condition = 'self_has_status' AND v_opponent.status IS NOT NULL AND (p_opponent_ability.bonus_status_filter IS NULL OR v_opponent.status = p_opponent_ability.bonus_status_filter);
+              OR p_opponent_ability.bonus_condition = 'self_has_status' AND v_opponent.status IS NOT NULL AND (p_opponent_ability.bonus_status_filter IS NULL OR v_opponent.status = p_opponent_ability.bonus_status_filter)
+              -- Poids : « self » est cette fois l'adversaire, qui attaque.
+              OR p_opponent_ability.bonus_condition = 'weight_ratio' AND autobattle_weight_condition(
+                   p_opponent_ability.bonus_weight_target, p_opponent_ability.bonus_weight_comparison,
+                   p_opponent_ability.bonus_weight_percent, p_opponent_weight, p_player_weight);
             IF p_opponent_ability.bonus_type IS NOT NULL AND v_bonus_condition_met THEN
               IF p_opponent_ability.bonus_type = 'multiply' THEN
                 v_hit_damage := floor(v_hit_damage * COALESCE(p_opponent_ability.bonus_multiplier, 1))::integer;
@@ -6398,7 +7219,7 @@ BEGIN
                     * COALESCE(p_opponent_ability.stat_mod_percent, 0) / 100.0)::integer
                 ELSE 0
               END;
-              v_stat_mod_amount := CASE WHEN p_opponent_ability.stat_mod_target = 'opponent' THEN -abs(v_stat_mod_amount) ELSE abs(v_stat_mod_amount) END;
+              v_stat_mod_amount := autobattle_stat_mod_signed(v_stat_mod_amount, p_opponent_ability.stat_mod_target, p_opponent_ability.stat_mod_direction);
               v_stat_mod_expiry := CASE WHEN p_opponent_ability.stat_mod_duration_type = 'battle_end' THEN 999999 ELSE v_round_no + 2 * COALESCE(p_opponent_ability.stat_mod_duration_turns, 1) END;
               -- Voir le même commentaire côté joueur plus haut.
               IF p_opponent_ability.stat_mod_target = 'self' AND p_opponent_ability.stat_mod_stat = 'damage' THEN
@@ -6446,6 +7267,52 @@ BEGIN
           IF p_opponent_ability.prevention_duration IS NOT NULL THEN
             v_opponent.prevention_expires := v_round_no + 2 * p_opponent_ability.prevention_duration;
             v_turn_entry := v_turn_entry || jsonb_build_object('prevention_granted', true);
+          END IF;
+          -- Voir les mêmes octrois côté joueur plus haut.
+          IF p_opponent_ability.damage_dot_config_turns IS NOT NULL THEN
+            v_player.damage_dot_amount := GREATEST(1, CASE
+              WHEN p_opponent_ability.damage_dot_config_type = 'percent_max_hp'
+                THEN floor(v_player.max_hp * COALESCE(p_opponent_ability.damage_dot_config_percent, 0) / 100.0)::integer
+              ELSE COALESCE(p_opponent_ability.damage_dot_config_amount, 0) END);
+            v_player.damage_dot_expires := v_round_no + 2 * p_opponent_ability.damage_dot_config_turns;
+            v_turn_entry := v_turn_entry || jsonb_build_object('damage_dot_granted', true);
+          END IF;
+          IF p_opponent_ability.leech_dot_config_turns IS NOT NULL THEN
+            v_player.leech_dot_amount := GREATEST(1, CASE
+              WHEN p_opponent_ability.leech_dot_config_type = 'percent_max_hp'
+                THEN floor(v_player.max_hp * COALESCE(p_opponent_ability.leech_dot_config_percent, 0) / 100.0)::integer
+              ELSE COALESCE(p_opponent_ability.leech_dot_config_amount, 0) END);
+            v_player.leech_dot_expires := v_round_no + 2 * p_opponent_ability.leech_dot_config_turns;
+            v_turn_entry := v_turn_entry || jsonb_build_object('leech_dot_granted', true);
+          END IF;
+          IF p_opponent_ability.status_dot_config_turns IS NOT NULL THEN
+            v_player.status_dot_status := p_opponent_ability.status_dot_config_status;
+            v_player.status_dot_chance := p_opponent_ability.status_dot_config_chance;
+            v_player.status_dot_expires := v_round_no + 2 * p_opponent_ability.status_dot_config_turns;
+            v_turn_entry := v_turn_entry || jsonb_build_object('status_dot_granted', true);
+          END IF;
+          IF p_opponent_ability.pierce_immunity_type IS NOT NULL AND p_opponent_ability.pierce_immunity_turns IS NOT NULL THEN
+            v_opponent.pierce_immunity_type := p_opponent_ability.pierce_immunity_type;
+            v_opponent.pierce_immunity_expires := v_round_no + 2 * p_opponent_ability.pierce_immunity_turns;
+            v_turn_entry := v_turn_entry || jsonb_build_object('pierce_immunity_granted', true);
+          END IF;
+          IF COALESCE(p_opponent_ability.clear_damage_dot, false)
+             AND (v_opponent.damage_dot_amount IS NOT NULL OR v_opponent.leech_dot_amount IS NOT NULL
+                  OR v_opponent.status_dot_status IS NOT NULL) THEN
+            v_opponent.damage_dot_amount := NULL; v_opponent.damage_dot_expires := NULL;
+            v_opponent.leech_dot_amount := NULL; v_opponent.leech_dot_expires := NULL;
+            v_opponent.status_dot_status := NULL; v_opponent.status_dot_chance := NULL; v_opponent.status_dot_expires := NULL;
+            v_turn_entry := v_turn_entry || jsonb_build_object('cleanse_dot', true);
+          END IF;
+          IF COALESCE(p_opponent_ability.cure_status, false) AND v_opponent.status IS NOT NULL THEN
+            v_turn_entry := v_turn_entry || jsonb_build_object('cleanse_status', v_opponent.status);
+            v_opponent.status := NULL;
+          END IF;
+          IF COALESCE(p_opponent_ability.clear_weather, false) AND v_weather IS NOT NULL THEN
+            v_talent_pending := COALESCE(v_talent_pending, '[]'::jsonb) || jsonb_build_array(
+              autobattle_weather_turn(v_turn_no, 'opponent', v_opponent.hp, v_weather,
+                jsonb_build_object('weather_cleared', true)));
+            v_weather := NULL;
           END IF;
           IF p_opponent_ability.invuln_grant AND p_opponent_ability.turn_effect IS DISTINCT FROM 'prepare_release' THEN
             v_opponent.invulnerable := true;
@@ -6523,7 +7390,7 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION autobattle_resolve_round_core(integer, integer, text, autobattle_combatant_state, autobattle_combatant_state, autobattle_combatant_ability, autobattle_combatant_ability, boolean, jsonb, jsonb, bigint, boolean, text, text) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION autobattle_resolve_round_core(integer, integer, text, autobattle_combatant_state, autobattle_combatant_state, autobattle_combatant_ability, autobattle_combatant_ability, boolean, jsonb, jsonb, bigint, boolean, text, text, numeric, numeric) TO anon, authenticated;
 
 -- Résout un combat Combat Auto de bout en bout, de façon atomique et
 -- autoritaire côté serveur (rien n'est fait confiance côté client hormis les
@@ -6535,9 +7402,11 @@ GRANT EXECUTE ON FUNCTION autobattle_resolve_round_core(integer, integer, text, 
 -- les tentatives concurrentes du même joueur sur ce niveau ; 3) valide
 -- variante/niveau actifs, niveau attendu (pas de saut/rejeu), pokémon/capacité
 -- éligibles ; 4) débite 1 ticket (échoue proprement si aucun) ; 5) simule le
--- combat tour par tour (formule : dégâts pokémon ×2 si son espèce est
--- "super efficace" contre le type de l'adversaire, + dégâts de la capacité,
--- jamais doublés) ; 6) à la victoire, crédite toutes les récompenses du
+-- combat tour par tour (formule : dégâts pokémon ×2 si le TYPE DE LA CAPACITÉ
+-- jouée est super efficace contre le type de l'adversaire — voir
+-- type_super_effective —, + dégâts de la capacité, jamais doublés ; et coup
+-- entièrement annulé si ce type ne peut rien contre l'adversaire, voir
+-- type_no_effect) ; 6) à la victoire, crédite toutes les récompenses du
 -- niveau et fait avancer la progression ; à la défaite, marque seulement le
 -- niveau comme découvert. Tout ceci dans une seule transaction implicite
 -- (fonction plpgsql) : soit tout est appliqué, soit rien ne l'est.
@@ -6567,6 +7436,19 @@ DECLARE
   v_player_type_bonus   boolean;
   v_opponent_damage     integer;
   v_opponent_type_bonus boolean;
+  -- Immunités de type (voir type_no_effect) : recalculées à chaque tour, un
+  -- perce-immunité (pierce_immunity_*) pouvant les lever en cours de combat —
+  -- seuls les TYPES d'espèce affrontés, eux, sont figés (les deux camps gardent
+  -- la même capacité et la même espèce d'un bout à l'autre en mode Auto).
+  v_player_type_immune   boolean;
+  v_opponent_type_immune boolean;
+  -- Type d'espèce que la capacité de chaque camp affronte (Métamorph compris).
+  v_player_target_type   text;
+  v_opponent_target_type text;
+  -- Poids des deux espèces (pokemon.poids) pour la condition de dégâts
+  -- additionnels 'weight_ratio' — voir autobattle_weight_condition.
+  v_player_weight        numeric;
+  v_opponent_weight      numeric;
   v_hit_dice            integer;
   v_hit_damage          integer;
   v_player_hp           integer;
@@ -6655,6 +7537,7 @@ DECLARE
   -- avec chacune son échéance en numéro de round (999999 = jusqu'à la fin du
   -- combat, très au-delà du plafond de 200 tours).
   v_player_stat_mod_target       text;
+  v_player_stat_mod_direction    text;
   v_player_stat_mod_stat         text;
   v_player_stat_mod_value_type   text;
   v_player_stat_mod_flat         integer;
@@ -6666,6 +7549,7 @@ DECLARE
   v_player_stat_mod_max_uses     integer;
   v_player_stat_mod_uses_used    integer := 0;
   v_opponent_stat_mod_target       text;
+  v_opponent_stat_mod_direction    text;
   v_opponent_stat_mod_stat         text;
   v_opponent_stat_mod_value_type   text;
   v_opponent_stat_mod_flat         integer;
@@ -6712,6 +7596,8 @@ DECLARE
   v_opponent_cancel_heal_duration  integer;
   v_player_percent_hp_damage_percent   integer;
   v_opponent_percent_hp_damage_percent integer;
+  v_player_percent_hp_damage_basis     text;
+  v_opponent_percent_hp_damage_basis   text;
   v_player_heal_disabled_expires   integer;
   v_opponent_heal_disabled_expires integer;
   -- Effets ajoutés après coup (voir autobattle_ability_rules et les mêmes
@@ -6750,6 +7636,81 @@ DECLARE
   v_opponent_heal_dot_until_awake  boolean := false;
   v_player_ignore_status_block     text;
   v_opponent_ignore_status_block   text;
+  -- Effets persistants OFFENSIFS (voir autobattle_ability_rules.damage_dot_* /
+  -- leech_dot_*) : config de la capacité de chaque camp d'un côté, effet
+  -- SUBI par chaque camp de l'autre — un camp pose l'effet sur l'autre, d'où
+  -- les deux jeux de variables (le _config_ du joueur alimente le _amount_ de
+  -- l'adversaire, et réciproquement).
+  v_player_damage_dot_config_amount    integer;
+  v_player_damage_dot_config_turns     integer;
+  v_player_damage_dot_config_type      text;
+  v_player_damage_dot_config_percent   integer;
+  v_opponent_damage_dot_config_amount  integer;
+  v_opponent_damage_dot_config_turns   integer;
+  v_opponent_damage_dot_config_type    text;
+  v_opponent_damage_dot_config_percent integer;
+  v_player_leech_dot_config_amount     integer;
+  v_player_leech_dot_config_turns      integer;
+  v_player_leech_dot_config_type       text;
+  v_player_leech_dot_config_percent    integer;
+  v_opponent_leech_dot_config_amount   integer;
+  v_opponent_leech_dot_config_turns    integer;
+  v_opponent_leech_dot_config_type     text;
+  v_opponent_leech_dot_config_percent  integer;
+  v_player_damage_dot_amount    integer;
+  v_player_damage_dot_expires   integer;
+  v_opponent_damage_dot_amount  integer;
+  v_opponent_damage_dot_expires integer;
+  v_player_leech_dot_amount     integer;
+  v_player_leech_dot_expires    integer;
+  v_opponent_leech_dot_amount   integer;
+  v_opponent_leech_dot_expires  integer;
+  -- Tentative de statut persistante (voir status_dot_*) : config de la
+  -- capacité de chaque camp, puis effet SUBI par chaque camp.
+  v_player_status_dot_config_status    text;
+  v_player_status_dot_config_chance    integer;
+  v_player_status_dot_config_turns     integer;
+  v_opponent_status_dot_config_status  text;
+  v_opponent_status_dot_config_chance  integer;
+  v_opponent_status_dot_config_turns   integer;
+  v_player_status_dot_status    text;
+  v_player_status_dot_chance    integer;
+  v_player_status_dot_expires   integer;
+  v_opponent_status_dot_status  text;
+  v_opponent_status_dot_chance  integer;
+  v_opponent_status_dot_expires integer;
+  -- Perce-immunité (voir autobattle_ability_rules.pierce_immunity_*) : config
+  -- de la capacité, puis effet actif accordé à son lanceur.
+  v_player_pierce_immunity_config_type    text;
+  v_player_pierce_immunity_config_turns   integer;
+  v_opponent_pierce_immunity_config_type  text;
+  v_opponent_pierce_immunity_config_turns integer;
+  v_player_pierce_immunity_type      text;
+  v_player_pierce_immunity_expires   integer;
+  v_opponent_pierce_immunity_type    text;
+  v_opponent_pierce_immunity_expires integer;
+  -- Statut exigé sur la cible (voir requires_target_status) et réglages de la
+  -- condition de dégâts additionnels 'weight_ratio'.
+  v_player_requires_target_status   text;
+  v_opponent_requires_target_status text;
+  v_player_bonus_weight_target      text;
+  v_player_bonus_weight_comparison  text;
+  v_player_bonus_weight_percent     integer;
+  v_opponent_bonus_weight_target     text;
+  v_opponent_bonus_weight_comparison text;
+  v_opponent_bonus_weight_percent    integer;
+  -- Purges de la capacité de chaque camp (voir clear_damage_dot/clear_weather/
+  -- cure_status).
+  v_player_clear_damage_dot     boolean;
+  v_player_clear_weather        boolean;
+  v_player_cure_status          boolean;
+  v_opponent_clear_damage_dot   boolean;
+  v_opponent_clear_weather      boolean;
+  v_opponent_cure_status        boolean;
+  -- Retour d'un tick d'effet persistant offensif (voir autobattle_dot_tick).
+  v_dot_res jsonb;
+  -- Échec automatique faute du statut exigé sur la cible (voir plus bas).
+  v_status_req_failed boolean;
   -- Météo déclenchée par la capacité, et condition « météo en cours » de son
   -- modificateur de stat (voir autobattle_ability_rules.weather_id).
   v_player_weather_id              bigint;
@@ -6950,19 +7911,27 @@ BEGIN
   -- Métamorph est remplacé par celui de l'AUTRE camp le cas échéant.
   v_player_base_damage_component := CASE WHEN v_is_metamorph THEN v_level.opponent_base_damage ELSE v_player_species.degats_base END;
   v_opponent_base_damage_component := CASE WHEN v_is_opponent_metamorph THEN v_player_base_damage_component ELSE v_level.opponent_base_damage END;
-  -- Super efficace : en plus de la table de types (ci-dessous), la capacité
-  -- utilisée doit être du MÊME type que le pokémon qui l'utilise — un
-  -- pokémon peut apprendre des capacités d'autres types, mais celles-ci ne
-  -- profitent jamais du bonus super efficace, seulement celles qui
-  -- correspondent à son propre type (voir requirement).
-  v_player_type_bonus := EXISTS (
-    SELECT 1 FROM (VALUES
-      (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_1 ELSE v_player_species.super_efficace_1 END),
-      (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_2 ELSE v_player_species.super_efficace_2 END),
-      (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_3 ELSE v_player_species.super_efficace_3 END),
-      (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_4 ELSE v_player_species.super_efficace_4 END)
-    ) AS s(val) WHERE lower(trim(val)) = lower(trim(CASE WHEN v_is_opponent_metamorph THEN v_player_species.type ELSE v_opponent_species.type END))
-  ) AND lower(trim(v_ability.type)) = lower(trim(CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END));
+  -- Super efficace : TYPE DE LA CAPACITÉ jouée vs TYPE DU DÉFENSEUR (voir
+  -- type_super_effective) — plus les colonnes super_efficace_1..4 de l'espèce
+  -- attaquante, et plus de condition « la capacité doit être du type de son
+  -- lanceur » : n'importe quelle capacité apprise profite du x2 si son propre
+  -- type est avantageux (requirement). Métamorph ne change donc plus rien ici
+  -- côté attaquant (la capacité copiée porte déjà son type), seulement le type
+  -- d'espèce du DÉFENSEUR le cas échéant.
+  v_player_type_bonus := type_super_effective(
+    v_ability.type,
+    CASE WHEN v_is_opponent_metamorph THEN v_player_species.type ELSE v_opponent_species.type END
+  );
+  -- Immunité de type : la capacité ne peut rien faire à ce défenseur (voir
+  -- type_no_effect) — traitée plus bas comme un raté « aucun effet », mais
+  -- seulement si elle vise réellement l'adversaire. Seul le TYPE affronté est
+  -- figé ici ; l'immunité elle-même est réévaluée à chaque tour dans la boucle
+  -- (un perce-immunité peut la lever, voir autobattle_type_immune).
+  v_player_target_type := CASE WHEN v_is_opponent_metamorph THEN v_player_species.type ELSE v_opponent_species.type END;
+  -- Poids des deux espèces : Métamorph copie le sprite, le type et les dégâts,
+  -- jamais le poids — chacun garde le sien.
+  v_player_weight := v_player_species.poids;
+  v_opponent_weight := v_opponent_species.poids;
   -- Dégâts de base (avant dé) : bonus de type inclus, jamais redoublé par le
   -- dé. Le dé (attacks.degats_de) est retiré au sort à CHAQUE coup dans la
   -- boucle ci-dessous (1..degats_de inclus), pas une seule fois pour tout le
@@ -6975,14 +7944,12 @@ BEGIN
   v_player_damage := v_player_damage_species_xp
     * (CASE WHEN v_player_type_bonus THEN 2 ELSE 1 END) + COALESCE(v_ability.degats_base, 0);
 
-  v_opponent_type_bonus := EXISTS (
-    SELECT 1 FROM (VALUES
-      (CASE WHEN v_is_opponent_metamorph THEN v_player_species.super_efficace_1 ELSE v_opponent_species.super_efficace_1 END),
-      (CASE WHEN v_is_opponent_metamorph THEN v_player_species.super_efficace_2 ELSE v_opponent_species.super_efficace_2 END),
-      (CASE WHEN v_is_opponent_metamorph THEN v_player_species.super_efficace_3 ELSE v_opponent_species.super_efficace_3 END),
-      (CASE WHEN v_is_opponent_metamorph THEN v_player_species.super_efficace_4 ELSE v_opponent_species.super_efficace_4 END)
-    ) AS s(val) WHERE lower(trim(val)) = lower(trim(CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END))
-  ) AND lower(trim(v_opponent_ability.type)) = lower(trim(CASE WHEN v_is_opponent_metamorph THEN v_player_species.type ELSE v_opponent_species.type END));
+  -- Même règle côté adverse (type de SA capacité vs type du joueur).
+  v_opponent_type_bonus := type_super_effective(
+    v_opponent_ability.type,
+    CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END
+  );
+  v_opponent_target_type := CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END;
   v_opponent_damage_species_xp := COALESCE(v_opponent_base_damage_component, 0);
   v_opponent_damage := v_opponent_damage_species_xp * (CASE WHEN v_opponent_type_bonus THEN 2 ELSE 1 END)
     + COALESCE(v_opponent_ability.degats_base, 0);
@@ -7003,7 +7970,7 @@ BEGIN
          recoil_type, recoil_min, recoil_max, recoil_percent, invulnerable_next_turn,
          bonus_damage_type, bonus_damage_multiplier, bonus_damage_flat, bonus_damage_min, bonus_damage_max,
          bonus_damage_condition, bonus_damage_condition_dice_value, bonus_damage_status_filter,
-         stat_mod_target, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
+         stat_mod_target, stat_mod_direction, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
          stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
          heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
          stat_mod_type_filter, prevention_duration_turns,
@@ -7014,7 +7981,7 @@ BEGIN
          v_player_recoil_type, v_player_recoil_min, v_player_recoil_max, v_player_recoil_percent, v_player_invuln_grant,
          v_player_bonus_type, v_player_bonus_multiplier, v_player_bonus_flat, v_player_bonus_min, v_player_bonus_max,
          v_player_bonus_condition, v_player_bonus_dice_value, v_player_bonus_status_filter,
-         v_player_stat_mod_target, v_player_stat_mod_stat, v_player_stat_mod_value_type, v_player_stat_mod_flat, v_player_stat_mod_min, v_player_stat_mod_max, v_player_stat_mod_percent,
+         v_player_stat_mod_target, v_player_stat_mod_direction, v_player_stat_mod_stat, v_player_stat_mod_value_type, v_player_stat_mod_flat, v_player_stat_mod_min, v_player_stat_mod_max, v_player_stat_mod_percent,
          v_player_stat_mod_duration_type, v_player_stat_mod_duration_turns, v_player_stat_mod_max_uses,
          v_player_heal_dot_config_amount, v_player_heal_dot_config_turns, v_player_heal_dot_config_type, v_player_heal_dot_config_percent, v_player_cancel_heal_duration, v_player_percent_hp_damage_percent,
          v_player_stat_mod_type_filter, v_player_prevention_duration,
@@ -7023,6 +7990,26 @@ BEGIN
          v_player_weather_id, v_player_weather_chance,
          v_player_stat_mod_weather_condition, v_player_stat_mod_weather_id
     FROM autobattle_ability_rules WHERE attack_nom = v_effective_ability_nom;
+  -- Effets ajoutés en dernier (dégâts/vol de vie persistants, perce-immunité,
+  -- statut exigé, condition de poids) : lus à part pour ne pas rallonger
+  -- encore la liste ci-dessus, même ligne de règle.
+  SELECT damage_dot_amount, damage_dot_duration_turns, damage_dot_type, damage_dot_percent,
+         leech_dot_amount, leech_dot_duration_turns, leech_dot_type, leech_dot_percent,
+         pierce_immunity_type, pierce_immunity_turns, requires_target_status,
+         bonus_damage_weight_target, bonus_damage_weight_comparison, bonus_damage_weight_percent,
+         clear_damage_dot, clear_weather, cure_status,
+         status_dot_status, status_dot_chance, status_dot_duration_turns, percent_hp_damage_basis
+    INTO v_player_damage_dot_config_amount, v_player_damage_dot_config_turns, v_player_damage_dot_config_type, v_player_damage_dot_config_percent,
+         v_player_leech_dot_config_amount, v_player_leech_dot_config_turns, v_player_leech_dot_config_type, v_player_leech_dot_config_percent,
+         v_player_pierce_immunity_config_type, v_player_pierce_immunity_config_turns, v_player_requires_target_status,
+         v_player_bonus_weight_target, v_player_bonus_weight_comparison, v_player_bonus_weight_percent,
+         v_player_clear_damage_dot, v_player_clear_weather, v_player_cure_status,
+         v_player_status_dot_config_status, v_player_status_dot_config_chance, v_player_status_dot_config_turns,
+         v_player_percent_hp_damage_basis
+    FROM autobattle_ability_rules WHERE attack_nom = v_effective_ability_nom;
+  v_player_clear_damage_dot := COALESCE(v_player_clear_damage_dot, false);
+  v_player_clear_weather := COALESCE(v_player_clear_weather, false);
+  v_player_cure_status := COALESCE(v_player_cure_status, false);
   v_player_status_reversed := COALESCE(v_player_status_reversed, false);
   v_player_invuln_grant := COALESCE(v_player_invuln_grant, false);
   v_player_heal_dot_config_until_awake := COALESCE(v_player_heal_dot_config_until_awake, false);
@@ -7032,7 +8019,7 @@ BEGIN
          recoil_type, recoil_min, recoil_max, recoil_percent, invulnerable_next_turn,
          bonus_damage_type, bonus_damage_multiplier, bonus_damage_flat, bonus_damage_min, bonus_damage_max,
          bonus_damage_condition, bonus_damage_condition_dice_value, bonus_damage_status_filter,
-         stat_mod_target, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
+         stat_mod_target, stat_mod_direction, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
          stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
          heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
          stat_mod_type_filter, prevention_duration_turns,
@@ -7043,7 +8030,7 @@ BEGIN
          v_opponent_recoil_type, v_opponent_recoil_min, v_opponent_recoil_max, v_opponent_recoil_percent, v_opponent_invuln_grant,
          v_opponent_bonus_type, v_opponent_bonus_multiplier, v_opponent_bonus_flat, v_opponent_bonus_min, v_opponent_bonus_max,
          v_opponent_bonus_condition, v_opponent_bonus_dice_value, v_opponent_bonus_status_filter,
-         v_opponent_stat_mod_target, v_opponent_stat_mod_stat, v_opponent_stat_mod_value_type, v_opponent_stat_mod_flat, v_opponent_stat_mod_min, v_opponent_stat_mod_max, v_opponent_stat_mod_percent,
+         v_opponent_stat_mod_target, v_opponent_stat_mod_direction, v_opponent_stat_mod_stat, v_opponent_stat_mod_value_type, v_opponent_stat_mod_flat, v_opponent_stat_mod_min, v_opponent_stat_mod_max, v_opponent_stat_mod_percent,
          v_opponent_stat_mod_duration_type, v_opponent_stat_mod_duration_turns, v_opponent_stat_mod_max_uses,
          v_opponent_heal_dot_config_amount, v_opponent_heal_dot_config_turns, v_opponent_heal_dot_config_type, v_opponent_heal_dot_config_percent, v_opponent_cancel_heal_duration, v_opponent_percent_hp_damage_percent,
          v_opponent_stat_mod_type_filter, v_opponent_prevention_duration,
@@ -7052,6 +8039,24 @@ BEGIN
          v_opponent_weather_id, v_opponent_weather_chance,
          v_opponent_stat_mod_weather_condition, v_opponent_stat_mod_weather_id
     FROM autobattle_ability_rules WHERE attack_nom = v_effective_opponent_ability_nom;
+  -- Voir le même complément côté joueur juste au-dessus.
+  SELECT damage_dot_amount, damage_dot_duration_turns, damage_dot_type, damage_dot_percent,
+         leech_dot_amount, leech_dot_duration_turns, leech_dot_type, leech_dot_percent,
+         pierce_immunity_type, pierce_immunity_turns, requires_target_status,
+         bonus_damage_weight_target, bonus_damage_weight_comparison, bonus_damage_weight_percent,
+         clear_damage_dot, clear_weather, cure_status,
+         status_dot_status, status_dot_chance, status_dot_duration_turns, percent_hp_damage_basis
+    INTO v_opponent_damage_dot_config_amount, v_opponent_damage_dot_config_turns, v_opponent_damage_dot_config_type, v_opponent_damage_dot_config_percent,
+         v_opponent_leech_dot_config_amount, v_opponent_leech_dot_config_turns, v_opponent_leech_dot_config_type, v_opponent_leech_dot_config_percent,
+         v_opponent_pierce_immunity_config_type, v_opponent_pierce_immunity_config_turns, v_opponent_requires_target_status,
+         v_opponent_bonus_weight_target, v_opponent_bonus_weight_comparison, v_opponent_bonus_weight_percent,
+         v_opponent_clear_damage_dot, v_opponent_clear_weather, v_opponent_cure_status,
+         v_opponent_status_dot_config_status, v_opponent_status_dot_config_chance, v_opponent_status_dot_config_turns,
+         v_opponent_percent_hp_damage_basis
+    FROM autobattle_ability_rules WHERE attack_nom = v_effective_opponent_ability_nom;
+  v_opponent_clear_damage_dot := COALESCE(v_opponent_clear_damage_dot, false);
+  v_opponent_clear_weather := COALESCE(v_opponent_clear_weather, false);
+  v_opponent_cure_status := COALESCE(v_opponent_cure_status, false);
   v_opponent_status_reversed := COALESCE(v_opponent_status_reversed, false);
   v_opponent_invuln_grant := COALESCE(v_opponent_invuln_grant, false);
   v_opponent_heal_dot_config_until_awake := COALESCE(v_opponent_heal_dot_config_until_awake, false);
@@ -7270,6 +8275,42 @@ BEGIN
     IF v_opponent_heal_dot_until_awake AND COALESCE(v_opponent_status, '') <> 'sleep' THEN
       v_opponent_heal_dot_amount := NULL; v_opponent_heal_dot_until_awake := false;
     END IF;
+    -- Effets persistants OFFENSIFS subis et perce-immunité accordé : mêmes
+    -- échéances par numéro de round que le soin passif — voir le moteur
+    -- partagé autobattle_resolve_round_core.
+    IF v_player_damage_dot_expires IS NOT NULL AND v_round_no > v_player_damage_dot_expires THEN
+      v_player_damage_dot_amount := NULL; v_player_damage_dot_expires := NULL;
+    END IF;
+    IF v_opponent_damage_dot_expires IS NOT NULL AND v_round_no > v_opponent_damage_dot_expires THEN
+      v_opponent_damage_dot_amount := NULL; v_opponent_damage_dot_expires := NULL;
+    END IF;
+    IF v_player_leech_dot_expires IS NOT NULL AND v_round_no > v_player_leech_dot_expires THEN
+      v_player_leech_dot_amount := NULL; v_player_leech_dot_expires := NULL;
+    END IF;
+    IF v_opponent_leech_dot_expires IS NOT NULL AND v_round_no > v_opponent_leech_dot_expires THEN
+      v_opponent_leech_dot_amount := NULL; v_opponent_leech_dot_expires := NULL;
+    END IF;
+    IF v_player_status_dot_expires IS NOT NULL AND v_round_no > v_player_status_dot_expires THEN
+      v_player_status_dot_status := NULL; v_player_status_dot_chance := NULL; v_player_status_dot_expires := NULL;
+    END IF;
+    IF v_opponent_status_dot_expires IS NOT NULL AND v_round_no > v_opponent_status_dot_expires THEN
+      v_opponent_status_dot_status := NULL; v_opponent_status_dot_chance := NULL; v_opponent_status_dot_expires := NULL;
+    END IF;
+    IF v_player_pierce_immunity_expires IS NOT NULL AND v_round_no > v_player_pierce_immunity_expires THEN
+      v_player_pierce_immunity_type := NULL; v_player_pierce_immunity_expires := NULL;
+    END IF;
+    IF v_opponent_pierce_immunity_expires IS NOT NULL AND v_round_no > v_opponent_pierce_immunity_expires THEN
+      v_opponent_pierce_immunity_type := NULL; v_opponent_pierce_immunity_expires := NULL;
+    END IF;
+    -- Immunité de type effective de CE tour, perce-immunité compris.
+    v_player_type_immune := autobattle_type_immune(
+      v_ability.type, v_player_target_type,
+      v_player_pierce_immunity_config_type, v_player_pierce_immunity_type,
+      v_player_pierce_immunity_expires, v_round_no);
+    v_opponent_type_immune := autobattle_type_immune(
+      v_opponent_ability.type, v_opponent_target_type,
+      v_opponent_pierce_immunity_config_type, v_opponent_pierce_immunity_type,
+      v_opponent_pierce_immunity_expires, v_round_no);
 
     -- "A subi des dégâts au dernier tour adverse" (bonus_damage_condition
     -- 'took_damage_last_turn') doit refléter EXACTEMENT le tour précédent de
@@ -7302,6 +8343,43 @@ BEGIN
         (CASE WHEN v_attacker = 'player' THEN v_player_ignore_status_block ELSE v_opponent_ignore_status_block END)
           = (CASE WHEN v_attacker = 'player' THEN v_player_status ELSE v_opponent_status END),
         false);
+
+      -- Effets persistants OFFENSIFS subis par le camp qui ouvre son tour
+      -- (dégâts par tour, vol de vie par tour) : tout premier événement de son
+      -- tour, avant même son tick de statut, une seule fois par tour réel et
+      -- qu'il agisse ou non ensuite — voir le même bloc dans le moteur partagé
+      -- autobattle_resolve_round_core. Un tick peut mettre K.O.
+      IF v_attacker = 'player' AND (v_player_damage_dot_amount IS NOT NULL OR v_player_leech_dot_amount IS NOT NULL) THEN
+        v_dot_res := autobattle_dot_tick(
+          'player', v_turn_no, v_player_hp, v_player_max_hp, v_opponent_hp, v_level.opponent_hp,
+          v_player_status, v_opponent_status, v_player_damage_dot_amount, v_player_leech_dot_amount,
+          v_player_talents, v_player_talent_state,
+          v_opponent_heal_disabled_expires IS NOT NULL AND v_round_no <= v_opponent_heal_disabled_expires);
+        v_player_hp := (v_dot_res ->> 'hp')::integer;
+        v_opponent_hp := (v_dot_res ->> 'other_hp')::integer;
+        v_player_status := v_dot_res ->> 'status';
+        v_opponent_status := v_dot_res ->> 'other_status';
+        v_player_talent_state := v_dot_res -> 'state';
+        v_turns := v_turns || (v_dot_res -> 'turns');
+        -- Comme le tick de soin passif plus bas : ces tours consomment un
+        -- numéro de tour sans rendre la main ni changer d'attaquant.
+        IF jsonb_array_length(v_dot_res -> 'turns') > 0 THEN v_turn_no := v_turn_no + 1; END IF;
+        IF v_player_hp <= 0 THEN v_outcome := 'lose'; EXIT; END IF;
+      ELSIF v_attacker = 'opponent' AND (v_opponent_damage_dot_amount IS NOT NULL OR v_opponent_leech_dot_amount IS NOT NULL) THEN
+        v_dot_res := autobattle_dot_tick(
+          'opponent', v_turn_no, v_opponent_hp, v_level.opponent_hp, v_player_hp, v_player_max_hp,
+          v_opponent_status, v_player_status, v_opponent_damage_dot_amount, v_opponent_leech_dot_amount,
+          v_opponent_talents, v_opponent_talent_state,
+          v_player_heal_disabled_expires IS NOT NULL AND v_round_no <= v_player_heal_disabled_expires);
+        v_opponent_hp := (v_dot_res ->> 'hp')::integer;
+        v_player_hp := (v_dot_res ->> 'other_hp')::integer;
+        v_opponent_status := v_dot_res ->> 'status';
+        v_player_status := v_dot_res ->> 'other_status';
+        v_opponent_talent_state := v_dot_res -> 'state';
+        v_turns := v_turns || (v_dot_res -> 'turns');
+        IF jsonb_array_length(v_dot_res -> 'turns') > 0 THEN v_turn_no := v_turn_no + 1; END IF;
+        IF v_opponent_hp <= 0 THEN v_outcome := 'win'; EXIT; END IF;
+      END IF;
 
       -- Statut actif infligé par une capacité adverse précédente (voir plus
       -- bas "application du statut après un coup") : traité en tout premier,
@@ -7649,6 +8727,26 @@ BEGIN
         v_turn_no := v_turn_no + 1;
       END IF;
 
+      -- Tentative de statut persistante subie par le camp qui agit — voir le
+      -- même bloc dans le moteur partagé autobattle_resolve_round_core (jet
+      -- APRÈS son tick de statut, donc le statut posé ne mord qu'au tour
+      -- suivant ; rien n'est tenté s'il en a déjà un).
+      IF v_attacker = 'player' AND v_player_status_dot_status IS NOT NULL AND v_player_status IS NULL THEN
+        v_dot_res := autobattle_status_dot_tick('player', v_turn_no, v_player_hp, v_player_status,
+          v_player_status_dot_status, v_player_status_dot_chance, v_player_talents, v_player_talent_state);
+        v_player_status := v_dot_res ->> 'status';
+        v_player_talent_state := v_dot_res -> 'state';
+        v_turns := v_turns || (v_dot_res -> 'turns');
+        IF jsonb_array_length(v_dot_res -> 'turns') > 0 THEN v_turn_no := v_turn_no + 1; END IF;
+      ELSIF v_attacker = 'opponent' AND v_opponent_status_dot_status IS NOT NULL AND v_opponent_status IS NULL THEN
+        v_dot_res := autobattle_status_dot_tick('opponent', v_turn_no, v_opponent_hp, v_opponent_status,
+          v_opponent_status_dot_status, v_opponent_status_dot_chance, v_opponent_talents, v_opponent_talent_state);
+        v_opponent_status := v_dot_res ->> 'status';
+        v_opponent_talent_state := v_dot_res -> 'state';
+        v_turns := v_turns || (v_dot_res -> 'turns');
+        IF jsonb_array_length(v_dot_res -> 'turns') > 0 THEN v_turn_no := v_turn_no + 1; END IF;
+      END IF;
+
       -- Chaîne "Continue sur sa lancée" (voir autobattle_ability_rules.
       -- keep_going_turns) : en mode Auto la capacité est la même à chaque
       -- tour, le compteur suit donc simplement le nombre d'utilisations
@@ -7864,14 +8962,30 @@ BEGIN
       -- adverse (play_twice/play_three/...), pas seulement son 1er coup —
       -- le bouclier lui-même n'expire que via le compteur de tours plus haut
       -- (v_round_no), au début du prochain tour de son propriétaire.
-      IF (v_opponent_invulnerable OR autobattle_talent_shield_active(v_opponent_talents, v_opponent_talent_state)) AND (
+      -- Immunité de type (v_player_type_immune, voir type_no_effect) : même
+      -- traitement que l'invulnérabilité — raté automatique, et uniquement
+      -- pour une capacité qui vise réellement l'adversaire (une capacité
+      -- auto-ciblée se résout normalement). Seul le drapeau change, pour que
+      -- le client affiche « Aucun effet ! ».
+      -- Capacité conditionnée au statut de la CIBLE (voir
+      -- autobattle_ability_rules.requires_target_status) : hors condition, elle
+      -- échoue, au même endroit et de la même façon que l'invulnérabilité et
+      -- l'immunité de type.
+      v_status_req_failed := v_player_requires_target_status IS NOT NULL
+        AND v_opponent_status IS DISTINCT FROM v_player_requires_target_status;
+      IF v_status_req_failed
+         OR ((v_opponent_invulnerable OR v_player_type_immune OR autobattle_talent_shield_active(v_opponent_talents, v_opponent_talent_state)) AND (
         v_ability.deals_damage
         OR (v_ability.status_effect IS NOT NULL AND NOT v_player_status_reversed)
         OR v_player_stat_mod_target = 'opponent'
         OR v_player_cancel_heal_duration IS NOT NULL
-      ) THEN
+      )) THEN
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
-          'turn', v_turn_no, 'attacker', 'player', 'damage', 0, 'missed', true, 'invulnerable_miss', true,
+          'turn', v_turn_no, 'attacker', 'player', 'damage', 0, 'missed', true,
+          'invulnerable_miss', NOT v_player_type_immune AND NOT v_status_req_failed,
+          'no_effect', v_player_type_immune AND NOT v_status_req_failed,
+          'requires_status_failed', v_status_req_failed,
+          'requires_status', v_player_requires_target_status,
           'defender_hp_after', GREATEST(0, v_opponent_hp), 'ko', false
         ));
         IF v_player_turn_effect = 'repeat_until_fail' THEN
@@ -7946,7 +9060,9 @@ BEGIN
             -- s'appliquent ensuite normalement sur ce nouveau total.
             v_percent_hp_damage_applied := v_player_percent_hp_damage_percent IS NOT NULL;
             IF v_percent_hp_damage_applied THEN
-              v_hit_damage := GREATEST(0, floor(v_opponent_hp * v_player_percent_hp_damage_percent / 100.0)::integer);
+              v_hit_damage := GREATEST(0, floor(
+                (CASE WHEN v_player_percent_hp_damage_basis = 'max' THEN v_level.opponent_hp ELSE v_opponent_hp END)
+                * v_player_percent_hp_damage_percent / 100.0)::integer);
             END IF;
 
             -- Dégâts additionnels conditionnels (voir bonus_damage_* et les
@@ -7957,7 +9073,12 @@ BEGIN
               OR v_player_bonus_condition = 'first_use' AND NOT v_player_used_ability
               OR v_player_bonus_condition = 'dice_equals' AND v_hit_dice = v_player_bonus_dice_value
               OR v_player_bonus_condition = 'has_status' AND v_opponent_status IS NOT NULL AND (v_player_bonus_status_filter IS NULL OR v_opponent_status = v_player_bonus_status_filter)
-              OR v_player_bonus_condition = 'self_has_status' AND v_player_status IS NOT NULL AND (v_player_bonus_status_filter IS NULL OR v_player_status = v_player_bonus_status_filter);
+              OR v_player_bonus_condition = 'self_has_status' AND v_player_status IS NOT NULL AND (v_player_bonus_status_filter IS NULL OR v_player_status = v_player_bonus_status_filter)
+              -- Comparaison des POIDS des deux espèces (voir
+              -- autobattle_weight_condition) : « self » = le camp qui attaque.
+              OR v_player_bonus_condition = 'weight_ratio' AND autobattle_weight_condition(
+                   v_player_bonus_weight_target, v_player_bonus_weight_comparison,
+                   v_player_bonus_weight_percent, v_player_weight, v_opponent_weight);
             IF v_player_bonus_type IS NOT NULL AND v_bonus_condition_met THEN
               IF v_player_bonus_type = 'multiply' THEN
                 v_hit_damage := floor(v_hit_damage * COALESCE(v_player_bonus_multiplier, 1))::integer;
@@ -8139,7 +9260,7 @@ BEGIN
                     * COALESCE(v_player_stat_mod_percent, 0) / 100.0)::integer
                 ELSE 0
               END;
-              v_stat_mod_amount := CASE WHEN v_player_stat_mod_target = 'opponent' THEN -abs(v_stat_mod_amount) ELSE abs(v_stat_mod_amount) END;
+              v_stat_mod_amount := autobattle_stat_mod_signed(v_stat_mod_amount, v_player_stat_mod_target, v_player_stat_mod_direction);
               -- v_round_no avance de 1 à CHAQUE tour RÉEL (joueur ET
               -- adversaire confondus, jamais au milieu d'une rafale — voir
               -- DECLARE), donc "1 tour" pour le lanceur (son PROCHAIN tour,
@@ -8213,6 +9334,58 @@ BEGIN
             v_player_prevention_expires := v_round_no + 2 * v_player_prevention_duration;
             v_turn_entry := v_turn_entry || jsonb_build_object('prevention_granted', true);
           END IF;
+          -- Effets persistants OFFENSIFS posés sur la CIBLE et perce-immunité
+          -- accordé au lanceur — voir les mêmes octrois dans le moteur partagé
+          -- autobattle_resolve_round_core.
+          IF v_player_damage_dot_config_turns IS NOT NULL THEN
+            v_opponent_damage_dot_amount := GREATEST(1, CASE
+              WHEN v_player_damage_dot_config_type = 'percent_max_hp'
+                THEN floor(v_level.opponent_hp * COALESCE(v_player_damage_dot_config_percent, 0) / 100.0)::integer
+              ELSE COALESCE(v_player_damage_dot_config_amount, 0) END);
+            v_opponent_damage_dot_expires := v_round_no + 2 * v_player_damage_dot_config_turns;
+            v_turn_entry := v_turn_entry || jsonb_build_object('damage_dot_granted', true);
+          END IF;
+          IF v_player_leech_dot_config_turns IS NOT NULL THEN
+            v_opponent_leech_dot_amount := GREATEST(1, CASE
+              WHEN v_player_leech_dot_config_type = 'percent_max_hp'
+                THEN floor(v_level.opponent_hp * COALESCE(v_player_leech_dot_config_percent, 0) / 100.0)::integer
+              ELSE COALESCE(v_player_leech_dot_config_amount, 0) END);
+            v_opponent_leech_dot_expires := v_round_no + 2 * v_player_leech_dot_config_turns;
+            v_turn_entry := v_turn_entry || jsonb_build_object('leech_dot_granted', true);
+          END IF;
+          IF v_player_status_dot_config_turns IS NOT NULL THEN
+            v_opponent_status_dot_status := v_player_status_dot_config_status;
+            v_opponent_status_dot_chance := v_player_status_dot_config_chance;
+            v_opponent_status_dot_expires := v_round_no + 2 * v_player_status_dot_config_turns;
+            v_turn_entry := v_turn_entry || jsonb_build_object('status_dot_granted', true);
+          END IF;
+          IF v_player_pierce_immunity_config_type IS NOT NULL AND v_player_pierce_immunity_config_turns IS NOT NULL THEN
+            v_player_pierce_immunity_type := v_player_pierce_immunity_config_type;
+            v_player_pierce_immunity_expires := v_round_no + 2 * v_player_pierce_immunity_config_turns;
+            v_turn_entry := v_turn_entry || jsonb_build_object('pierce_immunity_granted', true);
+          END IF;
+          -- Purges (voir clear_damage_dot / cure_status / clear_weather) :
+          -- elles visent leur LANCEUR — ses propres dégâts sur la durée, ses
+          -- propres statuts — sauf la météo, état de TERRAIN partagé qui
+          -- disparaît pour les deux camps.
+          IF v_player_clear_damage_dot
+             AND (v_player_damage_dot_amount IS NOT NULL OR v_player_leech_dot_amount IS NOT NULL
+                  OR v_player_status_dot_status IS NOT NULL) THEN
+            v_player_damage_dot_amount := NULL; v_player_damage_dot_expires := NULL;
+            v_player_leech_dot_amount := NULL; v_player_leech_dot_expires := NULL;
+            v_player_status_dot_status := NULL; v_player_status_dot_chance := NULL; v_player_status_dot_expires := NULL;
+            v_turn_entry := v_turn_entry || jsonb_build_object('cleanse_dot', true);
+          END IF;
+          IF v_player_cure_status AND v_player_status IS NOT NULL THEN
+            v_turn_entry := v_turn_entry || jsonb_build_object('cleanse_status', v_player_status);
+            v_player_status := NULL;
+          END IF;
+          IF v_player_clear_weather AND v_weather IS NOT NULL THEN
+            v_talent_pending := COALESCE(v_talent_pending, '[]'::jsonb) || jsonb_build_array(
+              autobattle_weather_turn(v_turn_no, 'player', v_player_hp, v_weather,
+                jsonb_build_object('weather_cleared', true)));
+            v_weather := NULL;
+          END IF;
           -- Invulnérabilité accordée par cette capacité : consommée au
           -- prochain tour adverse (voir plus haut), indépendamment du reste.
           -- Pour 'prepare_release', déjà accordée à la préparation (protège
@@ -8280,14 +9453,24 @@ BEGIN
       -- Voir la même remarque côté joueur ci-dessus : ne bloque que si cette
       -- capacité affecte réellement le joueur, re-vérifié à CHAQUE
       -- activation (bloque toute une rafale adverse, pas juste son 1er coup).
-      IF (v_player_invulnerable OR autobattle_talent_shield_active(v_player_talents, v_player_talent_state)) AND (
+      -- Immunité de type côté adverse : voir la branche symétrique du camp
+      -- joueur plus haut.
+      -- Voir la branche symétrique du camp joueur plus haut.
+      v_status_req_failed := v_opponent_requires_target_status IS NOT NULL
+        AND v_player_status IS DISTINCT FROM v_opponent_requires_target_status;
+      IF v_status_req_failed
+         OR ((v_player_invulnerable OR v_opponent_type_immune OR autobattle_talent_shield_active(v_player_talents, v_player_talent_state)) AND (
         v_opponent_ability.deals_damage
         OR (v_opponent_ability.status_effect IS NOT NULL AND NOT v_opponent_status_reversed)
         OR v_opponent_stat_mod_target = 'opponent'
         OR v_opponent_cancel_heal_duration IS NOT NULL
-      ) THEN
+      )) THEN
         v_turns := v_turns || jsonb_build_array(jsonb_build_object(
-          'turn', v_turn_no, 'attacker', 'opponent', 'damage', 0, 'missed', true, 'invulnerable_miss', true,
+          'turn', v_turn_no, 'attacker', 'opponent', 'damage', 0, 'missed', true,
+          'invulnerable_miss', NOT v_opponent_type_immune AND NOT v_status_req_failed,
+          'no_effect', v_opponent_type_immune AND NOT v_status_req_failed,
+          'requires_status_failed', v_status_req_failed,
+          'requires_status', v_opponent_requires_target_status,
           'defender_hp_after', GREATEST(0, v_player_hp), 'ko', false
         ));
         IF v_opponent_turn_effect = 'repeat_until_fail' THEN
@@ -8344,14 +9527,20 @@ BEGIN
 
             v_percent_hp_damage_applied := v_opponent_percent_hp_damage_percent IS NOT NULL;
             IF v_percent_hp_damage_applied THEN
-              v_hit_damage := GREATEST(0, floor(v_player_hp * v_opponent_percent_hp_damage_percent / 100.0)::integer);
+              v_hit_damage := GREATEST(0, floor(
+                (CASE WHEN v_opponent_percent_hp_damage_basis = 'max' THEN v_player_max_hp ELSE v_player_hp END)
+                * v_opponent_percent_hp_damage_percent / 100.0)::integer);
             END IF;
 
             v_bonus_condition_met := v_opponent_bonus_condition = 'took_damage_last_turn' AND v_opponent_took_damage
               OR v_opponent_bonus_condition = 'first_use' AND NOT v_opponent_used_ability
               OR v_opponent_bonus_condition = 'dice_equals' AND v_hit_dice = v_opponent_bonus_dice_value
               OR v_opponent_bonus_condition = 'has_status' AND v_player_status IS NOT NULL AND (v_opponent_bonus_status_filter IS NULL OR v_player_status = v_opponent_bonus_status_filter)
-              OR v_opponent_bonus_condition = 'self_has_status' AND v_opponent_status IS NOT NULL AND (v_opponent_bonus_status_filter IS NULL OR v_opponent_status = v_opponent_bonus_status_filter);
+              OR v_opponent_bonus_condition = 'self_has_status' AND v_opponent_status IS NOT NULL AND (v_opponent_bonus_status_filter IS NULL OR v_opponent_status = v_opponent_bonus_status_filter)
+              -- Poids : « self » est cette fois l'adversaire, qui attaque.
+              OR v_opponent_bonus_condition = 'weight_ratio' AND autobattle_weight_condition(
+                   v_opponent_bonus_weight_target, v_opponent_bonus_weight_comparison,
+                   v_opponent_bonus_weight_percent, v_opponent_weight, v_player_weight);
             IF v_opponent_bonus_type IS NOT NULL AND v_bonus_condition_met THEN
               IF v_opponent_bonus_type = 'multiply' THEN
                 v_hit_damage := floor(v_hit_damage * COALESCE(v_opponent_bonus_multiplier, 1))::integer;
@@ -8510,7 +9699,7 @@ BEGIN
                     * COALESCE(v_opponent_stat_mod_percent, 0) / 100.0)::integer
                 ELSE 0
               END;
-              v_stat_mod_amount := CASE WHEN v_opponent_stat_mod_target = 'opponent' THEN -abs(v_stat_mod_amount) ELSE abs(v_stat_mod_amount) END;
+              v_stat_mod_amount := autobattle_stat_mod_signed(v_stat_mod_amount, v_opponent_stat_mod_target, v_opponent_stat_mod_direction);
               v_stat_mod_expiry := CASE WHEN v_opponent_stat_mod_duration_type = 'battle_end' THEN 999999 ELSE v_round_no + 2 * COALESCE(v_opponent_stat_mod_duration_turns, 1) END;
               -- Voir le même commentaire côté joueur plus haut.
               IF v_opponent_stat_mod_target = 'self' AND v_opponent_stat_mod_stat = 'damage' THEN
@@ -8562,6 +9751,52 @@ BEGIN
           IF v_opponent_prevention_duration IS NOT NULL THEN
             v_opponent_prevention_expires := v_round_no + 2 * v_opponent_prevention_duration;
             v_turn_entry := v_turn_entry || jsonb_build_object('prevention_granted', true);
+          END IF;
+          -- Voir les mêmes octrois et purges côté joueur plus haut.
+          IF v_opponent_damage_dot_config_turns IS NOT NULL THEN
+            v_player_damage_dot_amount := GREATEST(1, CASE
+              WHEN v_opponent_damage_dot_config_type = 'percent_max_hp'
+                THEN floor(v_player_max_hp * COALESCE(v_opponent_damage_dot_config_percent, 0) / 100.0)::integer
+              ELSE COALESCE(v_opponent_damage_dot_config_amount, 0) END);
+            v_player_damage_dot_expires := v_round_no + 2 * v_opponent_damage_dot_config_turns;
+            v_turn_entry := v_turn_entry || jsonb_build_object('damage_dot_granted', true);
+          END IF;
+          IF v_opponent_leech_dot_config_turns IS NOT NULL THEN
+            v_player_leech_dot_amount := GREATEST(1, CASE
+              WHEN v_opponent_leech_dot_config_type = 'percent_max_hp'
+                THEN floor(v_player_max_hp * COALESCE(v_opponent_leech_dot_config_percent, 0) / 100.0)::integer
+              ELSE COALESCE(v_opponent_leech_dot_config_amount, 0) END);
+            v_player_leech_dot_expires := v_round_no + 2 * v_opponent_leech_dot_config_turns;
+            v_turn_entry := v_turn_entry || jsonb_build_object('leech_dot_granted', true);
+          END IF;
+          IF v_opponent_status_dot_config_turns IS NOT NULL THEN
+            v_player_status_dot_status := v_opponent_status_dot_config_status;
+            v_player_status_dot_chance := v_opponent_status_dot_config_chance;
+            v_player_status_dot_expires := v_round_no + 2 * v_opponent_status_dot_config_turns;
+            v_turn_entry := v_turn_entry || jsonb_build_object('status_dot_granted', true);
+          END IF;
+          IF v_opponent_pierce_immunity_config_type IS NOT NULL AND v_opponent_pierce_immunity_config_turns IS NOT NULL THEN
+            v_opponent_pierce_immunity_type := v_opponent_pierce_immunity_config_type;
+            v_opponent_pierce_immunity_expires := v_round_no + 2 * v_opponent_pierce_immunity_config_turns;
+            v_turn_entry := v_turn_entry || jsonb_build_object('pierce_immunity_granted', true);
+          END IF;
+          IF v_opponent_clear_damage_dot
+             AND (v_opponent_damage_dot_amount IS NOT NULL OR v_opponent_leech_dot_amount IS NOT NULL
+                  OR v_opponent_status_dot_status IS NOT NULL) THEN
+            v_opponent_damage_dot_amount := NULL; v_opponent_damage_dot_expires := NULL;
+            v_opponent_leech_dot_amount := NULL; v_opponent_leech_dot_expires := NULL;
+            v_opponent_status_dot_status := NULL; v_opponent_status_dot_chance := NULL; v_opponent_status_dot_expires := NULL;
+            v_turn_entry := v_turn_entry || jsonb_build_object('cleanse_dot', true);
+          END IF;
+          IF v_opponent_cure_status AND v_opponent_status IS NOT NULL THEN
+            v_turn_entry := v_turn_entry || jsonb_build_object('cleanse_status', v_opponent_status);
+            v_opponent_status := NULL;
+          END IF;
+          IF v_opponent_clear_weather AND v_weather IS NOT NULL THEN
+            v_talent_pending := COALESCE(v_talent_pending, '[]'::jsonb) || jsonb_build_array(
+              autobattle_weather_turn(v_turn_no, 'opponent', v_opponent_hp, v_weather,
+                jsonb_build_object('weather_cleared', true)));
+            v_weather := NULL;
           END IF;
           IF v_opponent_invuln_grant AND v_opponent_turn_effect IS DISTINCT FROM 'prepare_release' THEN
             v_opponent_invulnerable := true;
@@ -8999,6 +10234,27 @@ DECLARE
   v_player_heal_dot_expires   integer;
   v_opponent_heal_dot_amount  integer;
   v_opponent_heal_dot_expires integer;
+  -- Effets persistants offensifs SUBIS par chaque camp et perce-immunité qui
+  -- lui est ACCORDÉ (colonnes player_*/opponent_* de autobattle_manual_battles,
+  -- miroir des champs de autobattle_combatant_state).
+  v_player_damage_dot_amount    integer;
+  v_player_damage_dot_expires   integer;
+  v_opponent_damage_dot_amount  integer;
+  v_opponent_damage_dot_expires integer;
+  v_player_leech_dot_amount     integer;
+  v_player_leech_dot_expires    integer;
+  v_opponent_leech_dot_amount   integer;
+  v_opponent_leech_dot_expires  integer;
+  v_player_status_dot_status    text;
+  v_player_status_dot_chance    integer;
+  v_player_status_dot_expires   integer;
+  v_opponent_status_dot_status  text;
+  v_opponent_status_dot_chance  integer;
+  v_opponent_status_dot_expires integer;
+  v_player_pierce_immunity_type      text;
+  v_player_pierce_immunity_expires   integer;
+  v_opponent_pierce_immunity_type    text;
+  v_opponent_pierce_immunity_expires integer;
   v_player_heal_disabled_expires   integer;
   v_opponent_heal_disabled_expires integer;
   v_player_invulnerable       boolean;
@@ -9054,6 +10310,7 @@ DECLARE
   v_player_bonus_dice_value integer;
   v_player_bonus_status_filter text;
   v_player_stat_mod_target       text;
+  v_player_stat_mod_direction    text;
   v_player_stat_mod_stat         text;
   v_player_stat_mod_value_type   text;
   v_player_stat_mod_flat         integer;
@@ -9106,6 +10363,7 @@ DECLARE
   v_opponent_bonus_dice_value integer;
   v_opponent_bonus_status_filter text;
   v_opponent_stat_mod_target       text;
+  v_opponent_stat_mod_direction    text;
   v_opponent_stat_mod_stat         text;
   v_opponent_stat_mod_value_type   text;
   v_opponent_stat_mod_flat         integer;
@@ -9356,6 +10614,24 @@ BEGIN
   v_opponent_keep_going_count := v_row.opponent_keep_going_count;
   v_player_talent_state := COALESCE(v_row.player_talent_state, '{}'::jsonb);
   v_opponent_talent_state := COALESCE(v_row.opponent_talent_state, '{}'::jsonb);
+  v_player_damage_dot_amount := v_row.player_damage_dot_amount;
+  v_player_damage_dot_expires := v_row.player_damage_dot_expires;
+  v_opponent_damage_dot_amount := v_row.opponent_damage_dot_amount;
+  v_opponent_damage_dot_expires := v_row.opponent_damage_dot_expires;
+  v_player_leech_dot_amount := v_row.player_leech_dot_amount;
+  v_player_leech_dot_expires := v_row.player_leech_dot_expires;
+  v_opponent_leech_dot_amount := v_row.opponent_leech_dot_amount;
+  v_opponent_leech_dot_expires := v_row.opponent_leech_dot_expires;
+  v_player_status_dot_status := v_row.player_status_dot_status;
+  v_player_status_dot_chance := v_row.player_status_dot_chance;
+  v_player_status_dot_expires := v_row.player_status_dot_expires;
+  v_opponent_status_dot_status := v_row.opponent_status_dot_status;
+  v_opponent_status_dot_chance := v_row.opponent_status_dot_chance;
+  v_opponent_status_dot_expires := v_row.opponent_status_dot_expires;
+  v_player_pierce_immunity_type := v_row.player_pierce_immunity_type;
+  v_player_pierce_immunity_expires := v_row.player_pierce_immunity_expires;
+  v_opponent_pierce_immunity_type := v_row.opponent_pierce_immunity_type;
+  v_opponent_pierce_immunity_expires := v_row.opponent_pierce_immunity_expires;
 
   -- Capacité RÉELLEMENT jouée par le joueur ce tour : celle mémorisée s'il
   -- est en cours de préparation (prepare_release, voir plus haut), sinon
@@ -9418,21 +10694,16 @@ BEGIN
     v_opponent_heal_disabled_expires := NULL;
   END IF;
 
-  -- Super efficace : la capacité utilisée doit être du MÊME type que le
-  -- pokémon qui l'utilise, en plus d'être favorable dans la table de types
-  -- (voir même remarque en mode Auto, autobattle_resolve_battle) — recalculé
-  -- CHAQUE round ici (contrairement au mode Auto, figé pour tout le combat)
-  -- puisque la capacité jouée change à chaque tour. Métamorph JOUEUR : copie
-  -- le type et la liste "super efficace" de l'ADVERSAIRE (comme Métamorph
-  -- adversaire copie ceux du joueur ci-dessous) — pas les siens propres.
-  v_player_type_bonus := EXISTS (
-    SELECT 1 FROM (VALUES
-      (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_1 ELSE v_player_species.super_efficace_1 END),
-      (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_2 ELSE v_player_species.super_efficace_2 END),
-      (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_3 ELSE v_player_species.super_efficace_3 END),
-      (CASE WHEN v_is_metamorph THEN v_opponent_species.super_efficace_4 ELSE v_player_species.super_efficace_4 END)
-    ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_opponent_species.type))
-  ) AND lower(trim(v_ability.type)) = lower(trim(CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END));
+  -- Super efficace : TYPE DE LA CAPACITÉ jouée ce round vs TYPE DU DÉFENSEUR
+  -- (voir type_super_effective, même règle qu'en mode Auto) — recalculé CHAQUE
+  -- round ici, la capacité changeant à chaque tour. Le type du défenseur est
+  -- son type EFFECTIF (celui copié par le talent 'transform' le cas échéant),
+  -- exactement celui passé au core pour la météo et pour l'immunité de type
+  -- (type_no_effect, gérée là-bas) : les trois règles jugent le même type.
+  v_player_type_bonus := type_super_effective(
+    v_ability.type,
+    CASE WHEN v_is_opponent_metamorph THEN v_player_species.type ELSE v_opponent_species.type END
+  );
   -- Dégâts de base "espèce" : copie ceux de l'adversaire (SANS bonus XP —
   -- reste une progression personnelle du joueur, jamais copiée, même
   -- principe qu'en mode Auto) au lieu des siens propres.
@@ -9442,19 +10713,13 @@ BEGIN
     * (CASE WHEN v_player_type_bonus THEN 2 ELSE 1 END) + COALESCE(v_ability.degats_base, 0);
   v_player_damage_original := v_player_damage;
 
-  -- Métamorph adversaire : copie le type et la liste "super efficace" du
-  -- pokémon du JOUEUR (comme en mode Auto, autobattle_resolve_battle) — pas
-  -- les siens propres, qui n'ont aucun sens pour Métamorph. Recalculé CHAQUE
-  -- round comme v_player_type_bonus ci-dessus (la capacité change à chaque
-  -- tour, potentiellement piochée dans un movepool différent).
-  v_opponent_type_bonus := EXISTS (
-    SELECT 1 FROM (VALUES
-      (CASE WHEN v_is_opponent_metamorph THEN v_player_species.super_efficace_1 ELSE v_opponent_species.super_efficace_1 END),
-      (CASE WHEN v_is_opponent_metamorph THEN v_player_species.super_efficace_2 ELSE v_opponent_species.super_efficace_2 END),
-      (CASE WHEN v_is_opponent_metamorph THEN v_player_species.super_efficace_3 ELSE v_opponent_species.super_efficace_3 END),
-      (CASE WHEN v_is_opponent_metamorph THEN v_player_species.super_efficace_4 ELSE v_opponent_species.super_efficace_4 END)
-    ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_player_species.type))
-  ) AND lower(trim(v_opponent_ability.type)) = lower(trim(CASE WHEN v_is_opponent_metamorph THEN v_player_species.type ELSE v_opponent_species.type END));
+  -- Même règle côté adverse (type de SA capacité vs type du joueur), recalculée
+  -- elle aussi à chaque round — l'adversaire peut piocher une capacité
+  -- différente d'un tour à l'autre.
+  v_opponent_type_bonus := type_super_effective(
+    v_opponent_ability.type,
+    CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END
+  );
   -- Dégâts de base "espèce" : copie ceux du joueur (SANS son bonus XP,
   -- progression personnelle jamais "copiée" — même principe qu'en mode Auto)
   -- au lieu du dégât de base configuré sur le niveau.
@@ -9474,7 +10739,7 @@ BEGIN
          recoil_type, recoil_min, recoil_max, recoil_percent, invulnerable_next_turn,
          bonus_damage_type, bonus_damage_multiplier, bonus_damage_flat, bonus_damage_min, bonus_damage_max,
          bonus_damage_condition, bonus_damage_condition_dice_value, bonus_damage_status_filter,
-         stat_mod_target, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
+         stat_mod_target, stat_mod_direction, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
          stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
          heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
          stat_mod_type_filter, prevention_duration_turns,
@@ -9485,7 +10750,7 @@ BEGIN
          v_player_recoil_type, v_player_recoil_min, v_player_recoil_max, v_player_recoil_percent, v_player_invuln_grant,
          v_player_bonus_type, v_player_bonus_multiplier, v_player_bonus_flat, v_player_bonus_min, v_player_bonus_max,
          v_player_bonus_condition, v_player_bonus_dice_value, v_player_bonus_status_filter,
-         v_player_stat_mod_target, v_player_stat_mod_stat, v_player_stat_mod_value_type, v_player_stat_mod_flat, v_player_stat_mod_min, v_player_stat_mod_max, v_player_stat_mod_percent,
+         v_player_stat_mod_target, v_player_stat_mod_direction, v_player_stat_mod_stat, v_player_stat_mod_value_type, v_player_stat_mod_flat, v_player_stat_mod_min, v_player_stat_mod_max, v_player_stat_mod_percent,
          v_player_stat_mod_duration_type, v_player_stat_mod_duration_turns, v_player_stat_mod_max_uses,
          v_player_heal_dot_config_amount, v_player_heal_dot_config_turns, v_player_heal_dot_config_type, v_player_heal_dot_config_percent, v_player_cancel_heal_duration, v_player_percent_hp_damage_percent,
          v_player_stat_mod_type_filter, v_player_prevention_duration,
@@ -9503,7 +10768,7 @@ BEGIN
          recoil_type, recoil_min, recoil_max, recoil_percent, invulnerable_next_turn,
          bonus_damage_type, bonus_damage_multiplier, bonus_damage_flat, bonus_damage_min, bonus_damage_max,
          bonus_damage_condition, bonus_damage_condition_dice_value, bonus_damage_status_filter,
-         stat_mod_target, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
+         stat_mod_target, stat_mod_direction, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
          stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
          heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
          stat_mod_type_filter, prevention_duration_turns,
@@ -9514,7 +10779,7 @@ BEGIN
          v_opponent_recoil_type, v_opponent_recoil_min, v_opponent_recoil_max, v_opponent_recoil_percent, v_opponent_invuln_grant,
          v_opponent_bonus_type, v_opponent_bonus_multiplier, v_opponent_bonus_flat, v_opponent_bonus_min, v_opponent_bonus_max,
          v_opponent_bonus_condition, v_opponent_bonus_dice_value, v_opponent_bonus_status_filter,
-         v_opponent_stat_mod_target, v_opponent_stat_mod_stat, v_opponent_stat_mod_value_type, v_opponent_stat_mod_flat, v_opponent_stat_mod_min, v_opponent_stat_mod_max, v_opponent_stat_mod_percent,
+         v_opponent_stat_mod_target, v_opponent_stat_mod_direction, v_opponent_stat_mod_stat, v_opponent_stat_mod_value_type, v_opponent_stat_mod_flat, v_opponent_stat_mod_min, v_opponent_stat_mod_max, v_opponent_stat_mod_percent,
          v_opponent_stat_mod_duration_type, v_opponent_stat_mod_duration_turns, v_opponent_stat_mod_max_uses,
          v_opponent_heal_dot_config_amount, v_opponent_heal_dot_config_turns, v_opponent_heal_dot_config_type, v_opponent_heal_dot_config_percent, v_opponent_cancel_heal_duration, v_opponent_percent_hp_damage_percent,
          v_opponent_stat_mod_type_filter, v_opponent_prevention_duration,
@@ -9558,6 +10823,17 @@ BEGIN
   v_player_state.keep_going_remaining := v_player_keep_going_remaining;
   v_player_state.keep_going_count := v_player_keep_going_count;
   v_player_state.talent_state := v_player_talent_state;
+  -- Effets persistants offensifs subis et perce-immunité accordé (colonnes
+  -- player_*/opponent_* de autobattle_manual_battles, lues plus haut).
+  v_player_state.damage_dot_amount := v_player_damage_dot_amount;
+  v_player_state.damage_dot_expires := v_player_damage_dot_expires;
+  v_player_state.leech_dot_amount := v_player_leech_dot_amount;
+  v_player_state.leech_dot_expires := v_player_leech_dot_expires;
+  v_player_state.status_dot_status := v_player_status_dot_status;
+  v_player_state.status_dot_chance := v_player_status_dot_chance;
+  v_player_state.status_dot_expires := v_player_status_dot_expires;
+  v_player_state.pierce_immunity_type := v_player_pierce_immunity_type;
+  v_player_state.pierce_immunity_expires := v_player_pierce_immunity_expires;
 
   v_opponent_state.hp := v_opponent_hp;
   v_opponent_state.max_hp := v_level.opponent_hp;
@@ -9582,6 +10858,15 @@ BEGIN
   v_opponent_state.keep_going_remaining := v_opponent_keep_going_remaining;
   v_opponent_state.keep_going_count := v_opponent_keep_going_count;
   v_opponent_state.talent_state := v_opponent_talent_state;
+  v_opponent_state.damage_dot_amount := v_opponent_damage_dot_amount;
+  v_opponent_state.damage_dot_expires := v_opponent_damage_dot_expires;
+  v_opponent_state.leech_dot_amount := v_opponent_leech_dot_amount;
+  v_opponent_state.leech_dot_expires := v_opponent_leech_dot_expires;
+  v_opponent_state.status_dot_status := v_opponent_status_dot_status;
+  v_opponent_state.status_dot_chance := v_opponent_status_dot_chance;
+  v_opponent_state.status_dot_expires := v_opponent_status_dot_expires;
+  v_opponent_state.pierce_immunity_type := v_opponent_pierce_immunity_type;
+  v_opponent_state.pierce_immunity_expires := v_opponent_pierce_immunity_expires;
 
   v_player_ability_cfg.ability_nom := v_effective_player_ability_nom;
   v_player_ability_cfg.base_damage := v_player_damage;
@@ -9612,6 +10897,7 @@ BEGIN
   v_player_ability_cfg.bonus_dice_value := v_player_bonus_dice_value;
   v_player_ability_cfg.bonus_status_filter := v_player_bonus_status_filter;
   v_player_ability_cfg.stat_mod_target := v_player_stat_mod_target;
+  v_player_ability_cfg.stat_mod_direction := v_player_stat_mod_direction;
   v_player_ability_cfg.stat_mod_stat := v_player_stat_mod_stat;
   v_player_ability_cfg.stat_mod_value_type := v_player_stat_mod_value_type;
   v_player_ability_cfg.stat_mod_flat := v_player_stat_mod_flat;
@@ -9641,6 +10927,23 @@ BEGIN
   v_player_ability_cfg.weather_chance := v_player_weather_chance;
   v_player_ability_cfg.stat_mod_weather_condition := v_player_stat_mod_weather_condition;
   v_player_ability_cfg.stat_mod_weather_id := v_player_stat_mod_weather_id;
+  -- Effets ajoutés en dernier (dégâts/vol de vie persistants, perce-immunité,
+  -- statut exigé, condition de poids, purges) : lus directement dans les
+  -- champs du type partagé, sans variable intermédiaire.
+  SELECT damage_dot_amount, damage_dot_duration_turns, damage_dot_type, damage_dot_percent,
+         leech_dot_amount, leech_dot_duration_turns, leech_dot_type, leech_dot_percent,
+         pierce_immunity_type, pierce_immunity_turns, requires_target_status,
+         bonus_damage_weight_target, bonus_damage_weight_comparison, bonus_damage_weight_percent,
+         clear_damage_dot, clear_weather, cure_status,
+         status_dot_status, status_dot_chance, status_dot_duration_turns, percent_hp_damage_basis
+    INTO v_player_ability_cfg.damage_dot_config_amount, v_player_ability_cfg.damage_dot_config_turns, v_player_ability_cfg.damage_dot_config_type, v_player_ability_cfg.damage_dot_config_percent,
+         v_player_ability_cfg.leech_dot_config_amount, v_player_ability_cfg.leech_dot_config_turns, v_player_ability_cfg.leech_dot_config_type, v_player_ability_cfg.leech_dot_config_percent,
+         v_player_ability_cfg.pierce_immunity_type, v_player_ability_cfg.pierce_immunity_turns, v_player_ability_cfg.requires_target_status,
+         v_player_ability_cfg.bonus_weight_target, v_player_ability_cfg.bonus_weight_comparison, v_player_ability_cfg.bonus_weight_percent,
+         v_player_ability_cfg.clear_damage_dot, v_player_ability_cfg.clear_weather, v_player_ability_cfg.cure_status,
+         v_player_ability_cfg.status_dot_config_status, v_player_ability_cfg.status_dot_config_chance, v_player_ability_cfg.status_dot_config_turns,
+         v_player_ability_cfg.percent_hp_damage_basis
+    FROM autobattle_ability_rules WHERE attack_nom = v_effective_player_ability_nom;
 
   v_opponent_ability_cfg.ability_nom := v_opponent_ability_nom_round;
   v_opponent_ability_cfg.base_damage := v_opponent_damage;
@@ -9671,6 +10974,7 @@ BEGIN
   v_opponent_ability_cfg.bonus_dice_value := v_opponent_bonus_dice_value;
   v_opponent_ability_cfg.bonus_status_filter := v_opponent_bonus_status_filter;
   v_opponent_ability_cfg.stat_mod_target := v_opponent_stat_mod_target;
+  v_opponent_ability_cfg.stat_mod_direction := v_opponent_stat_mod_direction;
   v_opponent_ability_cfg.stat_mod_stat := v_opponent_stat_mod_stat;
   v_opponent_ability_cfg.stat_mod_value_type := v_opponent_stat_mod_value_type;
   v_opponent_ability_cfg.stat_mod_flat := v_opponent_stat_mod_flat;
@@ -9700,17 +11004,34 @@ BEGIN
   v_opponent_ability_cfg.weather_chance := v_opponent_weather_chance;
   v_opponent_ability_cfg.stat_mod_weather_condition := v_opponent_stat_mod_weather_condition;
   v_opponent_ability_cfg.stat_mod_weather_id := v_opponent_stat_mod_weather_id;
+  -- Voir le même complément côté joueur juste au-dessus.
+  SELECT damage_dot_amount, damage_dot_duration_turns, damage_dot_type, damage_dot_percent,
+         leech_dot_amount, leech_dot_duration_turns, leech_dot_type, leech_dot_percent,
+         pierce_immunity_type, pierce_immunity_turns, requires_target_status,
+         bonus_damage_weight_target, bonus_damage_weight_comparison, bonus_damage_weight_percent,
+         clear_damage_dot, clear_weather, cure_status,
+         status_dot_status, status_dot_chance, status_dot_duration_turns, percent_hp_damage_basis
+    INTO v_opponent_ability_cfg.damage_dot_config_amount, v_opponent_ability_cfg.damage_dot_config_turns, v_opponent_ability_cfg.damage_dot_config_type, v_opponent_ability_cfg.damage_dot_config_percent,
+         v_opponent_ability_cfg.leech_dot_config_amount, v_opponent_ability_cfg.leech_dot_config_turns, v_opponent_ability_cfg.leech_dot_config_type, v_opponent_ability_cfg.leech_dot_config_percent,
+         v_opponent_ability_cfg.pierce_immunity_type, v_opponent_ability_cfg.pierce_immunity_turns, v_opponent_ability_cfg.requires_target_status,
+         v_opponent_ability_cfg.bonus_weight_target, v_opponent_ability_cfg.bonus_weight_comparison, v_opponent_ability_cfg.bonus_weight_percent,
+         v_opponent_ability_cfg.clear_damage_dot, v_opponent_ability_cfg.clear_weather, v_opponent_ability_cfg.cure_status,
+         v_opponent_ability_cfg.status_dot_config_status, v_opponent_ability_cfg.status_dot_config_chance, v_opponent_ability_cfg.status_dot_config_turns,
+         v_opponent_ability_cfg.percent_hp_damage_basis
+    FROM autobattle_ability_rules WHERE attack_nom = v_opponent_ability_nom_round;
 
   -- Météo : id en cours (persisté sur la ligne de combat), bascule du mode, et
   -- types d'espèce EFFECTIFS des deux camps — un pokémon transformé (talent
   -- 'transform') a copié le type de l'autre, la météo doit le voir ainsi.
+  -- Poids des deux espèces : le talent 'transform' ne copie pas le poids.
   v_round_result := autobattle_resolve_round_core(
     v_turn_no, v_round_no, v_first_attacker,
     v_player_state, v_opponent_state, v_player_ability_cfg, v_opponent_ability_cfg,
     v_precision_enabled, v_player_talents, v_opponent_talents,
     v_row.weather_id, v_weather_enabled,
     CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END,
-    CASE WHEN v_is_opponent_metamorph THEN v_player_species.type ELSE v_opponent_species.type END
+    CASE WHEN v_is_opponent_metamorph THEN v_player_species.type ELSE v_opponent_species.type END,
+    v_player_species.poids, v_opponent_species.poids
   );
 
   v_player_hp := (v_round_result.player_state).hp;
@@ -9735,6 +11056,15 @@ BEGIN
   v_player_keep_going_remaining := COALESCE((v_round_result.player_state).keep_going_remaining, 0);
   v_player_keep_going_count := COALESCE((v_round_result.player_state).keep_going_count, 0);
   v_player_talent_state := COALESCE((v_round_result.player_state).talent_state, '[]'::jsonb);
+  v_player_damage_dot_amount := (v_round_result.player_state).damage_dot_amount;
+  v_player_damage_dot_expires := (v_round_result.player_state).damage_dot_expires;
+  v_player_leech_dot_amount := (v_round_result.player_state).leech_dot_amount;
+  v_player_leech_dot_expires := (v_round_result.player_state).leech_dot_expires;
+  v_player_status_dot_status := (v_round_result.player_state).status_dot_status;
+  v_player_status_dot_chance := (v_round_result.player_state).status_dot_chance;
+  v_player_status_dot_expires := (v_round_result.player_state).status_dot_expires;
+  v_player_pierce_immunity_type := (v_round_result.player_state).pierce_immunity_type;
+  v_player_pierce_immunity_expires := (v_round_result.player_state).pierce_immunity_expires;
 
   v_opponent_hp := (v_round_result.opponent_state).hp;
   v_opponent_status := (v_round_result.opponent_state).status;
@@ -9758,6 +11088,15 @@ BEGIN
   v_opponent_keep_going_remaining := COALESCE((v_round_result.opponent_state).keep_going_remaining, 0);
   v_opponent_keep_going_count := COALESCE((v_round_result.opponent_state).keep_going_count, 0);
   v_opponent_talent_state := COALESCE((v_round_result.opponent_state).talent_state, '[]'::jsonb);
+  v_opponent_damage_dot_amount := (v_round_result.opponent_state).damage_dot_amount;
+  v_opponent_damage_dot_expires := (v_round_result.opponent_state).damage_dot_expires;
+  v_opponent_leech_dot_amount := (v_round_result.opponent_state).leech_dot_amount;
+  v_opponent_leech_dot_expires := (v_round_result.opponent_state).leech_dot_expires;
+  v_opponent_status_dot_status := (v_round_result.opponent_state).status_dot_status;
+  v_opponent_status_dot_chance := (v_round_result.opponent_state).status_dot_chance;
+  v_opponent_status_dot_expires := (v_round_result.opponent_state).status_dot_expires;
+  v_opponent_pierce_immunity_type := (v_round_result.opponent_state).pierce_immunity_type;
+  v_opponent_pierce_immunity_expires := (v_round_result.opponent_state).pierce_immunity_expires;
 
   v_turns := v_round_result.turns;
   v_outcome := v_round_result.outcome;
@@ -9873,7 +11212,13 @@ BEGIN
     -- copié pour l'adversaire (seules les capacités l'étaient).
     'opponent_image_override', CASE WHEN v_is_opponent_metamorph THEN v_player_species.image_miniature ELSE NULL END,
     -- Cas Métamorph JOUEUR : sprite de l'adversaire copié pour ce combat.
-    'player_image_override', v_player_image_override
+    'player_image_override', v_player_image_override,
+    -- Perce-immunité encore actif AU PROCHAIN TOUR côté joueur (voir
+    -- pierce_immunity_*) : le client s'en sert pour dégriser les capacités que
+    -- l'immunité de ce type bloquerait normalement dans sa grille.
+    'player_pierce_immunity_type', CASE
+      WHEN v_player_pierce_immunity_expires IS NOT NULL AND v_player_pierce_immunity_expires >= v_round_no + 1
+        THEN v_player_pierce_immunity_type ELSE NULL END
   );
 
   IF v_outcome IS NULL THEN
@@ -9900,6 +11245,16 @@ BEGIN
       player_keep_going_remaining = v_player_keep_going_remaining, opponent_keep_going_remaining = v_opponent_keep_going_remaining,
       player_keep_going_count = v_player_keep_going_count, opponent_keep_going_count = v_opponent_keep_going_count,
       player_talent_state = v_player_talent_state, opponent_talent_state = v_opponent_talent_state,
+      player_damage_dot_amount = v_player_damage_dot_amount, player_damage_dot_expires = v_player_damage_dot_expires,
+      opponent_damage_dot_amount = v_opponent_damage_dot_amount, opponent_damage_dot_expires = v_opponent_damage_dot_expires,
+      player_leech_dot_amount = v_player_leech_dot_amount, player_leech_dot_expires = v_player_leech_dot_expires,
+      opponent_leech_dot_amount = v_opponent_leech_dot_amount, opponent_leech_dot_expires = v_opponent_leech_dot_expires,
+      player_status_dot_status = v_player_status_dot_status, player_status_dot_chance = v_player_status_dot_chance,
+      player_status_dot_expires = v_player_status_dot_expires,
+      opponent_status_dot_status = v_opponent_status_dot_status, opponent_status_dot_chance = v_opponent_status_dot_chance,
+      opponent_status_dot_expires = v_opponent_status_dot_expires,
+      player_pierce_immunity_type = v_player_pierce_immunity_type, player_pierce_immunity_expires = v_player_pierce_immunity_expires,
+      opponent_pierce_immunity_type = v_opponent_pierce_immunity_type, opponent_pierce_immunity_expires = v_opponent_pierce_immunity_expires,
       opponent_ability_cycle_index = v_opponent_ability_cycle_index,
       player_stat_mod_uses = v_player_stat_mod_uses, opponent_stat_mod_uses = v_opponent_stat_mod_uses,
       weather_id = v_round_result.weather_id,
@@ -10534,6 +11889,27 @@ ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS defender_keep_going_remaining i
 ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS attacker_keep_going_count integer NOT NULL DEFAULT 0;
 ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS defender_keep_going_count integer NOT NULL DEFAULT 0;
 
+-- Effets persistants offensifs subis / perce-immunité accordé (voir les mêmes
+-- colonnes sur autobattle_manual_battles).
+ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS attacker_damage_dot_amount integer;
+ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS attacker_damage_dot_expires integer;
+ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS defender_damage_dot_amount integer;
+ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS defender_damage_dot_expires integer;
+ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS attacker_leech_dot_amount integer;
+ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS attacker_leech_dot_expires integer;
+ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS defender_leech_dot_amount integer;
+ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS defender_leech_dot_expires integer;
+ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS attacker_pierce_immunity_type text;
+ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS attacker_pierce_immunity_expires integer;
+ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS defender_pierce_immunity_type text;
+ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS defender_pierce_immunity_expires integer;
+ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS attacker_status_dot_status text;
+ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS attacker_status_dot_chance integer;
+ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS attacker_status_dot_expires integer;
+ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS defender_status_dot_status text;
+ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS defender_status_dot_chance integer;
+ALTER TABLE pvp_battles ADD COLUMN IF NOT EXISTS defender_status_dot_expires integer;
+
 -- Piles de modificateurs de stat (voir autobattle_mod_total) : remplacent les
 -- colonnes *_damage_mod_amount/_expires/_type_filter et *_precision_mod_amount/
 -- _expires, qui ne portaient qu'UN modificateur écrasable par camp et par stat.
@@ -11056,21 +12432,17 @@ BEGIN
   END IF;
   SELECT * INTO v_d_ability FROM attacks WHERE nom = v_d_ability_nom_round;
 
-  v_a_type_bonus := EXISTS (
-    SELECT 1 FROM (VALUES
-      (v_a_species.super_efficace_1), (v_a_species.super_efficace_2),
-      (v_a_species.super_efficace_3), (v_a_species.super_efficace_4)
-    ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_d_species.type))
-  ) AND lower(trim(v_ability.type)) = lower(trim(v_a_species.type));
+  -- Super efficace : TYPE DE LA CAPACITÉ jouée vs TYPE DU DÉFENSEUR (voir
+  -- type_super_effective) — plus les colonnes super_efficace_1..4 de l'espèce,
+  -- et plus de condition « la capacité doit être du type de son lanceur ».
+  -- L'immunité de type (type_no_effect) est gérée par le core, qui reçoit déjà
+  -- les deux types d'espèce.
+  v_a_type_bonus := type_super_effective(v_ability.type, v_d_species.type);
   v_a_damage_species_xp := COALESCE(v_a_species.degats_base, 0) + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'DMG');
   v_a_damage := v_a_damage_species_xp * (CASE WHEN v_a_type_bonus THEN 2 ELSE 1 END) + COALESCE(v_ability.degats_base, 0);
 
-  v_d_type_bonus := EXISTS (
-    SELECT 1 FROM (VALUES
-      (v_d_species.super_efficace_1), (v_d_species.super_efficace_2),
-      (v_d_species.super_efficace_3), (v_d_species.super_efficace_4)
-    ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_a_species.type))
-  ) AND lower(trim(v_d_ability.type)) = lower(trim(v_d_species.type));
+  -- Même règle côté défenseur (type de SA capacité vs type de l'attaquant).
+  v_d_type_bonus := type_super_effective(v_d_ability.type, v_a_species.type);
   -- Figé au dépôt du défi (voir pvp_challenges.damage_species_xp), pas
   -- recalculé depuis l'XP courante du pokémon réel du défenseur.
   v_d_damage_species_xp := v_challenge.damage_species_xp;
@@ -11109,6 +12481,17 @@ BEGIN
   v_a_state.keep_going_remaining := v_row.attacker_keep_going_remaining;
   v_a_state.keep_going_count := v_row.attacker_keep_going_count;
   v_a_state.talent_state := COALESCE(v_row.attacker_talent_state, '[]'::jsonb);
+  -- Effets persistants offensifs subis et perce-immunité accordé (voir les
+  -- mêmes colonnes côté Combat Manuel, autobattle_resolve_manual_round).
+  v_a_state.damage_dot_amount := v_row.attacker_damage_dot_amount;
+  v_a_state.damage_dot_expires := v_row.attacker_damage_dot_expires;
+  v_a_state.leech_dot_amount := v_row.attacker_leech_dot_amount;
+  v_a_state.leech_dot_expires := v_row.attacker_leech_dot_expires;
+  v_a_state.status_dot_status := v_row.attacker_status_dot_status;
+  v_a_state.status_dot_chance := v_row.attacker_status_dot_chance;
+  v_a_state.status_dot_expires := v_row.attacker_status_dot_expires;
+  v_a_state.pierce_immunity_type := v_row.attacker_pierce_immunity_type;
+  v_a_state.pierce_immunity_expires := v_row.attacker_pierce_immunity_expires;
 
   v_d_state.hp := v_row.defender_hp;
   v_d_state.max_hp := v_challenge.max_hp;
@@ -11133,12 +12516,21 @@ BEGIN
   v_d_state.keep_going_remaining := v_row.defender_keep_going_remaining;
   v_d_state.keep_going_count := v_row.defender_keep_going_count;
   v_d_state.talent_state := COALESCE(v_row.defender_talent_state, '[]'::jsonb);
+  v_d_state.damage_dot_amount := v_row.defender_damage_dot_amount;
+  v_d_state.damage_dot_expires := v_row.defender_damage_dot_expires;
+  v_d_state.leech_dot_amount := v_row.defender_leech_dot_amount;
+  v_d_state.leech_dot_expires := v_row.defender_leech_dot_expires;
+  v_d_state.status_dot_status := v_row.defender_status_dot_status;
+  v_d_state.status_dot_chance := v_row.defender_status_dot_chance;
+  v_d_state.status_dot_expires := v_row.defender_status_dot_expires;
+  v_d_state.pierce_immunity_type := v_row.defender_pierce_immunity_type;
+  v_d_state.pierce_immunity_expires := v_row.defender_pierce_immunity_expires;
 
   SELECT turn_effect, repeat_max_iterations, heal_type, heal_amount, heal_percent, status_reversed,
          recoil_type, recoil_min, recoil_max, recoil_percent, invulnerable_next_turn,
          bonus_damage_type, bonus_damage_multiplier, bonus_damage_flat, bonus_damage_min, bonus_damage_max,
          bonus_damage_condition, bonus_damage_condition_dice_value, bonus_damage_status_filter,
-         stat_mod_target, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
+         stat_mod_target, stat_mod_direction, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
          stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
          heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
          stat_mod_type_filter, prevention_duration_turns,
@@ -11149,7 +12541,7 @@ BEGIN
          v_a_ability_cfg.recoil_type, v_a_ability_cfg.recoil_min, v_a_ability_cfg.recoil_max, v_a_ability_cfg.recoil_percent, v_a_ability_cfg.invuln_grant,
          v_a_ability_cfg.bonus_type, v_a_ability_cfg.bonus_multiplier, v_a_ability_cfg.bonus_flat, v_a_ability_cfg.bonus_min, v_a_ability_cfg.bonus_max,
          v_a_ability_cfg.bonus_condition, v_a_ability_cfg.bonus_dice_value, v_a_ability_cfg.bonus_status_filter,
-         v_a_ability_cfg.stat_mod_target, v_a_ability_cfg.stat_mod_stat, v_a_ability_cfg.stat_mod_value_type, v_a_ability_cfg.stat_mod_flat, v_a_ability_cfg.stat_mod_min, v_a_ability_cfg.stat_mod_max, v_a_ability_cfg.stat_mod_percent,
+         v_a_ability_cfg.stat_mod_target, v_a_ability_cfg.stat_mod_direction, v_a_ability_cfg.stat_mod_stat, v_a_ability_cfg.stat_mod_value_type, v_a_ability_cfg.stat_mod_flat, v_a_ability_cfg.stat_mod_min, v_a_ability_cfg.stat_mod_max, v_a_ability_cfg.stat_mod_percent,
          v_a_ability_cfg.stat_mod_duration_type, v_a_ability_cfg.stat_mod_duration_turns, v_a_ability_cfg.stat_mod_max_uses,
          v_a_ability_cfg.heal_dot_config_amount, v_a_ability_cfg.heal_dot_config_turns, v_a_ability_cfg.heal_dot_config_type, v_a_ability_cfg.heal_dot_config_percent, v_a_ability_cfg.cancel_heal_duration, v_a_ability_cfg.percent_hp_damage_percent,
          v_a_ability_cfg.stat_mod_type_filter, v_a_ability_cfg.prevention_duration,
@@ -11157,6 +12549,22 @@ BEGIN
          v_a_ability_cfg.heal_dot_until_awake, v_a_ability_cfg.ignore_status_block,
          v_a_ability_cfg.weather_id, v_a_ability_cfg.weather_chance,
          v_a_ability_cfg.stat_mod_weather_condition, v_a_ability_cfg.stat_mod_weather_id
+    FROM autobattle_ability_rules WHERE attack_nom = v_effective_a_ability_nom;
+  -- Effets ajoutés en dernier (dégâts/vol de vie persistants, perce-immunité,
+  -- statut exigé, condition de poids, purges) — même ligne de règle.
+  SELECT damage_dot_amount, damage_dot_duration_turns, damage_dot_type, damage_dot_percent,
+         leech_dot_amount, leech_dot_duration_turns, leech_dot_type, leech_dot_percent,
+         pierce_immunity_type, pierce_immunity_turns, requires_target_status,
+         bonus_damage_weight_target, bonus_damage_weight_comparison, bonus_damage_weight_percent,
+         clear_damage_dot, clear_weather, cure_status,
+         status_dot_status, status_dot_chance, status_dot_duration_turns, percent_hp_damage_basis
+    INTO v_a_ability_cfg.damage_dot_config_amount, v_a_ability_cfg.damage_dot_config_turns, v_a_ability_cfg.damage_dot_config_type, v_a_ability_cfg.damage_dot_config_percent,
+         v_a_ability_cfg.leech_dot_config_amount, v_a_ability_cfg.leech_dot_config_turns, v_a_ability_cfg.leech_dot_config_type, v_a_ability_cfg.leech_dot_config_percent,
+         v_a_ability_cfg.pierce_immunity_type, v_a_ability_cfg.pierce_immunity_turns, v_a_ability_cfg.requires_target_status,
+         v_a_ability_cfg.bonus_weight_target, v_a_ability_cfg.bonus_weight_comparison, v_a_ability_cfg.bonus_weight_percent,
+         v_a_ability_cfg.clear_damage_dot, v_a_ability_cfg.clear_weather, v_a_ability_cfg.cure_status,
+         v_a_ability_cfg.status_dot_config_status, v_a_ability_cfg.status_dot_config_chance, v_a_ability_cfg.status_dot_config_turns,
+         v_a_ability_cfg.percent_hp_damage_basis
     FROM autobattle_ability_rules WHERE attack_nom = v_effective_a_ability_nom;
   v_a_ability_cfg.status_reversed := COALESCE(v_a_ability_cfg.status_reversed, false);
   v_a_ability_cfg.invuln_grant := COALESCE(v_a_ability_cfg.invuln_grant, false);
@@ -11175,7 +12583,7 @@ BEGIN
          recoil_type, recoil_min, recoil_max, recoil_percent, invulnerable_next_turn,
          bonus_damage_type, bonus_damage_multiplier, bonus_damage_flat, bonus_damage_min, bonus_damage_max,
          bonus_damage_condition, bonus_damage_condition_dice_value, bonus_damage_status_filter,
-         stat_mod_target, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
+         stat_mod_target, stat_mod_direction, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
          stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
          heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
          stat_mod_type_filter, prevention_duration_turns,
@@ -11186,7 +12594,7 @@ BEGIN
          v_d_ability_cfg.recoil_type, v_d_ability_cfg.recoil_min, v_d_ability_cfg.recoil_max, v_d_ability_cfg.recoil_percent, v_d_ability_cfg.invuln_grant,
          v_d_ability_cfg.bonus_type, v_d_ability_cfg.bonus_multiplier, v_d_ability_cfg.bonus_flat, v_d_ability_cfg.bonus_min, v_d_ability_cfg.bonus_max,
          v_d_ability_cfg.bonus_condition, v_d_ability_cfg.bonus_dice_value, v_d_ability_cfg.bonus_status_filter,
-         v_d_ability_cfg.stat_mod_target, v_d_ability_cfg.stat_mod_stat, v_d_ability_cfg.stat_mod_value_type, v_d_ability_cfg.stat_mod_flat, v_d_ability_cfg.stat_mod_min, v_d_ability_cfg.stat_mod_max, v_d_ability_cfg.stat_mod_percent,
+         v_d_ability_cfg.stat_mod_target, v_d_ability_cfg.stat_mod_direction, v_d_ability_cfg.stat_mod_stat, v_d_ability_cfg.stat_mod_value_type, v_d_ability_cfg.stat_mod_flat, v_d_ability_cfg.stat_mod_min, v_d_ability_cfg.stat_mod_max, v_d_ability_cfg.stat_mod_percent,
          v_d_ability_cfg.stat_mod_duration_type, v_d_ability_cfg.stat_mod_duration_turns, v_d_ability_cfg.stat_mod_max_uses,
          v_d_ability_cfg.heal_dot_config_amount, v_d_ability_cfg.heal_dot_config_turns, v_d_ability_cfg.heal_dot_config_type, v_d_ability_cfg.heal_dot_config_percent, v_d_ability_cfg.cancel_heal_duration, v_d_ability_cfg.percent_hp_damage_percent,
          v_d_ability_cfg.stat_mod_type_filter, v_d_ability_cfg.prevention_duration,
@@ -11194,6 +12602,21 @@ BEGIN
          v_d_ability_cfg.heal_dot_until_awake, v_d_ability_cfg.ignore_status_block,
          v_d_ability_cfg.weather_id, v_d_ability_cfg.weather_chance,
          v_d_ability_cfg.stat_mod_weather_condition, v_d_ability_cfg.stat_mod_weather_id
+    FROM autobattle_ability_rules WHERE attack_nom = v_d_ability_nom_round;
+  -- Voir le même complément côté attaquant juste au-dessus.
+  SELECT damage_dot_amount, damage_dot_duration_turns, damage_dot_type, damage_dot_percent,
+         leech_dot_amount, leech_dot_duration_turns, leech_dot_type, leech_dot_percent,
+         pierce_immunity_type, pierce_immunity_turns, requires_target_status,
+         bonus_damage_weight_target, bonus_damage_weight_comparison, bonus_damage_weight_percent,
+         clear_damage_dot, clear_weather, cure_status,
+         status_dot_status, status_dot_chance, status_dot_duration_turns, percent_hp_damage_basis
+    INTO v_d_ability_cfg.damage_dot_config_amount, v_d_ability_cfg.damage_dot_config_turns, v_d_ability_cfg.damage_dot_config_type, v_d_ability_cfg.damage_dot_config_percent,
+         v_d_ability_cfg.leech_dot_config_amount, v_d_ability_cfg.leech_dot_config_turns, v_d_ability_cfg.leech_dot_config_type, v_d_ability_cfg.leech_dot_config_percent,
+         v_d_ability_cfg.pierce_immunity_type, v_d_ability_cfg.pierce_immunity_turns, v_d_ability_cfg.requires_target_status,
+         v_d_ability_cfg.bonus_weight_target, v_d_ability_cfg.bonus_weight_comparison, v_d_ability_cfg.bonus_weight_percent,
+         v_d_ability_cfg.clear_damage_dot, v_d_ability_cfg.clear_weather, v_d_ability_cfg.cure_status,
+         v_d_ability_cfg.status_dot_config_status, v_d_ability_cfg.status_dot_config_chance, v_d_ability_cfg.status_dot_config_turns,
+         v_d_ability_cfg.percent_hp_damage_basis
     FROM autobattle_ability_rules WHERE attack_nom = v_d_ability_nom_round;
   v_d_ability_cfg.status_reversed := COALESCE(v_d_ability_cfg.status_reversed, false);
   v_d_ability_cfg.invuln_grant := COALESCE(v_d_ability_cfg.invuln_grant, false);
@@ -11221,7 +12644,9 @@ BEGIN
     -- Météo : id persisté sur la ligne de combat, bascule du mode, et types
     -- d'espèce des deux camps (le PvP n'a jamais géré le talent 'transform',
     -- les types sont donc ceux des espèces telles quelles).
-    v_row.weather_id, v_weather_enabled, v_a_species.type, v_d_species.type
+    v_row.weather_id, v_weather_enabled, v_a_species.type, v_d_species.type,
+    -- Poids des deux espèces (voir la condition de dégâts 'weight_ratio').
+    v_a_species.poids, v_d_species.poids
   );
 
   -- Voir autobattle_resolve_manual_round : un round peut se terminer avant que
@@ -11263,7 +12688,13 @@ BEGIN
       WHEN (v_round_result.player_state).preparing THEN (v_round_result.player_state).preparing_ability_nom
       WHEN (v_round_result.player_state).skip_pending THEN v_effective_a_ability_nom
       WHEN (v_round_result.player_state).keep_going_ability_nom IS NOT NULL THEN (v_round_result.player_state).keep_going_ability_nom
-      ELSE NULL END
+      ELSE NULL END,
+    -- Perce-immunité encore actif au prochain tour côté joueur (voir le même
+    -- champ dans autobattle_resolve_manual_round).
+    'player_pierce_immunity_type', CASE
+      WHEN (v_round_result.player_state).pierce_immunity_expires IS NOT NULL
+       AND (v_round_result.player_state).pierce_immunity_expires >= v_round_result.round_no + 1
+        THEN (v_round_result.player_state).pierce_immunity_type ELSE NULL END
   );
 
   IF v_round_result.outcome IS NULL THEN
@@ -11290,6 +12721,17 @@ BEGIN
       attacker_keep_going_remaining = COALESCE((v_round_result.player_state).keep_going_remaining, 0), defender_keep_going_remaining = COALESCE((v_round_result.opponent_state).keep_going_remaining, 0),
       attacker_keep_going_count = COALESCE((v_round_result.player_state).keep_going_count, 0), defender_keep_going_count = COALESCE((v_round_result.opponent_state).keep_going_count, 0),
       attacker_talent_state = COALESCE((v_round_result.player_state).talent_state, '[]'::jsonb), defender_talent_state = COALESCE((v_round_result.opponent_state).talent_state, '[]'::jsonb),
+      -- Effets persistants offensifs subis et perce-immunité accordé.
+      attacker_damage_dot_amount = (v_round_result.player_state).damage_dot_amount, attacker_damage_dot_expires = (v_round_result.player_state).damage_dot_expires,
+      defender_damage_dot_amount = (v_round_result.opponent_state).damage_dot_amount, defender_damage_dot_expires = (v_round_result.opponent_state).damage_dot_expires,
+      attacker_leech_dot_amount = (v_round_result.player_state).leech_dot_amount, attacker_leech_dot_expires = (v_round_result.player_state).leech_dot_expires,
+      defender_leech_dot_amount = (v_round_result.opponent_state).leech_dot_amount, defender_leech_dot_expires = (v_round_result.opponent_state).leech_dot_expires,
+      attacker_status_dot_status = (v_round_result.player_state).status_dot_status, attacker_status_dot_chance = (v_round_result.player_state).status_dot_chance,
+      attacker_status_dot_expires = (v_round_result.player_state).status_dot_expires,
+      defender_status_dot_status = (v_round_result.opponent_state).status_dot_status, defender_status_dot_chance = (v_round_result.opponent_state).status_dot_chance,
+      defender_status_dot_expires = (v_round_result.opponent_state).status_dot_expires,
+      attacker_pierce_immunity_type = (v_round_result.player_state).pierce_immunity_type, attacker_pierce_immunity_expires = (v_round_result.player_state).pierce_immunity_expires,
+      defender_pierce_immunity_type = (v_round_result.opponent_state).pierce_immunity_type, defender_pierce_immunity_expires = (v_round_result.opponent_state).pierce_immunity_expires,
       -- Le camp qui a gagné une action supplémentaire reprend la main au début
       -- du round suivant (voir autobattle_round_result.next_first_attacker).
       first_attacker = CASE WHEN COALESCE(v_round_result.next_first_attacker, 'player') = 'player' THEN 'attacker' ELSE 'defender' END,
@@ -11533,6 +12975,27 @@ ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS attacker_keep_going_remai
 ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS defender_keep_going_remaining integer NOT NULL DEFAULT 0;
 ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS attacker_keep_going_count integer NOT NULL DEFAULT 0;
 ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS defender_keep_going_count integer NOT NULL DEFAULT 0;
+
+-- Effets persistants offensifs subis / perce-immunité accordé (voir les mêmes
+-- colonnes sur autobattle_manual_battles).
+ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS attacker_damage_dot_amount integer;
+ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS attacker_damage_dot_expires integer;
+ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS defender_damage_dot_amount integer;
+ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS defender_damage_dot_expires integer;
+ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS attacker_leech_dot_amount integer;
+ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS attacker_leech_dot_expires integer;
+ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS defender_leech_dot_amount integer;
+ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS defender_leech_dot_expires integer;
+ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS attacker_pierce_immunity_type text;
+ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS attacker_pierce_immunity_expires integer;
+ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS defender_pierce_immunity_type text;
+ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS defender_pierce_immunity_expires integer;
+ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS attacker_status_dot_status text;
+ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS attacker_status_dot_chance integer;
+ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS attacker_status_dot_expires integer;
+ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS defender_status_dot_status text;
+ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS defender_status_dot_chance integer;
+ALTER TABLE pvp_trial_battles ADD COLUMN IF NOT EXISTS defender_status_dot_expires integer;
 
 -- Piles de modificateurs de stat (voir autobattle_mod_total) : remplacent les
 -- colonnes *_damage_mod_amount/_expires/_type_filter et *_precision_mod_amount/
@@ -11826,24 +13289,20 @@ BEGIN
     RETURN jsonb_build_object('status', 'not_found');
   END IF;
 
-  v_a_type_bonus := EXISTS (
-    SELECT 1 FROM (VALUES
-      (v_a_species.super_efficace_1), (v_a_species.super_efficace_2),
-      (v_a_species.super_efficace_3), (v_a_species.super_efficace_4)
-    ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_d_species.type))
-  ) AND lower(trim(v_ability.type)) = lower(trim(v_a_species.type));
+  -- Super efficace : TYPE DE LA CAPACITÉ jouée vs TYPE DU DÉFENSEUR (voir
+  -- type_super_effective) — plus les colonnes super_efficace_1..4 de l'espèce,
+  -- et plus de condition « la capacité doit être du type de son lanceur ».
+  -- L'immunité de type (type_no_effect) est gérée par le core, qui reçoit déjà
+  -- les deux types d'espèce.
+  v_a_type_bonus := type_super_effective(v_ability.type, v_d_species.type);
   v_a_damage_species_xp := COALESCE(v_a_species.degats_base, 0) + autobattle_xp_bonus(v_pp.pokemon_nom, v_pp.xp, 'DMG');
   v_a_damage := v_a_damage_species_xp * (CASE WHEN v_a_type_bonus THEN 2 ELSE 1 END) + COALESCE(v_ability.degats_base, 0);
 
   -- Le pantin n'a pas de "dégâts d'espèce+XP" (n'existe dans aucun roster,
   -- pas de progression) : ses dégâts viennent UNIQUEMENT de la capacité
   -- choisie par l'admin (censée être "anodine") — voir pvp_config.trial_ability_nom.
-  v_d_type_bonus := EXISTS (
-    SELECT 1 FROM (VALUES
-      (v_d_species.super_efficace_1), (v_d_species.super_efficace_2),
-      (v_d_species.super_efficace_3), (v_d_species.super_efficace_4)
-    ) AS s(val) WHERE lower(trim(val)) = lower(trim(v_a_species.type))
-  ) AND lower(trim(v_d_ability.type)) = lower(trim(v_d_species.type));
+  -- Même règle côté défenseur (type de SA capacité vs type de l'attaquant).
+  v_d_type_bonus := type_super_effective(v_d_ability.type, v_a_species.type);
   v_d_damage := (CASE WHEN v_d_type_bonus THEN 2 ELSE 1 END) * 0 + COALESCE(v_d_ability.degats_base, 0);
 
   SELECT precision_enabled, talents_enabled, weather_enabled
@@ -11875,6 +13334,17 @@ BEGIN
   v_a_state.keep_going_remaining := v_row.attacker_keep_going_remaining;
   v_a_state.keep_going_count := v_row.attacker_keep_going_count;
   v_a_state.talent_state := COALESCE(v_row.attacker_talent_state, '[]'::jsonb);
+  -- Effets persistants offensifs subis et perce-immunité accordé (voir les
+  -- mêmes colonnes côté Combat Manuel, autobattle_resolve_manual_round).
+  v_a_state.damage_dot_amount := v_row.attacker_damage_dot_amount;
+  v_a_state.damage_dot_expires := v_row.attacker_damage_dot_expires;
+  v_a_state.leech_dot_amount := v_row.attacker_leech_dot_amount;
+  v_a_state.leech_dot_expires := v_row.attacker_leech_dot_expires;
+  v_a_state.status_dot_status := v_row.attacker_status_dot_status;
+  v_a_state.status_dot_chance := v_row.attacker_status_dot_chance;
+  v_a_state.status_dot_expires := v_row.attacker_status_dot_expires;
+  v_a_state.pierce_immunity_type := v_row.attacker_pierce_immunity_type;
+  v_a_state.pierce_immunity_expires := v_row.attacker_pierce_immunity_expires;
 
   v_d_state.hp := v_row.defender_hp;
   v_d_state.max_hp := v_row.dummy_max_hp;
@@ -11899,12 +13369,21 @@ BEGIN
   v_d_state.keep_going_remaining := v_row.defender_keep_going_remaining;
   v_d_state.keep_going_count := v_row.defender_keep_going_count;
   v_d_state.talent_state := COALESCE(v_row.defender_talent_state, '[]'::jsonb);
+  v_d_state.damage_dot_amount := v_row.defender_damage_dot_amount;
+  v_d_state.damage_dot_expires := v_row.defender_damage_dot_expires;
+  v_d_state.leech_dot_amount := v_row.defender_leech_dot_amount;
+  v_d_state.leech_dot_expires := v_row.defender_leech_dot_expires;
+  v_d_state.status_dot_status := v_row.defender_status_dot_status;
+  v_d_state.status_dot_chance := v_row.defender_status_dot_chance;
+  v_d_state.status_dot_expires := v_row.defender_status_dot_expires;
+  v_d_state.pierce_immunity_type := v_row.defender_pierce_immunity_type;
+  v_d_state.pierce_immunity_expires := v_row.defender_pierce_immunity_expires;
 
   SELECT turn_effect, repeat_max_iterations, heal_type, heal_amount, heal_percent, status_reversed,
          recoil_type, recoil_min, recoil_max, recoil_percent, invulnerable_next_turn,
          bonus_damage_type, bonus_damage_multiplier, bonus_damage_flat, bonus_damage_min, bonus_damage_max,
          bonus_damage_condition, bonus_damage_condition_dice_value, bonus_damage_status_filter,
-         stat_mod_target, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
+         stat_mod_target, stat_mod_direction, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
          stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
          heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
          stat_mod_type_filter, prevention_duration_turns,
@@ -11915,7 +13394,7 @@ BEGIN
          v_a_ability_cfg.recoil_type, v_a_ability_cfg.recoil_min, v_a_ability_cfg.recoil_max, v_a_ability_cfg.recoil_percent, v_a_ability_cfg.invuln_grant,
          v_a_ability_cfg.bonus_type, v_a_ability_cfg.bonus_multiplier, v_a_ability_cfg.bonus_flat, v_a_ability_cfg.bonus_min, v_a_ability_cfg.bonus_max,
          v_a_ability_cfg.bonus_condition, v_a_ability_cfg.bonus_dice_value, v_a_ability_cfg.bonus_status_filter,
-         v_a_ability_cfg.stat_mod_target, v_a_ability_cfg.stat_mod_stat, v_a_ability_cfg.stat_mod_value_type, v_a_ability_cfg.stat_mod_flat, v_a_ability_cfg.stat_mod_min, v_a_ability_cfg.stat_mod_max, v_a_ability_cfg.stat_mod_percent,
+         v_a_ability_cfg.stat_mod_target, v_a_ability_cfg.stat_mod_direction, v_a_ability_cfg.stat_mod_stat, v_a_ability_cfg.stat_mod_value_type, v_a_ability_cfg.stat_mod_flat, v_a_ability_cfg.stat_mod_min, v_a_ability_cfg.stat_mod_max, v_a_ability_cfg.stat_mod_percent,
          v_a_ability_cfg.stat_mod_duration_type, v_a_ability_cfg.stat_mod_duration_turns, v_a_ability_cfg.stat_mod_max_uses,
          v_a_ability_cfg.heal_dot_config_amount, v_a_ability_cfg.heal_dot_config_turns, v_a_ability_cfg.heal_dot_config_type, v_a_ability_cfg.heal_dot_config_percent, v_a_ability_cfg.cancel_heal_duration, v_a_ability_cfg.percent_hp_damage_percent,
          v_a_ability_cfg.stat_mod_type_filter, v_a_ability_cfg.prevention_duration,
@@ -11923,6 +13402,22 @@ BEGIN
          v_a_ability_cfg.heal_dot_until_awake, v_a_ability_cfg.ignore_status_block,
          v_a_ability_cfg.weather_id, v_a_ability_cfg.weather_chance,
          v_a_ability_cfg.stat_mod_weather_condition, v_a_ability_cfg.stat_mod_weather_id
+    FROM autobattle_ability_rules WHERE attack_nom = v_a_ability_nom_round;
+  -- Effets ajoutés en dernier (dégâts/vol de vie persistants, perce-immunité,
+  -- statut exigé, condition de poids, purges) — même ligne de règle.
+  SELECT damage_dot_amount, damage_dot_duration_turns, damage_dot_type, damage_dot_percent,
+         leech_dot_amount, leech_dot_duration_turns, leech_dot_type, leech_dot_percent,
+         pierce_immunity_type, pierce_immunity_turns, requires_target_status,
+         bonus_damage_weight_target, bonus_damage_weight_comparison, bonus_damage_weight_percent,
+         clear_damage_dot, clear_weather, cure_status,
+         status_dot_status, status_dot_chance, status_dot_duration_turns, percent_hp_damage_basis
+    INTO v_a_ability_cfg.damage_dot_config_amount, v_a_ability_cfg.damage_dot_config_turns, v_a_ability_cfg.damage_dot_config_type, v_a_ability_cfg.damage_dot_config_percent,
+         v_a_ability_cfg.leech_dot_config_amount, v_a_ability_cfg.leech_dot_config_turns, v_a_ability_cfg.leech_dot_config_type, v_a_ability_cfg.leech_dot_config_percent,
+         v_a_ability_cfg.pierce_immunity_type, v_a_ability_cfg.pierce_immunity_turns, v_a_ability_cfg.requires_target_status,
+         v_a_ability_cfg.bonus_weight_target, v_a_ability_cfg.bonus_weight_comparison, v_a_ability_cfg.bonus_weight_percent,
+         v_a_ability_cfg.clear_damage_dot, v_a_ability_cfg.clear_weather, v_a_ability_cfg.cure_status,
+         v_a_ability_cfg.status_dot_config_status, v_a_ability_cfg.status_dot_config_chance, v_a_ability_cfg.status_dot_config_turns,
+         v_a_ability_cfg.percent_hp_damage_basis
     FROM autobattle_ability_rules WHERE attack_nom = v_a_ability_nom_round;
   v_a_ability_cfg.status_reversed := COALESCE(v_a_ability_cfg.status_reversed, false);
   v_a_ability_cfg.invuln_grant := COALESCE(v_a_ability_cfg.invuln_grant, false);
@@ -11941,7 +13436,7 @@ BEGIN
          recoil_type, recoil_min, recoil_max, recoil_percent, invulnerable_next_turn,
          bonus_damage_type, bonus_damage_multiplier, bonus_damage_flat, bonus_damage_min, bonus_damage_max,
          bonus_damage_condition, bonus_damage_condition_dice_value, bonus_damage_status_filter,
-         stat_mod_target, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
+         stat_mod_target, stat_mod_direction, stat_mod_stat, stat_mod_value_type, stat_mod_flat, stat_mod_min, stat_mod_max, stat_mod_percent,
          stat_mod_duration_type, stat_mod_duration_turns, stat_mod_max_uses,
          heal_dot_amount, heal_dot_duration_turns, heal_dot_type, heal_dot_percent, cancel_heal_duration_turns, percent_hp_damage_percent,
          stat_mod_type_filter, prevention_duration_turns,
@@ -11952,7 +13447,7 @@ BEGIN
          v_d_ability_cfg.recoil_type, v_d_ability_cfg.recoil_min, v_d_ability_cfg.recoil_max, v_d_ability_cfg.recoil_percent, v_d_ability_cfg.invuln_grant,
          v_d_ability_cfg.bonus_type, v_d_ability_cfg.bonus_multiplier, v_d_ability_cfg.bonus_flat, v_d_ability_cfg.bonus_min, v_d_ability_cfg.bonus_max,
          v_d_ability_cfg.bonus_condition, v_d_ability_cfg.bonus_dice_value, v_d_ability_cfg.bonus_status_filter,
-         v_d_ability_cfg.stat_mod_target, v_d_ability_cfg.stat_mod_stat, v_d_ability_cfg.stat_mod_value_type, v_d_ability_cfg.stat_mod_flat, v_d_ability_cfg.stat_mod_min, v_d_ability_cfg.stat_mod_max, v_d_ability_cfg.stat_mod_percent,
+         v_d_ability_cfg.stat_mod_target, v_d_ability_cfg.stat_mod_direction, v_d_ability_cfg.stat_mod_stat, v_d_ability_cfg.stat_mod_value_type, v_d_ability_cfg.stat_mod_flat, v_d_ability_cfg.stat_mod_min, v_d_ability_cfg.stat_mod_max, v_d_ability_cfg.stat_mod_percent,
          v_d_ability_cfg.stat_mod_duration_type, v_d_ability_cfg.stat_mod_duration_turns, v_d_ability_cfg.stat_mod_max_uses,
          v_d_ability_cfg.heal_dot_config_amount, v_d_ability_cfg.heal_dot_config_turns, v_d_ability_cfg.heal_dot_config_type, v_d_ability_cfg.heal_dot_config_percent, v_d_ability_cfg.cancel_heal_duration, v_d_ability_cfg.percent_hp_damage_percent,
          v_d_ability_cfg.stat_mod_type_filter, v_d_ability_cfg.prevention_duration,
@@ -11960,6 +13455,21 @@ BEGIN
          v_d_ability_cfg.heal_dot_until_awake, v_d_ability_cfg.ignore_status_block,
          v_d_ability_cfg.weather_id, v_d_ability_cfg.weather_chance,
          v_d_ability_cfg.stat_mod_weather_condition, v_d_ability_cfg.stat_mod_weather_id
+    FROM autobattle_ability_rules WHERE attack_nom = v_row.dummy_ability_nom;
+  -- Voir le même complément côté attaquant juste au-dessus.
+  SELECT damage_dot_amount, damage_dot_duration_turns, damage_dot_type, damage_dot_percent,
+         leech_dot_amount, leech_dot_duration_turns, leech_dot_type, leech_dot_percent,
+         pierce_immunity_type, pierce_immunity_turns, requires_target_status,
+         bonus_damage_weight_target, bonus_damage_weight_comparison, bonus_damage_weight_percent,
+         clear_damage_dot, clear_weather, cure_status,
+         status_dot_status, status_dot_chance, status_dot_duration_turns, percent_hp_damage_basis
+    INTO v_d_ability_cfg.damage_dot_config_amount, v_d_ability_cfg.damage_dot_config_turns, v_d_ability_cfg.damage_dot_config_type, v_d_ability_cfg.damage_dot_config_percent,
+         v_d_ability_cfg.leech_dot_config_amount, v_d_ability_cfg.leech_dot_config_turns, v_d_ability_cfg.leech_dot_config_type, v_d_ability_cfg.leech_dot_config_percent,
+         v_d_ability_cfg.pierce_immunity_type, v_d_ability_cfg.pierce_immunity_turns, v_d_ability_cfg.requires_target_status,
+         v_d_ability_cfg.bonus_weight_target, v_d_ability_cfg.bonus_weight_comparison, v_d_ability_cfg.bonus_weight_percent,
+         v_d_ability_cfg.clear_damage_dot, v_d_ability_cfg.clear_weather, v_d_ability_cfg.cure_status,
+         v_d_ability_cfg.status_dot_config_status, v_d_ability_cfg.status_dot_config_chance, v_d_ability_cfg.status_dot_config_turns,
+         v_d_ability_cfg.percent_hp_damage_basis
     FROM autobattle_ability_rules WHERE attack_nom = v_row.dummy_ability_nom;
   v_d_ability_cfg.status_reversed := COALESCE(v_d_ability_cfg.status_reversed, false);
   v_d_ability_cfg.invuln_grant := COALESCE(v_d_ability_cfg.invuln_grant, false);
@@ -11984,7 +13494,9 @@ BEGIN
     autobattle_talents_vs(v_pp.pokemon_nom, v_row.dummy_pokemon_nom, v_talents_enabled),
     autobattle_talents_vs(v_row.dummy_pokemon_nom, v_pp.pokemon_nom, v_talents_enabled),
     -- Météo : voir pvp_resolve_round, même mécanique.
-    v_row.weather_id, v_weather_enabled, v_a_species.type, v_d_species.type
+    v_row.weather_id, v_weather_enabled, v_a_species.type, v_d_species.type,
+    -- Poids des deux espèces (voir la condition de dégâts 'weight_ratio').
+    v_a_species.poids, v_d_species.poids
   );
 
   v_result := jsonb_build_object(
@@ -12005,7 +13517,12 @@ BEGIN
     'outcome', v_round_result.outcome,
     'opponent_pokemon_nom', v_row.dummy_pokemon_nom,
     'opponent_ability_nom', v_row.dummy_ability_nom,
-    'player_ability_nom', v_a_ability_nom_round
+    'player_ability_nom', v_a_ability_nom_round,
+    -- Voir le même champ dans autobattle_resolve_manual_round.
+    'player_pierce_immunity_type', CASE
+      WHEN (v_round_result.player_state).pierce_immunity_expires IS NOT NULL
+       AND (v_round_result.player_state).pierce_immunity_expires >= v_round_result.round_no + 1
+        THEN (v_round_result.player_state).pierce_immunity_type ELSE NULL END
   );
 
   IF v_round_result.outcome IS NULL THEN
@@ -12032,6 +13549,17 @@ BEGIN
       attacker_keep_going_remaining = COALESCE((v_round_result.player_state).keep_going_remaining, 0), defender_keep_going_remaining = COALESCE((v_round_result.opponent_state).keep_going_remaining, 0),
       attacker_keep_going_count = COALESCE((v_round_result.player_state).keep_going_count, 0), defender_keep_going_count = COALESCE((v_round_result.opponent_state).keep_going_count, 0),
       attacker_talent_state = COALESCE((v_round_result.player_state).talent_state, '[]'::jsonb), defender_talent_state = COALESCE((v_round_result.opponent_state).talent_state, '[]'::jsonb),
+      -- Effets persistants offensifs subis et perce-immunité accordé.
+      attacker_damage_dot_amount = (v_round_result.player_state).damage_dot_amount, attacker_damage_dot_expires = (v_round_result.player_state).damage_dot_expires,
+      defender_damage_dot_amount = (v_round_result.opponent_state).damage_dot_amount, defender_damage_dot_expires = (v_round_result.opponent_state).damage_dot_expires,
+      attacker_leech_dot_amount = (v_round_result.player_state).leech_dot_amount, attacker_leech_dot_expires = (v_round_result.player_state).leech_dot_expires,
+      defender_leech_dot_amount = (v_round_result.opponent_state).leech_dot_amount, defender_leech_dot_expires = (v_round_result.opponent_state).leech_dot_expires,
+      attacker_status_dot_status = (v_round_result.player_state).status_dot_status, attacker_status_dot_chance = (v_round_result.player_state).status_dot_chance,
+      attacker_status_dot_expires = (v_round_result.player_state).status_dot_expires,
+      defender_status_dot_status = (v_round_result.opponent_state).status_dot_status, defender_status_dot_chance = (v_round_result.opponent_state).status_dot_chance,
+      defender_status_dot_expires = (v_round_result.opponent_state).status_dot_expires,
+      attacker_pierce_immunity_type = (v_round_result.player_state).pierce_immunity_type, attacker_pierce_immunity_expires = (v_round_result.player_state).pierce_immunity_expires,
+      defender_pierce_immunity_type = (v_round_result.opponent_state).pierce_immunity_type, defender_pierce_immunity_expires = (v_round_result.opponent_state).pierce_immunity_expires,
       -- Le camp qui a gagné une action supplémentaire reprend la main au début
       -- du round suivant (voir autobattle_round_result.next_first_attacker).
       first_attacker = CASE WHEN COALESCE(v_round_result.next_first_attacker, 'player') = 'player' THEN 'attacker' ELSE 'defender' END,

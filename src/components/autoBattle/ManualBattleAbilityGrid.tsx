@@ -1,7 +1,8 @@
 import type { Pokemon, Attack, AutoBattleAbilityRule, AutoBattleWeatherEffect } from '../../types'
 import { getStatusEffectDisplay, describeAbilityRule, weatherAffectsAbility } from '../../lib/autoBattle'
-import { getSuperEfficace } from '../../lib/pokemonFacts'
+import { isTypeSuperEffective, isAbilityBlockedByType } from '../../lib/typeChart'
 import { TypeBadge } from '../TypeBadge'
+import { AbilityEffectLines } from './AbilityEffectLines'
 import { PixelIcon } from '../icons/PixelIcon'
 import { STAT_ICON, DICE_GENERIC_ICON } from '../../lib/icons'
 import { getPrecisionColor, formatPrecision } from '../../lib/precisionColor'
@@ -12,8 +13,6 @@ import { useToast } from '../../context/ToastContext'
 interface Props {
   /** Noms des capacités à afficher — le mouvepool du pokémon normalement, ou l'ensemble des capacités configurées sur le niveau adverse si le pokémon du joueur est Métamorph (voir ManualBattleScreen : le joueur choisit toujours laquelle jouer, contrairement à l'adversaire Métamorph qui pioche au hasard). */
   abilityNoms: string[]
-  /** Espèce EFFECTIVEMENT combattante (celle copiée par Métamorph le cas échéant, voir AutoBattlePopup) — même badge Super Efficace par capacité que AutoBattleAbilityPicker. */
-  playerSpecies?: Pokemon
   opponentSpecies?: Pokemon
   attacksByName: Map<string, Attack>
   abilityRulesByName: Map<string, AutoBattleAbilityRule>
@@ -25,6 +24,8 @@ interface Props {
   weatherNom?: string | null
   /** Effets de la météo en cours — décident quelles capacités portent la pastille (voir weatherAffectsAbility). */
   weatherEffects?: AutoBattleWeatherEffect[]
+  /** Type dont l'immunité est PERCÉE en ce moment au profit du joueur (perce-immunité encore actif, voir AutoBattleManualRoundResult.player_pierce_immunity_type) : les capacités que ce type bloque redeviennent jouables. */
+  piercedImmunityType?: string | null
   disabled: boolean
   onSelect: (ability: Attack) => void
 }
@@ -34,22 +35,25 @@ interface Props {
 // le combat — pas un écran de sélection séparé comme AutoBattleAbilityPicker
 // en mode Auto). `disabled` = un tour est en cours de résolution/animation
 // (attend le prochain round_no), la grille reste visible mais non cliquable.
-export function ManualBattleAbilityGrid({ abilityNoms, playerSpecies, opponentSpecies, attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, weatherIcon, weatherNom, weatherEffects, disabled, onSelect }: Props) {
+export function ManualBattleAbilityGrid({ abilityNoms, opponentSpecies, attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, weatherIcon, weatherNom, weatherEffects, piercedImmunityType, disabled, onSelect }: Props) {
   const { showToast } = useToast()
   const abilities = abilityNoms
     .map((nom) => attacksByName.get(nom))
     .filter((a): a is Attack => a != null)
-  const isSuperEffectiveSpecies = opponentSpecies != null
-    && getSuperEfficace(playerSpecies).includes(opponentSpecies.type)
 
   return (
     <div className="grid grid-cols-2 gap-2">
       {abilities.map((a) => {
-        const ineligible = bannedAttacks.has(a.nom)
         const rule = abilityRulesByName.get(a.nom)
+        const banned = bannedAttacks.has(a.nom)
+        // Immunité de type : capacité injouable contre ce défenseur (voir
+        // AutoBattleAbilityPicker, même règle), sauf si elle ne vise pas
+        // l'adversaire (soin/buff sur soi, météo).
+        const noEffect = !banned && isAbilityBlockedByType(a, rule, opponentSpecies?.type, piercedImmunityType)
+        const ineligible = banned || noEffect
         const effectLines = describeAbilityRule(rule, a)
-        const superEffective = isSuperEffectiveSpecies && playerSpecies != null
-          && a.type.toLowerCase().trim() === playerSpecies.type.toLowerCase().trim()
+        // Super efficace : type de LA CAPACITÉ vs type de l'adversaire.
+        const superEffective = isTypeSuperEffective(a.type, opponentSpecies?.type)
         // Météo : la pastille ne s'affiche que si CETTE capacité est concernée
         // (voir weatherAffectsAbility) — un buff des attaques Eau la pose sur
         // toutes les capacités Eau offensives, et sur elles seules.
@@ -59,7 +63,9 @@ export function ManualBattleAbilityGrid({ abilityNoms, playerSpecies, opponentSp
             key={a.nom}
             onClick={() => {
               if (disabled) return
-              if (ineligible) {
+              if (noEffect) {
+                showToast(`Aucun effet sur un pokémon de type ${opponentSpecies?.type ?? ''}`.trim())
+              } else if (banned) {
                 showToast("Cette capacité n'est pas disponible dans ce mode de jeu")
               } else {
                 onSelect(a)
@@ -71,10 +77,15 @@ export function ManualBattleAbilityGrid({ abilityNoms, playerSpecies, opponentSp
             <div className="flex items-center gap-1.5 flex-wrap">
               <TypeBadge type={a.type} small />
               <span className="flex-1 min-w-[4rem] text-ink text-xs font-bold truncate">{a.nom}</span>
-              {ineligible && (
+              {banned && (
                 <span className="flex items-center gap-1 shrink-0">
                   <span className="text-xs">🛑</span>
                   <span className="text-ink text-xs font-bold">BAN</span>
+                </span>
+              )}
+              {noEffect && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white bg-ink/70 whitespace-nowrap shrink-0">
+                  Aucun effet
                 </span>
               )}
               {!ineligible && superEffective && (
@@ -130,12 +141,8 @@ export function ManualBattleAbilityGrid({ abilityNoms, playerSpecies, opponentSp
                 })()}
               </div>
             )}
-            {!ineligible && effectLines.length > 0 && (
-              <div className="flex flex-col gap-0.5 mt-0.5">
-                {effectLines.map((line, i) => (
-                  <span key={i} className="text-ink-muted-2 text-xs leading-tight">{line}</span>
-                ))}
-              </div>
+            {!ineligible && (
+              <AbilityEffectLines lines={effectLines} textClassName="text-xs" />
             )}
           </button>
         )
