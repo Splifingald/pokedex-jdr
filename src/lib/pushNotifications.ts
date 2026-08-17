@@ -24,6 +24,14 @@ export function isIOS(): boolean {
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 }
 
+// Les notifications push n'ont d'intérêt que sur mobile (l'app y vit en PWA) :
+// on ne sollicite pas l'utilisateur à l'ouverture sur un ordinateur.
+export function isMobileDevice(): boolean {
+  if (isIOS()) return true
+  if (/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent)) return true
+  return window.matchMedia('(pointer: coarse)').matches && navigator.maxTouchPoints > 0
+}
+
 export function isStandalone(): boolean {
   return window.matchMedia('(display-mode: standalone)').matches ||
     (navigator as Navigator & { standalone?: boolean }).standalone === true

@@ -3975,6 +3975,35 @@ $$;
 
 GRANT EXECUTE ON FUNCTION type_no_effect(text, text) TO anon, authenticated;
 
+-- Immunités de STATUT propres à un type d'espèce (requirement) : un pokémon de
+-- ce type ne peut JAMAIS recevoir ce statut, quelle qu'en soit la source —
+-- capacité, talent 'inflict_status', tentative persistante (status_dot) ou
+-- statut de terrain d'une météo.
+--   Acier → Poison        Feu → Brûlure        Glace → Gel
+-- Contrairement au talent 'status_immunity', cette immunité ne dépend d'aucune
+-- donnée d'admin et ne peut donc être ni désactivée par la bascule globale des
+-- talents (autobattle_config.talents_enabled) ni annulée par 'cancel_talents' :
+-- elle est vérifiée dans autobattle_talent_status_guard, avant les talents.
+-- Silencieuse comme 'status_immunity' : le statut est simplement ignoré, aucun
+-- tour de journal n'est émis (sinon le client allumerait un badge que plus
+-- aucun tick ne viendrait éteindre).
+CREATE OR REPLACE FUNCTION autobattle_status_type_immune(p_pokemon_type text, p_status text)
+RETURNS boolean
+LANGUAGE sql IMMUTABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM (VALUES
+      ('acier', 'poison'),
+      ('feu',   'burn'),
+      ('glace', 'frozen')
+    ) AS t(pokemon_type, status)
+    WHERE t.pokemon_type = type_norm(p_pokemon_type)
+      AND t.status = p_status
+  )
+$$;
+
+GRANT EXECUTE ON FUNCTION autobattle_status_type_immune(text, text) TO anon, authenticated;
+
 -- ============================================================
 -- Modificateurs de stat EMPILABLES (voir autobattle_ability_rules.stat_mod_*)
 -- ============================================================
@@ -4569,17 +4598,24 @@ $$;
 -- Annonce les bonus de stat CONDITIONNELS qui viennent de devenir actifs, puis
 -- tente les infligeurs de statut ('inflict_status') dont le déclencheur
 -- correspond. p_trigger vaut 'battle_start', 'each_turn' ou 'on_ability_type'.
--- p_opp_talents/p_opp_status servent à respecter l'immunité et à ne pas écraser
--- un statut déjà en place. p_weather = météo en cours (voir
--- autobattle_weather_for), qui conditionne les bonus de stat et évite de
--- relancer une météo déjà levée. Renvoie
+-- p_opp_talents/p_opp_status/p_opp_type servent à respecter l'immunité (de
+-- talent ET de type) et à ne pas écraser un statut déjà en place. p_weather =
+-- météo en cours (voir autobattle_weather_for), qui conditionne les bonus de
+-- stat et évite de relancer une météo déjà levée. Renvoie
 -- {"state", "turns", "inflict_status", "set_weather"} — set_weather = l'id de la
 -- météo à lever, que l'appelant applique via autobattle_weather_set.
 DROP FUNCTION IF EXISTS autobattle_talent_act(jsonb, jsonb, text, text, text, integer, integer, text, text, jsonb, integer);
+DROP FUNCTION IF EXISTS autobattle_talent_act(jsonb, jsonb, text, text, text, integer, integer, text, text, jsonb, integer, jsonb);
 CREATE OR REPLACE FUNCTION autobattle_talent_act(
   p_talents jsonb, p_state jsonb, p_side text, p_trigger text, p_ability_type text,
   p_hp integer, p_max_hp integer, p_opp_status text, p_self_status text,
-  p_opp_talents jsonb, p_turn_no integer, p_weather jsonb DEFAULT NULL)
+  p_opp_talents jsonb, p_turn_no integer, p_weather jsonb DEFAULT NULL,
+  -- Type d'espèce de la CIBLE du statut (l'adversaire du porteur du talent) :
+  -- une cible immunisée par son type ne doit pas voir le talent se déclencher
+  -- « pour rien » (voir la garde ci-dessous). Par défaut NULL = pas d'immunité
+  -- de type connue, la garde de autobattle_talent_status_guard reste seule
+  -- juge — elle, ne laisse rien passer.
+  p_opp_type text DEFAULT NULL)
 RETURNS jsonb
 LANGUAGE plpgsql
 AS $$
@@ -4611,7 +4647,11 @@ BEGIN
       v_status := (v_t -> 'status_filter' ->> 0);
       -- Immunité de la cible : le talent ne se déclenche pas du tout (pas
       -- d'animation ni de ligne d'historique pour un effet sans effet).
-      IF EXISTS (
+      -- Vaut pour l'immunité de TYPE comme pour celle de talent : sans ce
+      -- filtre, le tour porterait 'talent_inflicted_status' et le client
+      -- allumerait un badge de statut que la garde vient de refuser, badge que
+      -- plus aucun tick ne viendrait éteindre.
+      IF autobattle_status_type_immune(p_opp_type, v_status) OR EXISTS (
         SELECT 1 FROM jsonb_array_elements(COALESCE(p_opp_talents, '[]'::jsonb)) o
         WHERE (o ->> 'kind') = 'status_immunity' AND autobattle_talent_status_match(o -> 'status_filter', v_status)
       ) THEN
@@ -4825,11 +4865,21 @@ END;
 $$;
 
 -- ── Phase 5 : statut subi ────────────────────────────────────────────────────
--- Immunité ('status_immunity', permanente) et guérison automatique du premier
--- statut ('auto_cure_first_status', usage unique). Renvoie
+-- Point de passage OBLIGATOIRE de tout statut posé sur un pokémon, quelle qu'en
+-- soit la source (capacité, talent 'inflict_status', tentative persistante
+-- status_dot, statut de terrain d'une météo) : immunité de TYPE
+-- (autobattle_status_type_immune, indépendante de toute donnée d'admin),
+-- immunité de talent ('status_immunity', permanente) et guérison automatique du
+-- premier statut ('auto_cure_first_status', usage unique). Renvoie
 -- {"blocked", "state", "turns"} — blocked = le statut ne s'applique pas.
+-- p_pokemon_type = type d'espèce de la VICTIME (celle qui reçoit le statut,
+-- donc le lanceur lui-même quand la capacité est retournée) — SANS valeur par
+-- défaut, exprès : un appelant qui l'oublierait doit échouer bruyamment plutôt
+-- que de laisser passer un statut interdit.
+DROP FUNCTION IF EXISTS autobattle_talent_status_guard(jsonb, jsonb, text, text, integer, integer);
 CREATE OR REPLACE FUNCTION autobattle_talent_status_guard(
-  p_talents jsonb, p_state jsonb, p_side text, p_status text, p_hp integer, p_turn_no integer)
+  p_talents jsonb, p_state jsonb, p_side text, p_status text, p_hp integer, p_turn_no integer,
+  p_pokemon_type text)
 RETURNS jsonb
 LANGUAGE plpgsql
 AS $$
@@ -4840,6 +4890,13 @@ DECLARE
 BEGIN
   IF p_status IS NULL THEN
     RETURN jsonb_build_object('blocked', false, 'state', v_state, 'turns', v_turns);
+  END IF;
+
+  -- Immunité de type (Acier/Poison, Feu/Brûlure, Glace/Gel) : vérifiée en tout
+  -- premier, avant les talents — elle ne consomme ni 'auto_cure_first_status'
+  -- ni quoi que ce soit d'autre, et reste silencieuse comme 'status_immunity'.
+  IF autobattle_status_type_immune(p_pokemon_type, p_status) THEN
+    RETURN jsonb_build_object('blocked', true, 'state', v_state, 'turns', v_turns);
   END IF;
 
   -- L'immunité est déjà annoncée en ouverture de combat : pas de tour ici, le
@@ -4949,10 +5006,10 @@ GRANT EXECUTE ON FUNCTION autobattle_talent_stat_active(jsonb, text, integer, in
 GRANT EXECUTE ON FUNCTION autobattle_talent_stat_bonus(jsonb, jsonb, text, text, integer, integer, text, text, jsonb) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION autobattle_talent_open(jsonb, text, integer) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION autobattle_talent_priority(jsonb) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION autobattle_talent_act(jsonb, jsonb, text, text, text, integer, integer, text, text, jsonb, integer, jsonb) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION autobattle_talent_act(jsonb, jsonb, text, text, text, integer, integer, text, text, jsonb, integer, jsonb, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION autobattle_talent_defend(jsonb, jsonb, text, integer, text, integer, integer, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION autobattle_talent_survive(jsonb, jsonb, text, integer, integer, integer, text) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION autobattle_talent_status_guard(jsonb, jsonb, text, text, integer, integer) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION autobattle_talent_status_guard(jsonb, jsonb, text, text, integer, integer, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION autobattle_talent_tick_bonus(jsonb, jsonb, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION autobattle_talent_dice(jsonb, integer, text, integer, integer) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION autobattle_talent_has_kind(jsonb, text) TO anon, authenticated;
@@ -5105,7 +5162,7 @@ BEGIN
         -- corrigé pour les talents 'inflict_status' à l'entrée en combat).
         -- 'auto_cure_first_status', lui, bloque EN émettant son tour : on
         -- annonce alors le statut, puis sa guérison immédiate juste après.
-        v_res := autobattle_talent_status_guard(p_talents, v_state, p_side, v_e ->> 'status', v_hp, p_turn_no);
+        v_res := autobattle_talent_status_guard(p_talents, v_state, p_side, v_e ->> 'status', v_hp, p_turn_no, p_pokemon_type);
         v_state := v_res -> 'state';
         IF NOT ((v_res ->> 'blocked')::boolean AND jsonb_array_length(v_res -> 'turns') = 0) THEN
           v_turns := v_turns || jsonb_build_array(autobattle_weather_turn(
@@ -5237,9 +5294,12 @@ $$;
 -- client allume un badge que plus aucun tick ne viendra éteindre).
 --
 -- Retour : { status, state, turns }.
+DROP FUNCTION IF EXISTS autobattle_status_dot_tick(text, integer, integer, text, text, integer, jsonb, jsonb);
 CREATE OR REPLACE FUNCTION autobattle_status_dot_tick(
   p_side text, p_turn_no integer, p_hp integer, p_status text,
-  p_status_dot text, p_chance integer, p_talents jsonb, p_state jsonb)
+  p_status_dot text, p_chance integer, p_talents jsonb, p_state jsonb,
+  -- Type d'espèce de la VICTIME — passé tel quel à la garde (immunité de type).
+  p_pokemon_type text)
 RETURNS jsonb
 LANGUAGE plpgsql
 AS $$
@@ -5254,7 +5314,7 @@ BEGIN
     RETURN jsonb_build_object('status', v_status, 'state', v_state, 'turns', v_turns);
   END IF;
 
-  v_res := autobattle_talent_status_guard(p_talents, v_state, p_side, p_status_dot, p_hp, p_turn_no);
+  v_res := autobattle_talent_status_guard(p_talents, v_state, p_side, p_status_dot, p_hp, p_turn_no, p_pokemon_type);
   v_state := v_res -> 'state';
   IF (v_res ->> 'blocked')::boolean AND jsonb_array_length(v_res -> 'turns') = 0 THEN
     RETURN jsonb_build_object('status', v_status, 'state', v_state, 'turns', v_turns);
@@ -5336,7 +5396,7 @@ AS $$
 $$;
 
 GRANT EXECUTE ON FUNCTION autobattle_dot_tick(text, integer, integer, integer, integer, integer, text, text, integer, integer, jsonb, jsonb, boolean) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION autobattle_status_dot_tick(text, integer, integer, text, text, integer, jsonb, jsonb) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION autobattle_status_dot_tick(text, integer, integer, text, text, integer, jsonb, jsonb, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION autobattle_type_immune(text, text, text, text, integer, integer) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION autobattle_weight_condition(text, text, integer, numeric, numeric) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION autobattle_stat_mod_signed(integer, text, text) TO anon, authenticated;
@@ -6265,13 +6325,13 @@ BEGIN
       -- jamais jusqu'ici, mais c'est justement un tour où il en a un.
       IF v_attacker = 'player' AND v_player.status_dot_status IS NOT NULL AND v_player.status IS NULL THEN
         v_dot_res := autobattle_status_dot_tick('player', v_turn_no, v_player.hp, v_player.status,
-          v_player.status_dot_status, v_player.status_dot_chance, p_player_talents, v_player.talent_state);
+          v_player.status_dot_status, v_player.status_dot_chance, p_player_talents, v_player.talent_state, p_player_pokemon_type);
         v_player.status := v_dot_res ->> 'status';
         v_player.talent_state := v_dot_res -> 'state';
         v_turns := v_turns || (v_dot_res -> 'turns');
       ELSIF v_attacker = 'opponent' AND v_opponent.status_dot_status IS NOT NULL AND v_opponent.status IS NULL THEN
         v_dot_res := autobattle_status_dot_tick('opponent', v_turn_no, v_opponent.hp, v_opponent.status,
-          v_opponent.status_dot_status, v_opponent.status_dot_chance, p_opponent_talents, v_opponent.talent_state);
+          v_opponent.status_dot_status, v_opponent.status_dot_chance, p_opponent_talents, v_opponent.talent_state, p_opponent_pokemon_type);
         v_opponent.status := v_dot_res ->> 'status';
         v_opponent.talent_state := v_dot_res -> 'state';
         v_turns := v_turns || (v_dot_res -> 'turns');
@@ -6485,7 +6545,7 @@ BEGIN
       -- tentative d'infliger un statut ('inflict_status', déclencheur « à chaque
       -- tour »). Les passifs permanents sont annoncés en tête de combat.
       v_talent_res := autobattle_talent_act(p_player_talents, v_player.talent_state, 'player', 'each_turn', p_player_ability.ability_type,
-        v_player.hp, v_player.max_hp, v_opponent.status, v_player.status, p_opponent_talents, v_turn_no, v_weather);
+        v_player.hp, v_player.max_hp, v_opponent.status, v_player.status, p_opponent_talents, v_turn_no, v_weather, p_opponent_pokemon_type);
       v_player.talent_state := v_talent_res -> 'state';
       v_turns := v_turns || (v_talent_res -> 'turns');
       -- Météo levée par un talent 'set_weather' : elle prend effet tout de
@@ -6499,7 +6559,7 @@ BEGIN
       -- Statut infligé par un talent : la cible peut encore le neutraliser
       -- ('status_immunity' est déjà pris en compte, 'auto_cure_first_status' non).
       IF v_talent_inflict IS NOT NULL THEN
-        v_talent_res := autobattle_talent_status_guard(p_opponent_talents, v_opponent.talent_state, 'opponent', v_talent_inflict, v_opponent.hp, v_turn_no);
+        v_talent_res := autobattle_talent_status_guard(p_opponent_talents, v_opponent.talent_state, 'opponent', v_talent_inflict, v_opponent.hp, v_turn_no, p_opponent_pokemon_type);
         v_opponent.talent_state := v_talent_res -> 'state';
         v_turns := v_turns || (v_talent_res -> 'turns');
         IF NOT (v_talent_res ->> 'blocked')::boolean THEN
@@ -6648,7 +6708,7 @@ BEGIN
           -- un tick de brûlure/poison, qui ne passent pas par ici.
           IF v_hit_damage > 0 THEN
             v_talent_res := autobattle_talent_act(p_player_talents, v_player.talent_state, 'player', 'on_ability_type', p_player_ability.ability_type,
-              v_player.hp, v_player.max_hp, v_opponent.status, v_player.status, p_opponent_talents, v_turn_no, v_weather);
+              v_player.hp, v_player.max_hp, v_opponent.status, v_player.status, p_opponent_talents, v_turn_no, v_weather, p_opponent_pokemon_type);
             v_player.talent_state := v_talent_res -> 'state';
             v_turns := v_turns || (v_talent_res -> 'turns');
             v_weather_res := autobattle_weather_set((v_talent_res ->> 'set_weather')::bigint, p_weather_enabled, v_weather, 'player', v_player.hp, v_turn_no);
@@ -6656,7 +6716,7 @@ BEGIN
             v_turns := v_turns || (v_weather_res -> 'turns');
             v_talent_inflict := v_talent_res ->> 'inflict_status';
             IF v_talent_inflict IS NOT NULL THEN
-              v_talent_res := autobattle_talent_status_guard(p_opponent_talents, v_opponent.talent_state, 'opponent', v_talent_inflict, v_opponent.hp, v_turn_no);
+              v_talent_res := autobattle_talent_status_guard(p_opponent_talents, v_opponent.talent_state, 'opponent', v_talent_inflict, v_opponent.hp, v_turn_no, p_opponent_pokemon_type);
               v_opponent.talent_state := v_talent_res -> 'state';
               v_turns := v_turns || (v_talent_res -> 'turns');
               IF NOT (v_talent_res ->> 'blocked')::boolean THEN
@@ -6749,7 +6809,8 @@ BEGIN
               CASE WHEN p_player_ability.status_reversed THEN v_player.talent_state ELSE v_opponent.talent_state END,
               CASE WHEN p_player_ability.status_reversed THEN 'player' ELSE 'opponent' END,
               p_player_ability.status_effect,
-              CASE WHEN p_player_ability.status_reversed THEN v_player.hp ELSE v_opponent.hp END, v_turn_no);
+              CASE WHEN p_player_ability.status_reversed THEN v_player.hp ELSE v_opponent.hp END, v_turn_no,
+              CASE WHEN p_player_ability.status_reversed THEN p_player_pokemon_type ELSE p_opponent_pokemon_type END);
             IF p_player_ability.status_reversed THEN v_player.talent_state := v_talent_res -> 'state';
             ELSE v_opponent.talent_state := v_talent_res -> 'state'; END IF;
             v_talent_pending := COALESCE(v_talent_pending, '[]'::jsonb) || (v_talent_res -> 'turns');
@@ -6952,7 +7013,7 @@ BEGIN
       -- tentative d'infliger un statut ('inflict_status', déclencheur « à chaque
       -- tour »). Les passifs permanents sont annoncés en tête de combat.
       v_talent_res := autobattle_talent_act(p_opponent_talents, v_opponent.talent_state, 'opponent', 'each_turn', p_opponent_ability.ability_type,
-        v_opponent.hp, v_opponent.max_hp, v_player.status, v_opponent.status, p_player_talents, v_turn_no, v_weather);
+        v_opponent.hp, v_opponent.max_hp, v_player.status, v_opponent.status, p_player_talents, v_turn_no, v_weather, p_player_pokemon_type);
       v_opponent.talent_state := v_talent_res -> 'state';
       v_turns := v_turns || (v_talent_res -> 'turns');
       -- Voir le même commentaire côté joueur plus haut.
@@ -6963,7 +7024,7 @@ BEGIN
       -- Statut infligé par un talent : la cible peut encore le neutraliser
       -- ('status_immunity' est déjà pris en compte, 'auto_cure_first_status' non).
       IF v_talent_inflict IS NOT NULL THEN
-        v_talent_res := autobattle_talent_status_guard(p_player_talents, v_player.talent_state, 'player', v_talent_inflict, v_player.hp, v_turn_no);
+        v_talent_res := autobattle_talent_status_guard(p_player_talents, v_player.talent_state, 'player', v_talent_inflict, v_player.hp, v_turn_no, p_player_pokemon_type);
         v_player.talent_state := v_talent_res -> 'state';
         v_turns := v_turns || (v_talent_res -> 'turns');
         IF NOT (v_talent_res ->> 'blocked')::boolean THEN
@@ -7091,7 +7152,7 @@ BEGIN
           -- un tick de brûlure/poison, qui ne passent pas par ici.
           IF v_hit_damage > 0 THEN
             v_talent_res := autobattle_talent_act(p_opponent_talents, v_opponent.talent_state, 'opponent', 'on_ability_type', p_opponent_ability.ability_type,
-              v_opponent.hp, v_opponent.max_hp, v_player.status, v_opponent.status, p_player_talents, v_turn_no, v_weather);
+              v_opponent.hp, v_opponent.max_hp, v_player.status, v_opponent.status, p_player_talents, v_turn_no, v_weather, p_player_pokemon_type);
             v_opponent.talent_state := v_talent_res -> 'state';
             v_turns := v_turns || (v_talent_res -> 'turns');
             v_weather_res := autobattle_weather_set((v_talent_res ->> 'set_weather')::bigint, p_weather_enabled, v_weather, 'opponent', v_opponent.hp, v_turn_no);
@@ -7099,7 +7160,7 @@ BEGIN
             v_turns := v_turns || (v_weather_res -> 'turns');
             v_talent_inflict := v_talent_res ->> 'inflict_status';
             IF v_talent_inflict IS NOT NULL THEN
-              v_talent_res := autobattle_talent_status_guard(p_player_talents, v_player.talent_state, 'player', v_talent_inflict, v_player.hp, v_turn_no);
+              v_talent_res := autobattle_talent_status_guard(p_player_talents, v_player.talent_state, 'player', v_talent_inflict, v_player.hp, v_turn_no, p_player_pokemon_type);
               v_player.talent_state := v_talent_res -> 'state';
               v_turns := v_turns || (v_talent_res -> 'turns');
               IF NOT (v_talent_res ->> 'blocked')::boolean THEN
@@ -7186,7 +7247,8 @@ BEGIN
               CASE WHEN p_opponent_ability.status_reversed THEN v_opponent.talent_state ELSE v_player.talent_state END,
               CASE WHEN p_opponent_ability.status_reversed THEN 'opponent' ELSE 'player' END,
               p_opponent_ability.status_effect,
-              CASE WHEN p_opponent_ability.status_reversed THEN v_opponent.hp ELSE v_player.hp END, v_turn_no);
+              CASE WHEN p_opponent_ability.status_reversed THEN v_opponent.hp ELSE v_player.hp END, v_turn_no,
+              CASE WHEN p_opponent_ability.status_reversed THEN p_opponent_pokemon_type ELSE p_player_pokemon_type END);
             IF p_opponent_ability.status_reversed THEN v_opponent.talent_state := v_talent_res -> 'state';
             ELSE v_player.talent_state := v_talent_res -> 'state'; END IF;
             v_talent_pending := COALESCE(v_talent_pending, '[]'::jsonb) || (v_talent_res -> 'turns');
@@ -7445,6 +7507,11 @@ DECLARE
   -- Type d'espèce que la capacité de chaque camp affronte (Métamorph compris).
   v_player_target_type   text;
   v_opponent_target_type text;
+  -- Type d'espèce PROPRE à chaque camp (Métamorph = celui qu'il a copié) : ce
+  -- que la victime « est », et non ce qu'elle affronte — c'est lui qui décide
+  -- des immunités de statut de type (autobattle_status_type_immune).
+  v_player_self_type     text;
+  v_opponent_self_type   text;
   -- Poids des deux espèces (pokemon.poids) pour la condition de dégâts
   -- additionnels 'weight_ratio' — voir autobattle_weight_condition.
   v_player_weight        numeric;
@@ -7950,6 +8017,11 @@ BEGIN
     CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END
   );
   v_opponent_target_type := CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END;
+  -- Type PROPRE de chacun : celui du camp d'en face quand il est Métamorph
+  -- (mêmes expressions que les ticks de météo plus bas, qui visent déjà le
+  -- pokémon lui-même et non sa cible).
+  v_player_self_type := CASE WHEN v_is_metamorph THEN v_opponent_species.type ELSE v_player_species.type END;
+  v_opponent_self_type := CASE WHEN v_is_opponent_metamorph THEN v_player_species.type ELSE v_opponent_species.type END;
   v_opponent_damage_species_xp := COALESCE(v_opponent_base_damage_component, 0);
   v_opponent_damage := v_opponent_damage_species_xp * (CASE WHEN v_opponent_type_bonus THEN 2 ELSE 1 END)
     + COALESCE(v_opponent_ability.degats_base, 0);
@@ -8122,7 +8194,7 @@ BEGIN
   FOREACH v_talent_side IN ARRAY (CASE WHEN v_coin_player_first THEN ARRAY['player', 'opponent'] ELSE ARRAY['opponent', 'player'] END) LOOP
     IF v_talent_side = 'player' THEN
       v_talent_res := autobattle_talent_act(v_player_talents, v_player_talent_state, 'player', 'battle_start', v_ability.type,
-        v_player_hp, v_player_max_hp, v_opponent_status, v_player_status, v_opponent_talents, 0, v_weather);
+        v_player_hp, v_player_max_hp, v_opponent_status, v_player_status, v_opponent_talents, 0, v_weather, v_opponent_self_type);
       v_player_talent_state := v_talent_res -> 'state';
       v_turns := v_turns || (v_talent_res -> 'turns');
       -- Météo levée « à l'entrée en combat » : elle est donc déjà en place au
@@ -8133,7 +8205,7 @@ BEGIN
       v_turns := v_turns || (v_weather_res -> 'turns');
       v_talent_inflict := v_talent_res ->> 'inflict_status';
       IF v_talent_inflict IS NOT NULL THEN
-        v_talent_res := autobattle_talent_status_guard(v_opponent_talents, v_opponent_talent_state, 'opponent', v_talent_inflict, v_opponent_hp, 0);
+        v_talent_res := autobattle_talent_status_guard(v_opponent_talents, v_opponent_talent_state, 'opponent', v_talent_inflict, v_opponent_hp, 0, v_opponent_self_type);
         v_opponent_talent_state := v_talent_res -> 'state';
         v_turns := v_turns || (v_talent_res -> 'turns');
         IF NOT (v_talent_res ->> 'blocked')::boolean THEN
@@ -8142,7 +8214,7 @@ BEGIN
       END IF;
     ELSE
       v_talent_res := autobattle_talent_act(v_opponent_talents, v_opponent_talent_state, 'opponent', 'battle_start', v_opponent_ability.type,
-        v_opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status, v_player_talents, 0, v_weather);
+        v_opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status, v_player_talents, 0, v_weather, v_player_self_type);
       v_opponent_talent_state := v_talent_res -> 'state';
       v_turns := v_turns || (v_talent_res -> 'turns');
       -- Voir le même commentaire côté joueur.
@@ -8151,7 +8223,7 @@ BEGIN
       v_turns := v_turns || (v_weather_res -> 'turns');
       v_talent_inflict := v_talent_res ->> 'inflict_status';
       IF v_talent_inflict IS NOT NULL THEN
-        v_talent_res := autobattle_talent_status_guard(v_player_talents, v_player_talent_state, 'player', v_talent_inflict, v_player_hp, 0);
+        v_talent_res := autobattle_talent_status_guard(v_player_talents, v_player_talent_state, 'player', v_talent_inflict, v_player_hp, 0, v_player_self_type);
         v_player_talent_state := v_talent_res -> 'state';
         v_turns := v_turns || (v_talent_res -> 'turns');
         IF NOT (v_talent_res ->> 'blocked')::boolean THEN
@@ -8733,14 +8805,14 @@ BEGIN
       -- suivant ; rien n'est tenté s'il en a déjà un).
       IF v_attacker = 'player' AND v_player_status_dot_status IS NOT NULL AND v_player_status IS NULL THEN
         v_dot_res := autobattle_status_dot_tick('player', v_turn_no, v_player_hp, v_player_status,
-          v_player_status_dot_status, v_player_status_dot_chance, v_player_talents, v_player_talent_state);
+          v_player_status_dot_status, v_player_status_dot_chance, v_player_talents, v_player_talent_state, v_player_self_type);
         v_player_status := v_dot_res ->> 'status';
         v_player_talent_state := v_dot_res -> 'state';
         v_turns := v_turns || (v_dot_res -> 'turns');
         IF jsonb_array_length(v_dot_res -> 'turns') > 0 THEN v_turn_no := v_turn_no + 1; END IF;
       ELSIF v_attacker = 'opponent' AND v_opponent_status_dot_status IS NOT NULL AND v_opponent_status IS NULL THEN
         v_dot_res := autobattle_status_dot_tick('opponent', v_turn_no, v_opponent_hp, v_opponent_status,
-          v_opponent_status_dot_status, v_opponent_status_dot_chance, v_opponent_talents, v_opponent_talent_state);
+          v_opponent_status_dot_status, v_opponent_status_dot_chance, v_opponent_talents, v_opponent_talent_state, v_opponent_self_type);
         v_opponent_status := v_dot_res ->> 'status';
         v_opponent_talent_state := v_dot_res -> 'state';
         v_turns := v_turns || (v_dot_res -> 'turns');
@@ -8931,7 +9003,7 @@ BEGIN
       -- tentative d'infliger un statut ('inflict_status', déclencheur « à chaque
       -- tour »). Les passifs permanents sont annoncés en tête de combat.
       v_talent_res := autobattle_talent_act(v_player_talents, v_player_talent_state, 'player', 'each_turn', v_ability.type,
-        v_player_hp, v_player_max_hp, v_opponent_status, v_player_status, v_opponent_talents, v_turn_no, v_weather);
+        v_player_hp, v_player_max_hp, v_opponent_status, v_player_status, v_opponent_talents, v_turn_no, v_weather, v_opponent_self_type);
       v_player_talent_state := v_talent_res -> 'state';
       v_turns := v_turns || (v_talent_res -> 'turns');
       -- Météo levée en cours de tour : le tick de ce tour est déjà passé, elle
@@ -8943,7 +9015,7 @@ BEGIN
       -- Statut infligé par un talent : la cible peut encore le neutraliser
       -- ('status_immunity' est déjà pris en compte, 'auto_cure_first_status' non).
       IF v_talent_inflict IS NOT NULL THEN
-        v_talent_res := autobattle_talent_status_guard(v_opponent_talents, v_opponent_talent_state, 'opponent', v_talent_inflict, v_opponent_hp, v_turn_no);
+        v_talent_res := autobattle_talent_status_guard(v_opponent_talents, v_opponent_talent_state, 'opponent', v_talent_inflict, v_opponent_hp, v_turn_no, v_opponent_self_type);
         v_opponent_talent_state := v_talent_res -> 'state';
         v_turns := v_turns || (v_talent_res -> 'turns');
         IF NOT (v_talent_res ->> 'blocked')::boolean THEN
@@ -9116,7 +9188,7 @@ BEGIN
           -- un tick de brûlure/poison, qui ne passent pas par ici.
           IF v_hit_damage > 0 THEN
             v_talent_res := autobattle_talent_act(v_player_talents, v_player_talent_state, 'player', 'on_ability_type', v_ability.type,
-              v_player_hp, v_player_max_hp, v_opponent_status, v_player_status, v_opponent_talents, v_turn_no, v_weather);
+              v_player_hp, v_player_max_hp, v_opponent_status, v_player_status, v_opponent_talents, v_turn_no, v_weather, v_opponent_self_type);
             v_player_talent_state := v_talent_res -> 'state';
             v_turns := v_turns || (v_talent_res -> 'turns');
             v_weather_res := autobattle_weather_set((v_talent_res ->> 'set_weather')::bigint, v_weather_enabled, v_weather, 'player', v_player_hp, v_turn_no);
@@ -9124,7 +9196,7 @@ BEGIN
             v_turns := v_turns || (v_weather_res -> 'turns');
             v_talent_inflict := v_talent_res ->> 'inflict_status';
             IF v_talent_inflict IS NOT NULL THEN
-              v_talent_res := autobattle_talent_status_guard(v_opponent_talents, v_opponent_talent_state, 'opponent', v_talent_inflict, v_opponent_hp, v_turn_no);
+              v_talent_res := autobattle_talent_status_guard(v_opponent_talents, v_opponent_talent_state, 'opponent', v_talent_inflict, v_opponent_hp, v_turn_no, v_opponent_self_type);
               v_opponent_talent_state := v_talent_res -> 'state';
               v_turns := v_turns || (v_talent_res -> 'turns');
               IF NOT (v_talent_res ->> 'blocked')::boolean THEN
@@ -9223,7 +9295,8 @@ BEGIN
               CASE WHEN v_player_status_reversed THEN v_player_talent_state ELSE v_opponent_talent_state END,
               CASE WHEN v_player_status_reversed THEN 'player' ELSE 'opponent' END,
               v_ability.status_effect,
-              CASE WHEN v_player_status_reversed THEN v_player_hp ELSE v_opponent_hp END, v_turn_no);
+              CASE WHEN v_player_status_reversed THEN v_player_hp ELSE v_opponent_hp END, v_turn_no,
+              CASE WHEN v_player_status_reversed THEN v_player_self_type ELSE v_opponent_self_type END);
             IF v_player_status_reversed THEN v_player_talent_state := v_talent_res -> 'state';
             ELSE v_opponent_talent_state := v_talent_res -> 'state'; END IF;
             v_talent_pending := COALESCE(v_talent_pending, '[]'::jsonb) || (v_talent_res -> 'turns');
@@ -9431,7 +9504,7 @@ BEGIN
       -- tentative d'infliger un statut ('inflict_status', déclencheur « à chaque
       -- tour »). Les passifs permanents sont annoncés en tête de combat.
       v_talent_res := autobattle_talent_act(v_opponent_talents, v_opponent_talent_state, 'opponent', 'each_turn', v_opponent_ability.type,
-        v_opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status, v_player_talents, v_turn_no, v_weather);
+        v_opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status, v_player_talents, v_turn_no, v_weather, v_player_self_type);
       v_opponent_talent_state := v_talent_res -> 'state';
       v_turns := v_turns || (v_talent_res -> 'turns');
       -- Voir le même commentaire côté joueur plus haut.
@@ -9442,7 +9515,7 @@ BEGIN
       -- Statut infligé par un talent : la cible peut encore le neutraliser
       -- ('status_immunity' est déjà pris en compte, 'auto_cure_first_status' non).
       IF v_talent_inflict IS NOT NULL THEN
-        v_talent_res := autobattle_talent_status_guard(v_player_talents, v_player_talent_state, 'player', v_talent_inflict, v_player_hp, v_turn_no);
+        v_talent_res := autobattle_talent_status_guard(v_player_talents, v_player_talent_state, 'player', v_talent_inflict, v_player_hp, v_turn_no, v_player_self_type);
         v_player_talent_state := v_talent_res -> 'state';
         v_turns := v_turns || (v_talent_res -> 'turns');
         IF NOT (v_talent_res ->> 'blocked')::boolean THEN
@@ -9575,7 +9648,7 @@ BEGIN
           -- un tick de brûlure/poison, qui ne passent pas par ici.
           IF v_hit_damage > 0 THEN
             v_talent_res := autobattle_talent_act(v_opponent_talents, v_opponent_talent_state, 'opponent', 'on_ability_type', v_opponent_ability.type,
-              v_opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status, v_player_talents, v_turn_no, v_weather);
+              v_opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status, v_player_talents, v_turn_no, v_weather, v_player_self_type);
             v_opponent_talent_state := v_talent_res -> 'state';
             v_turns := v_turns || (v_talent_res -> 'turns');
             v_weather_res := autobattle_weather_set((v_talent_res ->> 'set_weather')::bigint, v_weather_enabled, v_weather, 'opponent', v_opponent_hp, v_turn_no);
@@ -9583,7 +9656,7 @@ BEGIN
             v_turns := v_turns || (v_weather_res -> 'turns');
             v_talent_inflict := v_talent_res ->> 'inflict_status';
             IF v_talent_inflict IS NOT NULL THEN
-              v_talent_res := autobattle_talent_status_guard(v_player_talents, v_player_talent_state, 'player', v_talent_inflict, v_player_hp, v_turn_no);
+              v_talent_res := autobattle_talent_status_guard(v_player_talents, v_player_talent_state, 'player', v_talent_inflict, v_player_hp, v_turn_no, v_player_self_type);
               v_player_talent_state := v_talent_res -> 'state';
               v_turns := v_turns || (v_talent_res -> 'turns');
               IF NOT (v_talent_res ->> 'blocked')::boolean THEN
@@ -9669,7 +9742,8 @@ BEGIN
               CASE WHEN v_opponent_status_reversed THEN v_opponent_talent_state ELSE v_player_talent_state END,
               CASE WHEN v_opponent_status_reversed THEN 'opponent' ELSE 'player' END,
               v_opponent_ability.status_effect,
-              CASE WHEN v_opponent_status_reversed THEN v_opponent_hp ELSE v_player_hp END, v_turn_no);
+              CASE WHEN v_opponent_status_reversed THEN v_opponent_hp ELSE v_player_hp END, v_turn_no,
+              CASE WHEN v_opponent_status_reversed THEN v_opponent_self_type ELSE v_player_self_type END);
             IF v_opponent_status_reversed THEN v_opponent_talent_state := v_talent_res -> 'state';
             ELSE v_player_talent_state := v_talent_res -> 'state'; END IF;
             v_talent_pending := COALESCE(v_talent_pending, '[]'::jsonb) || (v_talent_res -> 'turns');
@@ -9948,6 +10022,10 @@ DECLARE
   v_progress       record;
   v_pp             record;
   v_player_species record;
+  -- Type d'espèce de l'adversaire du niveau : sert aux immunités de statut de
+  -- type des talents « à l'entrée en combat » (autobattle_status_type_immune),
+  -- le reste du combat étant résolu par autobattle_resolve_manual_round.
+  v_opponent_type  text;
   v_row            autobattle_manual_battles%ROWTYPE;
   v_ticket_item_nom text := 'Ticket Combat';
   v_player_max_hp  integer;
@@ -10010,6 +10088,7 @@ BEGIN
   IF v_player_species IS NULL THEN
     RETURN jsonb_build_object('status', 'ineligible_pokemon');
   END IF;
+  SELECT type INTO v_opponent_type FROM pokemon WHERE nom = v_level.opponent_pokemon_nom;
 
   SELECT * INTO v_row FROM autobattle_manual_battles
     WHERE player_id = p_player_id AND level_id = p_level_id FOR UPDATE;
@@ -10070,7 +10149,7 @@ BEGIN
   FOREACH v_side IN ARRAY (CASE WHEN v_first_attacker = 'player' THEN ARRAY['player', 'opponent'] ELSE ARRAY['opponent', 'player'] END) LOOP
     IF v_side = 'player' THEN
       v_talent_res := autobattle_talent_act(v_player_talents, v_player_talent_state, 'player', 'battle_start', NULL,
-        GREATEST(1, v_player_max_hp), GREATEST(1, v_player_max_hp), v_opponent_status, v_player_status, v_opponent_talents, 0, v_weather);
+        GREATEST(1, v_player_max_hp), GREATEST(1, v_player_max_hp), v_opponent_status, v_player_status, v_opponent_talents, 0, v_weather, v_opponent_type);
       v_player_talent_state := v_talent_res -> 'state';
       v_start_turns := v_start_turns || (v_talent_res -> 'turns');
       -- Météo levée « à l'entrée en combat » : persistée sur la ligne de combat,
@@ -10080,7 +10159,7 @@ BEGIN
       v_start_turns := v_start_turns || (v_weather_res -> 'turns');
       v_talent_inflict := v_talent_res ->> 'inflict_status';
       IF v_talent_inflict IS NOT NULL THEN
-        v_talent_res := autobattle_talent_status_guard(v_opponent_talents, v_opponent_talent_state, 'opponent', v_talent_inflict, v_level.opponent_hp, 0);
+        v_talent_res := autobattle_talent_status_guard(v_opponent_talents, v_opponent_talent_state, 'opponent', v_talent_inflict, v_level.opponent_hp, 0, v_opponent_type);
         v_opponent_talent_state := v_talent_res -> 'state';
         v_start_turns := v_start_turns || (v_talent_res -> 'turns');
         IF NOT (v_talent_res ->> 'blocked')::boolean THEN
@@ -10089,7 +10168,7 @@ BEGIN
       END IF;
     ELSE
       v_talent_res := autobattle_talent_act(v_opponent_talents, v_opponent_talent_state, 'opponent', 'battle_start', NULL,
-        v_level.opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status, v_player_talents, 0, v_weather);
+        v_level.opponent_hp, v_level.opponent_hp, v_player_status, v_opponent_status, v_player_talents, 0, v_weather, v_player_species.type);
       v_opponent_talent_state := v_talent_res -> 'state';
       v_start_turns := v_start_turns || (v_talent_res -> 'turns');
       -- Voir le même commentaire côté joueur.
@@ -10098,7 +10177,7 @@ BEGIN
       v_start_turns := v_start_turns || (v_weather_res -> 'turns');
       v_talent_inflict := v_talent_res ->> 'inflict_status';
       IF v_talent_inflict IS NOT NULL THEN
-        v_talent_res := autobattle_talent_status_guard(v_player_talents, v_player_talent_state, 'player', v_talent_inflict, GREATEST(1, v_player_max_hp), 0);
+        v_talent_res := autobattle_talent_status_guard(v_player_talents, v_player_talent_state, 'player', v_talent_inflict, GREATEST(1, v_player_max_hp), 0, v_player_species.type);
         v_player_talent_state := v_talent_res -> 'state';
         v_start_turns := v_start_turns || (v_talent_res -> 'turns');
         IF NOT (v_talent_res ->> 'blocked')::boolean THEN
@@ -12133,6 +12212,9 @@ DECLARE
   v_challenge         record;
   v_pp                record;
   v_species           record;
+  -- Type d'espèce du DÉFENSEUR (le défi ne stocke que son nom d'espèce) : sert
+  -- aux immunités de statut de type des talents « à l'entrée en combat ».
+  v_d_type            text;
   v_row               pvp_battles%ROWTYPE;
   v_attacker_max_hp   integer;
   v_first_attacker    text;
@@ -12184,6 +12266,7 @@ BEGIN
   IF v_species IS NULL THEN
     RETURN jsonb_build_object('status', 'ineligible_pokemon');
   END IF;
+  SELECT type INTO v_d_type FROM pokemon WHERE nom = v_challenge.pokemon_nom;
 
   SELECT * INTO v_row FROM pvp_battles
     WHERE attacker_player_id = p_attacker_player_id AND challenge_id = p_challenge_id FOR UPDATE;
@@ -12239,7 +12322,7 @@ BEGIN
   FOREACH v_side IN ARRAY (CASE WHEN v_first_attacker = 'attacker' THEN ARRAY['player', 'opponent'] ELSE ARRAY['opponent', 'player'] END) LOOP
     IF v_side = 'player' THEN
       v_talent_res := autobattle_talent_act(v_a_talents, v_a_talent_state, 'player', 'battle_start', NULL,
-        v_attacker_max_hp, v_attacker_max_hp, v_d_status, v_a_status, v_d_talents, 0, v_weather);
+        v_attacker_max_hp, v_attacker_max_hp, v_d_status, v_a_status, v_d_talents, 0, v_weather, v_d_type);
       v_a_talent_state := v_talent_res -> 'state';
       v_start_turns := v_start_turns || (v_talent_res -> 'turns');
       -- Météo « à l'entrée en combat » : persistée sur la ligne de combat.
@@ -12248,7 +12331,7 @@ BEGIN
       v_start_turns := v_start_turns || (v_weather_res -> 'turns');
       v_talent_inflict := v_talent_res ->> 'inflict_status';
       IF v_talent_inflict IS NOT NULL THEN
-        v_talent_res := autobattle_talent_status_guard(v_d_talents, v_d_talent_state, 'opponent', v_talent_inflict, v_challenge.max_hp, 0);
+        v_talent_res := autobattle_talent_status_guard(v_d_talents, v_d_talent_state, 'opponent', v_talent_inflict, v_challenge.max_hp, 0, v_d_type);
         v_d_talent_state := v_talent_res -> 'state';
         v_start_turns := v_start_turns || (v_talent_res -> 'turns');
         IF NOT (v_talent_res ->> 'blocked')::boolean THEN
@@ -12257,7 +12340,7 @@ BEGIN
       END IF;
     ELSE
       v_talent_res := autobattle_talent_act(v_d_talents, v_d_talent_state, 'opponent', 'battle_start', NULL,
-        v_challenge.max_hp, v_challenge.max_hp, v_a_status, v_d_status, v_a_talents, 0, v_weather);
+        v_challenge.max_hp, v_challenge.max_hp, v_a_status, v_d_status, v_a_talents, 0, v_weather, v_species.type);
       v_d_talent_state := v_talent_res -> 'state';
       v_start_turns := v_start_turns || (v_talent_res -> 'turns');
       -- Voir le même commentaire côté attaquant.
@@ -12266,7 +12349,7 @@ BEGIN
       v_start_turns := v_start_turns || (v_weather_res -> 'turns');
       v_talent_inflict := v_talent_res ->> 'inflict_status';
       IF v_talent_inflict IS NOT NULL THEN
-        v_talent_res := autobattle_talent_status_guard(v_a_talents, v_a_talent_state, 'player', v_talent_inflict, v_attacker_max_hp, 0);
+        v_talent_res := autobattle_talent_status_guard(v_a_talents, v_a_talent_state, 'player', v_talent_inflict, v_attacker_max_hp, 0, v_species.type);
         v_a_talent_state := v_talent_res -> 'state';
         v_start_turns := v_start_turns || (v_talent_res -> 'turns');
         IF NOT (v_talent_res ->> 'blocked')::boolean THEN
@@ -13136,7 +13219,7 @@ BEGIN
   FOREACH v_side IN ARRAY (CASE WHEN v_first_attacker = 'attacker' THEN ARRAY['player', 'opponent'] ELSE ARRAY['opponent', 'player'] END) LOOP
     IF v_side = 'player' THEN
       v_talent_res := autobattle_talent_act(v_a_talents, v_a_talent_state, 'player', 'battle_start', NULL,
-        v_attacker_max_hp, v_attacker_max_hp, v_d_status, v_a_status, v_d_talents, 0, v_weather);
+        v_attacker_max_hp, v_attacker_max_hp, v_d_status, v_a_status, v_d_talents, 0, v_weather, v_dummy_species.type);
       v_a_talent_state := v_talent_res -> 'state';
       v_start_turns := v_start_turns || (v_talent_res -> 'turns');
       -- Météo « à l'entrée en combat » : persistée sur la ligne d'essai.
@@ -13145,7 +13228,7 @@ BEGIN
       v_start_turns := v_start_turns || (v_weather_res -> 'turns');
       v_talent_inflict := v_talent_res ->> 'inflict_status';
       IF v_talent_inflict IS NOT NULL THEN
-        v_talent_res := autobattle_talent_status_guard(v_d_talents, v_d_talent_state, 'opponent', v_talent_inflict, v_dummy_hp, 0);
+        v_talent_res := autobattle_talent_status_guard(v_d_talents, v_d_talent_state, 'opponent', v_talent_inflict, v_dummy_hp, 0, v_dummy_species.type);
         v_d_talent_state := v_talent_res -> 'state';
         v_start_turns := v_start_turns || (v_talent_res -> 'turns');
         IF NOT (v_talent_res ->> 'blocked')::boolean THEN
@@ -13154,7 +13237,7 @@ BEGIN
       END IF;
     ELSE
       v_talent_res := autobattle_talent_act(v_d_talents, v_d_talent_state, 'opponent', 'battle_start', NULL,
-        v_dummy_hp, v_dummy_hp, v_a_status, v_d_status, v_a_talents, 0, v_weather);
+        v_dummy_hp, v_dummy_hp, v_a_status, v_d_status, v_a_talents, 0, v_weather, v_species.type);
       v_d_talent_state := v_talent_res -> 'state';
       v_start_turns := v_start_turns || (v_talent_res -> 'turns');
       -- Voir le même commentaire côté attaquant.
@@ -13163,7 +13246,7 @@ BEGIN
       v_start_turns := v_start_turns || (v_weather_res -> 'turns');
       v_talent_inflict := v_talent_res ->> 'inflict_status';
       IF v_talent_inflict IS NOT NULL THEN
-        v_talent_res := autobattle_talent_status_guard(v_a_talents, v_a_talent_state, 'player', v_talent_inflict, v_attacker_max_hp, 0);
+        v_talent_res := autobattle_talent_status_guard(v_a_talents, v_a_talent_state, 'player', v_talent_inflict, v_attacker_max_hp, 0, v_species.type);
         v_a_talent_state := v_talent_res -> 'state';
         v_start_turns := v_start_turns || (v_talent_res -> 'turns');
         IF NOT (v_talent_res ->> 'blocked')::boolean THEN

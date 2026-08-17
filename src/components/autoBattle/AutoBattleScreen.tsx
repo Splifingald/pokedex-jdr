@@ -725,6 +725,19 @@ export function AutoBattleScreen({
             if (attackerSide === 'player') setPlayerHp(Math.min(playerMaxHp, turn.attacker_hp_after))
             else setOpponentHp(Math.min(opponentMaxHp, turn.attacker_hp_after))
           }
+          // Dégâts de terrain (Tempête de sable & co.) : même retour visuel que
+          // n'importe quels dégâts encaissés — nombre qui s'envole sur le
+          // pokémon, secousse et flash — la barre de PV qui descend et la ligne
+          // d'historique ne suffisaient pas à faire le lien avec la météo.
+          const weatherDamage = turn.weather_damage ?? 0
+          if (weatherDamage > 0) {
+            setShakeSide(attackerSide)
+            setFlashSide(attackerSide)
+            setLastDamage({ side: attackerSide, damage: weatherDamage, superEffective: false })
+            setHitKey((k) => k + 1)
+            window.setTimeout(() => setShakeSide(null), SHAKE_MS)
+            window.setTimeout(() => setFlashSide(null), FLASH_MS)
+          }
           // Statut de terrain : il vise le pokémon CONCERNÉ lui-même, pas son
           // adversaire (contrairement au talent 'inflict_status').
           if (turn.weather_inflicted_status) {

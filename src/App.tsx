@@ -31,9 +31,10 @@ import { CarteTab } from './components/CarteTab'
 import { PokedollarChip } from './components/PokedollarChip'
 import { SettingsPopup } from './components/SettingsPopup'
 import { PlayerProfilePopup } from './components/PlayerProfilePopup'
-import { FullscreenPromptModal } from './components/FullscreenPromptModal'
+import { NotificationPromptModal } from './components/NotificationPromptModal'
 import { PixelIcon } from './components/icons/PixelIcon'
-import { useFullscreen, isFullscreenSupported } from './hooks/useFullscreen'
+import { usePushNotifications } from './hooks/usePushNotifications'
+import { isMobileDevice } from './lib/pushNotifications'
 import { useUnsavedChangesGuard } from './context/UnsavedChangesContext'
 import { PANEL_LG, PIXEL_BORDER_SM } from './lib/panelStyles'
 import { SETTINGS_ICON } from './lib/icons'
@@ -68,10 +69,23 @@ export default function App() {
   const notificationsAvailable = parameters.feature_gifting_enabled ||
     ((casinoConfig.slots_enabled || casinoConfig.dice_enabled) && casinoConfig.ticket_full_notify_enabled)
   const { showToast } = useToast()
-  const { enter: enterFullscreen } = useFullscreen()
   const { guardedNavigate } = useUnsavedChangesGuard()
+  const push = usePushNotifications(player?.id ?? null)
 
-  const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(isFullscreenSupported)
+  // Invitation à activer les notifications à l'ouverture, tant qu'elles ne le sont pas
+  // (uniquement sur mobile ; rien à proposer si le navigateur les a bloquées,
+  // si elles sont déjà actives, ou si la PWA n'est pas installée sur iOS).
+  const [notifPromptDismissed, setNotifPromptDismissed] = useState(false)
+  const showNotifPrompt =
+    !notifPromptDismissed &&
+    !!player &&
+    notificationsAvailable &&
+    isMobileDevice() &&
+    push.supported &&
+    !push.needsInstall &&
+    push.ready &&
+    push.permission !== 'denied' &&
+    !push.subscribed
   const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem('adminMode') === 'true')
   const [showSettings, setShowSettings] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
@@ -362,10 +376,11 @@ export default function App() {
         />
       )}
 
-      {showFullscreenPrompt && (
-        <FullscreenPromptModal
-          onEnable={() => { enterFullscreen(); setShowFullscreenPrompt(false) }}
-          onClose={() => setShowFullscreenPrompt(false)}
+      {showNotifPrompt && (
+        <NotificationPromptModal
+          loading={push.loading}
+          onEnable={() => { void push.enable().then(() => setNotifPromptDismissed(true)) }}
+          onClose={() => setNotifPromptDismissed(true)}
         />
       )}
 

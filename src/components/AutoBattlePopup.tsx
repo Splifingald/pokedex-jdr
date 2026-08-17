@@ -10,6 +10,7 @@ import { useAutoBattleProgress } from '../hooks/useAutoBattleProgress'
 import { useAutoBattleBannedAttacks } from '../hooks/useAutoBattleBannedAttacks'
 import { useAutoBattleAbilityRules } from '../hooks/useAutoBattleAbilityRules'
 import { useAutoBattleTalents } from '../hooks/useAutoBattleTalents'
+import { useAutoBattleWeathers } from '../hooks/useAutoBattleWeathers'
 import { isPurchaseCapReached, localDateString, formatCountdown } from '../lib/casino'
 import { generateIdempotencyKey } from '../lib/autoBattle'
 import { getHpBreakdown } from '../lib/xpBonuses'
@@ -78,6 +79,10 @@ export function AutoBattlePopup({
   const { bannedNames } = useAutoBattleBannedAttacks()
   const { rules: abilityRules } = useAutoBattleAbilityRules()
   const { talentsByPokemon } = useAutoBattleTalents()
+  // Uniquement pour nommer les météos citées par les descriptions de talents
+  // (sélecteur de pokémon) et de capacités (sélecteur de capacité, grille du
+  // Combat Manuel) — le combat lui-même reçoit déjà ses libellés du serveur.
+  const { weatherNames } = useAutoBattleWeathers()
   const { showToast } = useToast()
 
   const abilityRulesByName = useMemo(() => {
@@ -101,6 +106,18 @@ export function AutoBattlePopup({
   const [bannerFullHeight, setBannerFullHeight] = useState<number | null>(null)
   const [scrollShrink, setScrollShrink] = useState(0)
   const BANNER_SHRINK_SCROLL_PX = 100
+  // Vitesse d'animation des combats, réglable UNIQUEMENT en admin (pastille
+  // posée sur la bannière, voir plus bas) : outil de test pour ne pas subir la
+  // chorégraphie complète à chaque essai. Gardée au niveau de la popup pour
+  // rester valable d'un combat à l'autre tant qu'elle est ouverte.
+  // ATTENTION : la vitesse est appliquée au moment où AutoBattleScreen
+  // PROGRAMME les animations d'un lot de tours. En Combat Manuel (un lot par
+  // tour), un changement se voit donc dès le tour suivant ; en Combat Auto
+  // (tout le combat programmé d'un coup dès la fin du compte à rebours), il
+  // vaut pour le combat suivant — jamais rétroactivement sur des animations
+  // déjà programmées.
+  const [battleSpeed, setBattleSpeed] = useState(1)
+  const BATTLE_SPEEDS = [1, 2, 5]
 
   // Ajuste l'état pendant le rendu plutôt que dans un effet (pattern
   // recommandé par React pour "réinitialiser un état quand une prop change",
@@ -560,13 +577,26 @@ export function AutoBattlePopup({
         {(view === 'battle' || view === 'manual-battle') && activeLevel && (
           <div
             ref={bannerWrapRef}
-            className="w-full shrink-0 overflow-hidden"
+            className="relative w-full shrink-0 overflow-hidden"
             style={{
               height: bannerFullHeight != null ? bannerFullHeight * (1 - scrollShrink * 0.5) : undefined,
               transition: 'height 120ms ease-out',
             }}
           >
             <GameBanner bannerUrl={activeVariant?.banner_url ?? ''} fallbackEmoji="⚔️" className="w-full h-full" />
+            {/* Réglage de vitesse, admin uniquement : un clic passe à la
+                valeur suivante (×1 → ×2 → ×5 → ×1). Posé en bas à droite de la
+                bannière, là où la croix de fermeture se trouve sur les autres
+                vues (elle est masquée pendant un combat). */}
+            {isAdmin && (
+              <button
+                onClick={() => setBattleSpeed((s) => BATTLE_SPEEDS[(BATTLE_SPEEDS.indexOf(s) + 1) % BATTLE_SPEEDS.length])}
+                title="Vitesse d'animation du combat (admin)"
+                className="absolute right-2 bottom-2 z-20 px-2 py-1 rounded border-2 border-ink bg-cream text-ink text-xs font-bold shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[1px] active:translate-y-[1px] transition-all"
+              >
+                ×{battleSpeed}
+              </button>
+            )}
           </div>
         )}
 
@@ -672,6 +702,7 @@ export function AutoBattlePopup({
               // Talents masqués quand la bascule globale du mode est coupée :
               // rien ne se déclencherait, autant ne rien annoncer.
               talentsByPokemon={config.talents_enabled ? talentsByPokemon : undefined}
+              weatherNames={weatherNames}
               // Mode Manuel : le combat démarre (et le ticket est débité) dès
               // le choix du pokémon, d'où la confirmation par "Lancer". Mode
               // Auto : le choix du pokémon ne fait qu'ouvrir la sélection de
@@ -730,7 +761,9 @@ export function AutoBattlePopup({
               abilityRulesByName={abilityRulesByName}
               bannedAttacks={bannedNames}
               precisionEnabled={config.precision_enabled}
+              weatherNames={weatherNames}
               isAdmin={isAdmin}
+              speedMultiplier={battleSpeed}
               onSubmitRound={(ability) => handleSubmitManualRound(selectedPokemon, ability)}
               onFinished={handleManualBattleFinished}
               onDeclareTie={() => void handleDeclareTie()}
@@ -746,6 +779,7 @@ export function AutoBattlePopup({
               abilityRulesByName={abilityRulesByName}
               bannedAttacks={bannedNames}
               precisionEnabled={config.precision_enabled}
+              weatherNames={weatherNames}
               noTicket={ticketCount < 1}
               onSelect={(ability) => void handleSelectAbility(selectedPokemon, ability)}
               onBack={() => setView('pick-pokemon')}
@@ -780,6 +814,7 @@ export function AutoBattlePopup({
               opponentTypeBonus={battleResult.opponent_type_bonus ?? false}
               onContinue={() => handleBattleFinished()}
               isAdmin={isAdmin}
+              speedMultiplier={battleSpeed}
               attacksByName={attacksByName}
               abilityRulesByName={abilityRulesByName}
               playerDamagePerHit={battleResult.player_damage_per_hit}

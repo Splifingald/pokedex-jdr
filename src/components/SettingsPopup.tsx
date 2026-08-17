@@ -37,7 +37,7 @@ interface Props {
 
 export function SettingsPopup({ player, isAdmin, notificationsAvailable, onRequestLogin, onLogout, onAdminSuccess, onAdminLogout, onClose }: Props) {
   const { isFullscreen, toggle } = useFullscreen()
-  const { supported, needsInstall, permission, subscribed, loading, enable, disable } = usePushNotifications(player?.id ?? null)
+  const { supported, needsInstall, permission, subscribed, ready, loading, enable, disable } = usePushNotifications(player?.id ?? null)
   const [showInstallPrompt, setShowInstallPrompt] = useState(false)
   const [adminPassword, setAdminPassword] = useState('')
   const [adminMsg, setAdminMsg] = useState<{ text: string; error: boolean } | null>(null)
@@ -124,10 +124,10 @@ export function SettingsPopup({ player, isAdmin, notificationsAvailable, onReque
             ) : (
               <button
                 onClick={handleToggleNotifications}
-                disabled={loading}
-                className={`text-xs px-2.5 py-1.5 rounded-md font-bold ${subscribed ? BUTTON_STYLE.green : BUTTON_STYLE.gray}`}
+                disabled={loading || !ready}
+                className={`text-xs px-2.5 py-1.5 rounded-md font-bold disabled:opacity-60 ${subscribed ? BUTTON_STYLE.green : BUTTON_STYLE.gray}`}
               >
-                {subscribed ? 'Activées' : 'Désactivées'}
+                {loading || !ready ? '...' : subscribed ? 'Activées' : 'Désactivées'}
               </button>
             )}
           </div>

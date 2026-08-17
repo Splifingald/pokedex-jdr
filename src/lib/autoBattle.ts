@@ -22,6 +22,19 @@ export const STATUS_EFFECT_LABEL: Record<AutoBattleStatusEffect, string> = {
   frozen: 'Gel',
 }
 
+// Forme ADJECTIVE (masculin singulier) des mêmes statuts, pour les phrases
+// construites autour du verbe être (« si l'adversaire est empoisonné ») où le
+// nom de STATUS_EFFECT_LABEL ne passe pas (« si l'adversaire est poison »).
+export const STATUS_EFFECT_ADJECTIVE: Record<AutoBattleStatusEffect, string> = {
+  paralysis: 'paralysé',
+  fear: 'apeuré',
+  confusion: 'confus',
+  sleep: 'endormi',
+  burn: 'brûlé',
+  poison: 'empoisonné',
+  frozen: 'gelé',
+}
+
 /**
  * Sens d'un modificateur de stat : la cible et le sens sont deux réglages
  * indépendants (une capacité peut se baisser une stat à elle-même). Les règles
@@ -185,7 +198,9 @@ export function describeAbilityRule(
 ): string[] {
   if (!rule) return []
   const lines: string[] = []
-  const weatherNom = (id: number | null) => (id != null ? weatherNames?.get(id) ?? null : null)
+  // Voir describeTalent : null seulement si la règle ne vise aucune météo — un
+  // id qu'on n'arrive pas à nommer se dit « une météo », pas « supprimée ».
+  const weatherNom = (id: number | null) => (id != null ? weatherNames?.get(id) ?? 'une météo' : null)
   if (rule.turn_effect === 'skip') {
     lines.push('Passe son tour 1 fois sur 2')
   } else if (rule.turn_effect === 'play_twice') {
@@ -302,9 +317,9 @@ export function describeAbilityRule(
       : rule.bonus_damage_condition === 'first_use' ? 'à la 1ère utilisation'
       : rule.bonus_damage_condition === 'dice_equals' ? `si le dé fait ${rule.bonus_damage_condition_dice_value}`
       : rule.bonus_damage_condition === 'has_status'
-        ? (rule.bonus_damage_status_filter ? `si l'adversaire est ${STATUS_EFFECT_LABEL[rule.bonus_damage_status_filter].toLowerCase()}` : "si l'adversaire a un statut")
+        ? (rule.bonus_damage_status_filter ? `si l'adversaire est ${STATUS_EFFECT_ADJECTIVE[rule.bonus_damage_status_filter]}` : "si l'adversaire a un statut")
       : rule.bonus_damage_condition === 'self_has_status'
-        ? (rule.bonus_damage_status_filter ? `si lui-même ${STATUS_EFFECT_LABEL[rule.bonus_damage_status_filter].toLowerCase()}` : "s'il a un statut")
+        ? (rule.bonus_damage_status_filter ? `s'il est ${STATUS_EFFECT_ADJECTIVE[rule.bonus_damage_status_filter]}` : "s'il a un statut")
       : rule.bonus_damage_condition === 'weight_ratio' ? describeWeightCondition(rule)
       : ''
     const bonusLabel = rule.bonus_damage_type === 'multiply' ? `Dégâts ×${rule.bonus_damage_multiplier}`
@@ -398,7 +413,11 @@ const listOrAll = (list: string[] | null) => (list && list.length > 0 ? list.joi
 // `weatherNames` : noms des météos par id (le talent ne stocke qu'un id). Absent
 // = la phrase reste correcte, elle nomme juste « une météo » à la place.
 export function describeTalent(talent: AutoBattleTalent, weatherNames?: Map<number, string>): string {
-  const weatherNom = (id: number | null) => (id != null ? weatherNames?.get(id) ?? null : null)
+  // null UNIQUEMENT quand le talent ne vise aucune météo (colonne à NULL, donc
+  // effet réellement inerte) : un id présent mais introuvable dans la table
+  // (map absente, ou pas encore chargée) doit se lire « une météo », jamais
+  // « supprimée » / « ce talent ne fait rien ».
+  const weatherNom = (id: number | null) => (id != null ? weatherNames?.get(id) ?? 'une météo' : null)
   switch (talent.kind) {
     case 'stat_boost': {
       const stat = talent.stat === 'precision' ? 'précision' : 'dégâts'

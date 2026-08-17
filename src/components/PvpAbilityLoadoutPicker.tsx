@@ -17,6 +17,8 @@ interface Props {
   bannedAttacks: Set<string>
   precisionEnabled: boolean
   loadoutMax: number
+  /** Noms des météos par id (voir useAutoBattleWeathers.weatherNames) — une règle ne stocke qu'un id de météo, sans cette table describeAbilityRule dit « une météo » au lieu de la nommer. */
+  weatherNames?: Map<number, string>
   /** Contrôlé par le parent (PvpPopup) — survit à un aller-retour vers l'écran "Tester" (voir onTest), contrairement à un état local qui serait perdu au démontage. */
   selected: string[]
   onSelectedChange: (next: string[]) => void
@@ -37,7 +39,7 @@ interface Props {
 // doublons possibles) — pas de réordonnancement (seulement 4-8 éléments,
 // retirer et rajouter dans le bon ordre suffit).
 export function PvpAbilityLoadoutPicker({
-  playerPokemon, attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, loadoutMax,
+  playerPokemon, attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, loadoutMax, weatherNames,
   selected, onSelectedChange, onConfirm, onTest, trialAvailable, onBack,
 }: Props) {
   const { showToast } = useToast()
@@ -99,7 +101,7 @@ export function PvpAbilityLoadoutPicker({
         {abilities.map((a) => {
           const ineligible = bannedAttacks.has(a.nom)
           const indices = indicesByName.get(a.nom) ?? []
-          const effectLines = describeAbilityRule(abilityRulesByName.get(a.nom), a)
+          const effectLines = describeAbilityRule(abilityRulesByName.get(a.nom), a, weatherNames)
           return (
             <button
               key={a.nom}

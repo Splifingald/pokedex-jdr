@@ -21,6 +21,8 @@ interface Props {
   abilityRulesByName: Map<string, AutoBattleAbilityRule>
   bannedAttacks: Set<string>
   precisionEnabled: boolean
+  /** Noms des météos par id (voir useAutoBattleWeathers.weatherNames) — une règle ne stocke qu'un id de météo, sans cette table describeAbilityRule dit « une météo » au lieu de la nommer. */
+  weatherNames?: Map<number, string>
   /** Lance réellement le combat (et débite le ticket) — appelée au bouton "Lancer", pas au tap sur une capacité, qui ne fait que la sélectionner. */
   onSelect: (ability: Attack) => void
   /** Plus aucun ticket : "Lancer" apparaît quand même une fois la capacité choisie, mais désactivé. */
@@ -44,7 +46,7 @@ interface Props {
 // qui déclenche le combat et le débit du ticket (voir handleSelectAbility
 // dans AutoBattlePopup). Tant qu'il n'est pas pressé, le joueur peut changer
 // d'avis ou revenir en arrière sans rien dépenser.
-export function AutoBattleAbilityPicker({ playerPokemon, opponentSpecies, opponentDiscovered, attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, onSelect, noTicket, onBack }: Props) {
+export function AutoBattleAbilityPicker({ playerPokemon, opponentSpecies, opponentDiscovered, attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, weatherNames, onSelect, noTicket, onBack }: Props) {
   const { showToast } = useToast()
   const [selected, setSelected] = useState<Attack | null>(null)
   const abilities = playerPokemon.moves
@@ -68,7 +70,7 @@ export function AutoBattleAbilityPicker({ playerPokemon, opponentSpecies, oppone
           // concernées : un soin/buff sur soi reste jouable (requirement).
           const noEffect = !banned && isAbilityBlockedByType(a, rule, opponentSpecies?.type)
           const ineligible = banned || noEffect
-          const effectLines = describeAbilityRule(rule, a)
+          const effectLines = describeAbilityRule(rule, a, weatherNames)
           // Super efficace : type de LA CAPACITÉ vs type de l'adversaire —
           // plus aucun rapport avec le type du pokémon qui la lance.
           const superEffective = opponentDiscovered && isTypeSuperEffective(a.type, opponentSpecies?.type)

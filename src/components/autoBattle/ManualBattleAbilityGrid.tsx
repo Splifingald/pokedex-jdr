@@ -22,6 +22,8 @@ interface Props {
   weatherIcon?: string | null
   /** Nom de la météo en cours, pour l'infobulle de la pastille. */
   weatherNom?: string | null
+  /** À ne pas confondre avec `weatherNom` (météo EN COURS) : table des noms de TOUTES les météos par id (voir useAutoBattleWeathers.weatherNames), dont describeAbilityRule a besoin pour nommer la météo citée par une règle — qui n'en stocke que l'id. */
+  weatherNames?: Map<number, string>
   /** Effets de la météo en cours — décident quelles capacités portent la pastille (voir weatherAffectsAbility). */
   weatherEffects?: AutoBattleWeatherEffect[]
   /** Type dont l'immunité est PERCÉE en ce moment au profit du joueur (perce-immunité encore actif, voir AutoBattleManualRoundResult.player_pierce_immunity_type) : les capacités que ce type bloque redeviennent jouables. */
@@ -35,7 +37,7 @@ interface Props {
 // le combat — pas un écran de sélection séparé comme AutoBattleAbilityPicker
 // en mode Auto). `disabled` = un tour est en cours de résolution/animation
 // (attend le prochain round_no), la grille reste visible mais non cliquable.
-export function ManualBattleAbilityGrid({ abilityNoms, opponentSpecies, attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, weatherIcon, weatherNom, weatherEffects, piercedImmunityType, disabled, onSelect }: Props) {
+export function ManualBattleAbilityGrid({ abilityNoms, opponentSpecies, attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, weatherIcon, weatherNom, weatherNames, weatherEffects, piercedImmunityType, disabled, onSelect }: Props) {
   const { showToast } = useToast()
   const abilities = abilityNoms
     .map((nom) => attacksByName.get(nom))
@@ -51,7 +53,7 @@ export function ManualBattleAbilityGrid({ abilityNoms, opponentSpecies, attacksB
         // l'adversaire (soin/buff sur soi, météo).
         const noEffect = !banned && isAbilityBlockedByType(a, rule, opponentSpecies?.type, piercedImmunityType)
         const ineligible = banned || noEffect
-        const effectLines = describeAbilityRule(rule, a)
+        const effectLines = describeAbilityRule(rule, a, weatherNames)
         // Super efficace : type de LA CAPACITÉ vs type de l'adversaire.
         const superEffective = isTypeSuperEffective(a.type, opponentSpecies?.type)
         // Météo : la pastille ne s'affiche que si CETTE capacité est concernée

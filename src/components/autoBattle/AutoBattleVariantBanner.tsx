@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type {
   AutoBattleVariant, AutoBattleLevel, AutoBattleLevelReward,
   AutoBattlePlayerVariantProgress, AutoBattlePlayerLevelState, Pokemon, Item,
@@ -25,9 +25,6 @@ interface Props {
 // quand il y en a peu, réduit progressivement jusqu'à un plancher de 1.5×
 // quand il y en a beaucoup (au-delà, la jauge défile horizontalement plutôt
 // que de continuer à se resserrer).
-// Diamètre d'une puce de niveau (w-6) — sert à calculer la largeur du
-// remplissage de la jauge, qui s'arrête au centre de la puce courante.
-const DOT_PX = 24
 const BASE_GAP_PX = 8
 const MAX_GAP_PX = BASE_GAP_PX * 2.5
 const MIN_GAP_PX = BASE_GAP_PX * 1.5
@@ -102,7 +99,9 @@ export function AutoBattleVariantBanner({
   const displayedCurrent = completed ? levels.length : currentIndex + 1
   const currentDotRef = useRef<HTMLDivElement>(null)
   const levelStripRef = useRef<HTMLDivElement>(null)
+  const levelRowRef = useRef<HTMLDivElement>(null)
   const levelGapPx = computeLevelGapPx(levels.length)
+  const [fillWidthPx, setFillWidthPx] = useState(0)
 
   // Recentre la jauge de niveaux sur la puce courante — en pilotant nous-mêmes
   // le scrollLeft de la bande défilante plutôt qu'avec scrollIntoView : celui-
@@ -120,10 +119,31 @@ export function AutoBattleVariantBanner({
     strip.scrollLeft += delta
   }, [])
 
-  // Remplissage de la jauge : s'arrête au centre de la puce du niveau courant
-  // (les puces sont espacées régulièrement de DOT_PX + levelGapPx), ou couvre
-  // toute la barre quand le parcours est terminé.
-  const fillWidthPx = currentIndex * (DOT_PX + levelGapPx) + DOT_PX / 2
+  // Remplissage de la jauge : il s'arrête au centre de la puce du niveau
+  // courant, MESURÉE et non calculée. La largeur des puces (w-6) est en rem et
+  // suit donc le `html { font-size: 130% }` de index.css (≈31 px, pas 24), là
+  // où l'espacement inter-puces est posé en px : toute constante en dur ici se
+  // trompait d'un peu à chaque niveau, et la jauge décrochait de plus en plus
+  // de la puce à mesure qu'on avançait dans le parcours.
+  useLayoutEffect(() => {
+    const row = levelRowRef.current
+    const dot = currentDotRef.current
+    if (!row || !dot) return
+    // Rects plutôt qu'offsetLeft : la puce courante porte un scale-110, dont le
+    // CENTRE ne bouge pas (transform-origin au centre) — c'est bien ce centre-
+    // là qu'on vise, et les deux rects défilent ensemble dans la bande.
+    const measure = () => {
+      const rowRect = row.getBoundingClientRect()
+      const dotRect = dot.getBoundingClientRect()
+      setFillWidthPx(dotRect.left + dotRect.width / 2 - rowRect.left)
+    }
+    measure()
+    // Le zoom du navigateur / un changement de taille de police relayoute la
+    // rangée : on re-mesure plutôt que de figer la valeur du premier rendu.
+    const observer = new ResizeObserver(measure)
+    observer.observe(row)
+    return () => observer.disconnect()
+  }, [levels, currentIndex, levelGapPx])
 
   return (
     <div className="flex flex-col">
@@ -194,7 +214,7 @@ export function AutoBattleVariantBanner({
       {!completed && (
         <div ref={levelStripRef} className="w-full overflow-x-auto pt-2 pb-2.5">
           <div className="flex flex-col gap-0.5 w-max mx-auto px-3">
-            <div className="relative flex items-center" style={{ gap: `${levelGapPx}px` }}>
+            <div ref={levelRowRef} className="relative flex items-center" style={{ gap: `${levelGapPx}px` }}>
               <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-1.5 bg-black rounded" />
               <div
                 className="absolute left-0 top-1/2 -translate-y-1/2 h-1.5 bg-[#5fd67a] rounded"

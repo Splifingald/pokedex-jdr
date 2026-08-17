@@ -36,7 +36,11 @@ interface Props {
   abilityRulesByName: Map<string, AutoBattleAbilityRule>
   bannedAttacks: Set<string>
   precisionEnabled: boolean
+  /** Noms des météos par id (voir useAutoBattleWeathers.weatherNames) — simple passe-plat vers la grille de capacités, qui en a besoin pour nommer la météo citée par une règle. */
+  weatherNames?: Map<number, string>
   isAdmin?: boolean
+  /** Vitesse d'animation choisie en admin (voir AutoBattleScreen.speedMultiplier) — simple passe-plat. */
+  speedMultiplier?: number
   /** Envoie le tour au serveur (voir autobattle_resolve_manual_round) — renvoie null en cas d'erreur réseau/RPC (déjà signalée par le parent via toast). */
   onSubmitRound: (ability: Attack) => Promise<AutoBattleManualRoundResult | null>
   onFinished: (result: AutoBattleManualRoundResult) => void
@@ -60,7 +64,7 @@ interface Props {
 // pokémon, plus besoin de le différer ici jusqu'au 1er tour).
 export function ManualBattleScreen({
   playerPokemon, playerSpecies, playerMaxHp, opponentSpecies, opponentNom, opponentMaxHp, firstAttacker, startTurns, playerTransforms, opponentTransforms, opponentAbilityPool,
-  attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, isAdmin, onSubmitRound, onFinished, onDeclareTie,
+  attacksByName, abilityRulesByName, bannedAttacks, precisionEnabled, weatherNames, isAdmin, speedMultiplier, onSubmitRound, onFinished, onDeclareTie,
 }: Props) {
   // Les tours d'ouverture (talents) sont déjà résolus côté serveur au moment du
   // tirage au sort : ils amorcent le journal, et `busy` démarre à vrai pour que
@@ -219,6 +223,7 @@ export function ManualBattleScreen({
       hideContinueButton
       skipCountdown
       isAdmin={isAdmin}
+      speedMultiplier={speedMultiplier}
       attacksByName={attacksByName}
       abilityRulesByName={abilityRulesByName}
       midSlot={
@@ -248,6 +253,7 @@ export function ManualBattleScreen({
             precisionEnabled={precisionEnabled}
             weatherIcon={activeWeather?.weather_icon ?? null}
             weatherNom={activeWeather?.weather_nom ?? null}
+            weatherNames={weatherNames}
             weatherEffects={activeWeather?.weather_effects}
             piercedImmunityType={piercedImmunityType}
             disabled={busy || !!autoPlayAbility || !!forcedAbility}

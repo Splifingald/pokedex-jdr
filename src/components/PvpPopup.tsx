@@ -7,6 +7,7 @@ import { usePvpChallengeAttempts } from '../hooks/usePvpChallengeAttempts'
 import { useAutoBattleBannedAttacks } from '../hooks/useAutoBattleBannedAttacks'
 import { useAutoBattleAbilityRules } from '../hooks/useAutoBattleAbilityRules'
 import { useAutoBattleTalents } from '../hooks/useAutoBattleTalents'
+import { useAutoBattleWeathers } from '../hooks/useAutoBattleWeathers'
 import { generateIdempotencyKey, normalizeFirstAttacker } from '../lib/autoBattle'
 import { getHpBreakdown } from '../lib/xpBonuses'
 import { useToast } from '../context/ToastContext'
@@ -73,6 +74,9 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
   const { bannedNames } = useAutoBattleBannedAttacks()
   const { rules: abilityRules } = useAutoBattleAbilityRules()
   const { talentsByPokemon } = useAutoBattleTalents()
+  // Voir AutoBattlePopup : sert seulement à nommer les météos citées par les
+  // descriptions de talents et de capacités des écrans de sélection.
+  const { weatherNames } = useAutoBattleWeathers()
   const { showToast } = useToast()
 
   const abilityRulesByName = useMemo(() => {
@@ -422,6 +426,7 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
               opponentDiscovered={false}
               // Voir AutoBattlePopup : masqué si la bascule globale JcJ est coupée.
               talentsByPokemon={config.talents_enabled ? talentsByPokemon : undefined}
+              weatherNames={weatherNames}
               onSelect={(pp) => { setPostSelectedPokemon(pp); setSelectedAbilities([]); setView('post-pick-abilities') }}
               onBack={resetToList}
             />
@@ -435,6 +440,7 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
               bannedAttacks={bannedNames}
               precisionEnabled={config.precision_enabled}
               loadoutMax={config.loadout_max}
+              weatherNames={weatherNames}
               selected={selectedAbilities}
               onSelectedChange={setSelectedAbilities}
               onConfirm={() => void handlePostConfirm()}
@@ -469,6 +475,7 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
               opponentDiscovered
               // Voir AutoBattlePopup : masqué si la bascule globale JcJ est coupée.
               talentsByPokemon={config.talents_enabled ? talentsByPokemon : undefined}
+              weatherNames={weatherNames}
               onSelect={(pp) => void handleStartBattle(pp)}
               onBack={resetToList}
             />
@@ -500,6 +507,7 @@ export function PvpPopup({ player, players, roster, pokemonByName, attacksByName
               abilityRulesByName={abilityRulesByName}
               bannedAttacks={bannedNames}
               precisionEnabled={config.precision_enabled}
+              weatherNames={weatherNames}
               isAdmin={isAdmin}
               onSubmitRound={(ability) => handleSubmitRound(attackSelectedPokemon, ability)}
               onFinished={handleBattleFinished}

@@ -21,10 +21,12 @@ interface Props {
   bannedAttacks: Set<string>
   /** Espèce adverse du niveau en cours — undefined si pas encore résolue (ne devrait pas arriver en pratique, voir AutoBattlePopup). */
   opponentSpecies?: Pokemon
-  /** Ce niveau a-t-il déjà été joué au moins une fois (autobattle_player_level_state.discovered) — le badge "Super Efficace" ne doit apparaître qu'une fois l'adversaire réellement découvert, jamais en avant-première sur un niveau jamais tenté. */
+  /** Ce niveau a-t-il déjà été joué au moins une fois (autobattle_player_level_state.discovered) — le tri par efficacité ne doit tenir compte du type adverse qu'une fois celui-ci réellement découvert, jamais en avant-première sur un niveau jamais tenté. */
   opponentDiscovered: boolean
   /** Talents d'espèce (voir autobattle_talents), indexés par nom d'espèce — affichés sur la ligne du milieu. Omis quand la bascule globale du mode est désactivée (autobattle_config/pvp_config.talents_enabled), auquel cas la ligne disparaît plutôt que d'annoncer un effet qui ne se produira pas. */
   talentsByPokemon?: Map<string, AutoBattleTalent[]>
+  /** Noms des météos par id (voir useAutoBattleWeathers.weatherNames) — un talent ne stocke qu'un id de météo, sans cette table describeTalent ne sait pas la nommer et retombe sur « une météo supprimée » / « ce talent ne fait rien ». */
+  weatherNames?: Map<number, string>
   /** Choix en deux temps (Combat Manuel) : le tap ne fait que sélectionner le pokémon, onSelect n'est appelée qu'au bouton "Lancer" — c'est là que le ticket est débité (voir handleStartManualBattle). Sans ce drapeau (Combat Auto, PvP), le tap appelle onSelect directement : l'écran suivant ne coûte rien. */
   requireLaunch?: boolean
   /** Avec requireLaunch : plus aucun ticket, "Lancer" reste visible mais désactivé. */
@@ -68,7 +70,7 @@ const SORT_LABELS: Record<SortKey, string> = {
 // pokémon ayant au moins une capacité apprise non-bannie (voir requirement
 // #6/#9). Partagée telle quelle entre Combat Auto (auto ET manuel) et PvP
 // (AutoBattlePopup / PvpPopup) — aucune différence d'affichage entre modes.
-export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, bannedAttacks, opponentSpecies, opponentDiscovered, talentsByPokemon, requireLaunch, noTicket, onSelect, onBack }: Props) {
+export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, bannedAttacks, opponentSpecies, opponentDiscovered, talentsByPokemon, weatherNames, requireLaunch, noTicket, onSelect, onBack }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('default')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<PlayerPokemon | null>(null)
@@ -118,10 +120,12 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
     [roster, attacksByName, bannedAttacks]
   )
 
-  // L'efficacité se joue désormais au niveau de la CAPACITÉ (voir
-  // src/lib/typeChart.ts) : un pokémon est annoncé "Super Efficace" dès qu'au
-  // moins une de ses capacités apprises (non bannie) est avantageuse contre le
-  // type adverse — c'est bien ce que le joueur pourra jouer à l'écran suivant.
+  // Sert UNIQUEMENT au tri "Type & efficacité" : la pastille "Super Efficace"
+  // a été retirée des cartes, la règle d'efficacité ayant changé — on ne
+  // l'annonce plus au joueur, on se contente de remonter ces pokémon en tête.
+  // L'efficacité se joue au niveau de la CAPACITÉ (voir src/lib/typeChart.ts) :
+  // un pokémon compte dès qu'une de ses capacités apprises (non bannie) est
+  // avantageuse contre le type adverse.
   const isSuperEffective = (pp: PlayerPokemon) => {
     if (!opponentDiscovered || opponentSpecies == null) return false
     return pp.moves.some((nom) => {
@@ -205,7 +209,6 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
         <div className="flex flex-col gap-2">
           {sortedAndFiltered.map((pp) => {
             const species = pokemonByName.get(pp.pokemon_nom)
-            const superEffective = isSuperEffective(pp)
             const damage = getDamageBreakdown(species, pp.xp).total
             const hp = getHpBreakdown(species, pp.xp).total
             // Talents regroupés par NOM : une espèce peut en cumuler plusieurs
@@ -263,7 +266,7 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
                     <span className="flex items-center gap-1 flex-1 min-w-0 flex-wrap">
                       {talentGroups.map(([label, group]) => {
                         const key = `${pp.id}:${label}`
-                        const lines = group.map((t) => describeTalent(t))
+                        const lines = group.map((t) => describeTalent(t, weatherNames))
                         return (
                           <span
                             key={key}
@@ -284,12 +287,11 @@ export function AutoBattlePokemonPicker({ roster, pokemonByName, attacksByName, 
                         )
                       })}
                     </span>
+                    {/* Plus de pastille "Super Efficace" ici : la règle
+                        d'efficacité a changé, l'annonce faite sur la carte
+                        n'était plus fiable (le tri "Type & efficacité"
+                        continue, lui, de remonter ces pokémon). */}
                     <span className="flex items-center gap-1.5 shrink-0">
-                      {superEffective && (
-                        <span className="text-xs font-bold px-1.5 py-0.5 rounded-full text-white bg-[#d9761e] whitespace-nowrap">
-                          Super Efficace
-                        </span>
-                      )}
                       {species && <TypeBadge type={species.type} small />}
                     </span>
                   </div>
