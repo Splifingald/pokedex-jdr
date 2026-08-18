@@ -12,7 +12,7 @@ import { useAutoBattleAbilityRules } from '../hooks/useAutoBattleAbilityRules'
 import { useAutoBattleTalents } from '../hooks/useAutoBattleTalents'
 import { useAutoBattleWeathers } from '../hooks/useAutoBattleWeathers'
 import { isPurchaseCapReached, localDateString, formatCountdown } from '../lib/casino'
-import { generateIdempotencyKey } from '../lib/autoBattle'
+import { generateIdempotencyKey, isVariantUnlocked, countVariantDiscovered } from '../lib/autoBattle'
 import { getHpBreakdown } from '../lib/xpBonuses'
 import { getEvolutionOptions } from '../lib/evolution'
 import { useToast } from '../context/ToastContext'
@@ -43,6 +43,7 @@ const STATUS_MESSAGE: Record<string, string> = {
   ineligible_pokemon: 'Ce pokémon ne peut pas combattre (en pension ?).',
   ineligible_ability: "Cette capacité n'est plus disponible.",
   variant_disabled: 'Ce parcours est désactivé.',
+  variant_locked: "Ce parcours n'est plus accessible (conditions non remplies).",
   variant_completed: 'Ce parcours est déjà terminé.',
   invalid_level: 'Niveau mal configuré, contacte un admin.',
   duplicate_request: 'Combat déjà résolu.',
@@ -59,6 +60,8 @@ interface Props {
   playerItems: ReturnType<typeof usePlayerItems>
   roster: PlayerPokemon[]
   pokemonByName: Map<string, Pokemon>
+  /** Pokédex découvert (état GLOBAL partagé) — sert aux conditions de déverrouillage des parcours. */
+  discoveredPokemon: Set<string>
   attacksByName: Map<string, Attack>
   itemsByName: Map<string, Item>
   evolutionsByPokemonNom: Map<string, PokemonEvolution[]>
@@ -69,12 +72,12 @@ interface Props {
 }
 
 export function AutoBattlePopup({
-  player, players, playerItems, roster, pokemonByName, attacksByName, itemsByName, evolutionsByPokemonNom,
+  player, players, playerItems, roster, pokemonByName, discoveredPokemon, attacksByName, itemsByName, evolutionsByPokemonNom,
   pokedollarImageUrl, onRequestPokemonDetail, onClose, isAdmin,
 }: Props) {
   const { config } = useAutoBattleConfig()
   const { state, updateState } = useAutoBattlePlayerState(player.id)
-  const { variants, levelsByVariant, rewardsByLevel, loading: variantsLoading } = useAutoBattleVariants()
+  const { variants, levelsByVariant, rewardsByLevel, unlockConditionsByVariant, loading: variantsLoading } = useAutoBattleVariants()
   const { progressByVariant, stateByLevel } = useAutoBattleProgress(player.id)
   const { bannedNames } = useAutoBattleBannedAttacks()
   const { rules: abilityRules } = useAutoBattleAbilityRules()
@@ -549,8 +552,47 @@ export function AutoBattlePopup({
     return { imageUrl: sprite, name: species?.nom ?? 'Adversaire', fit: 'contain' }
   }
 
+  // Objets réellement possédés (quantité > 0) — les lignes d'inventaire
+  // tombées à 0 ne comptent pas pour une condition de déverrouillage.
+  const ownedItemNames = useMemo(
+    () => new Set(playerItems.inventory.filter((it) => it.quantity > 0).map((it) => it.item_nom)),
+    [playerItems.inventory]
+  )
+  // Pokédex : on ne compte que les découvertes correspondant à une espèce
+  // existante, comme la fonction SQL autobattle_variant_unlocked (les
+  // réimports CSV peuvent laisser des lignes orphelines dans discovered_pokemon).
+  const discoveredCount = useMemo(
+    () => [...discoveredPokemon].filter((nom) => pokemonByName.has(nom)).length,
+    [discoveredPokemon, pokemonByName]
+  )
+
+  // Parcours déjà terminés par CE joueur — cible de la condition de
+  // déverrouillage 'variant_completed' (« finis le parcours A pour ouvrir B »).
+  const completedVariantIds = useMemo(() => {
+    const set = new Set<number>()
+    for (const [variantId, progress] of progressByVariant) {
+      if (progress.variant_completed) set.add(variantId)
+    }
+    return set
+  }, [progressByVariant])
+
+  // Parcours VISIBLES : activés en admin ET dont les conditions de
+  // déverrouillage sont remplies (voir isVariantUnlocked). Un parcours
+  // verrouillé est purement et simplement masqué — pas de carte grisée, pas
+  // d'indice sur ce qu'il faudrait faire. Recalculé en continu : perdre un
+  // objet exigé le fait disparaître de la liste.
+  const unlockedVariants = useMemo(
+    () => variants.filter((v) => v.enabled && isVariantUnlocked(unlockConditionsByVariant.get(v.id), {
+      ownedItemNames,
+      discoveredCount,
+      variantDiscoveredCount: countVariantDiscovered(levelsByVariant.get(v.id) ?? [], discoveredPokemon),
+      completedVariantIds,
+    })),
+    [variants, unlockConditionsByVariant, ownedItemNames, discoveredCount, levelsByVariant, discoveredPokemon, completedVariantIds]
+  )
+
   // Variantes déjà terminées reléguées en bas de liste (ordre stable sinon).
-  const sortedEnabledVariants = [...variants.filter((v) => v.enabled)].sort((a, b) => {
+  const sortedEnabledVariants = [...unlockedVariants].sort((a, b) => {
     const aDone = progressByVariant.get(a.id)?.variant_completed ?? false
     const bDone = progressByVariant.get(b.id)?.variant_completed ?? false
     return Number(aDone) - Number(bDone)

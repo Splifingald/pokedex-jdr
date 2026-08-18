@@ -919,6 +919,46 @@ export interface AutoBattleVariant {
   created_at: string
 }
 
+// Condition de DÉVERROUILLAGE d'un parcours, en plus de sa bascule `enabled` :
+// un parcours désactivé n'est jamais accessible, un parcours activé l'est dès
+// que TOUTES ses conditions sont remplies (et immédiatement s'il n'en a
+// aucune, cas par défaut). Verdict recalculé en permanence, jamais mémorisé —
+// consommer un objet exigé referme le parcours, qui disparaît alors de la
+// liste du joueur (masqué, pas grisé, voir AutoBattlePopup).
+//
+//   'item_owned'            l'objet item_nom est dans l'inventaire du joueur
+//                           (quantité > 0, aucune quantité exigée) — une ligne
+//                           par objet.
+//   'pokedex_count'         au moins `amount` pokémon découverts au Pokédex.
+//                           Le Pokédex étant GLOBAL (discovered_pokemon est
+//                           partagé par tous les joueurs), cette condition
+//                           l'est aussi, contrairement à 'item_owned'.
+//   'variant_pokedex_count' idem, restreint aux espèces des niveaux DE CE
+//                           parcours — la liste suit automatiquement les
+//                           niveaux, l'admin ne saisit que le nombre.
+//   'variant_completed'     le joueur a TERMINÉ le parcours target_variant_id
+//                           (tous ses niveaux gagnés) — condition PAR JOUEUR,
+//                           comme 'item_owned'.
+export type AutoBattleUnlockConditionType =
+  | 'item_owned'
+  | 'pokedex_count'
+  | 'variant_pokedex_count'
+  | 'variant_completed'
+
+export interface AutoBattleVariantUnlockCondition {
+  id: number
+  variant_id: number
+  condition_type: AutoBattleUnlockConditionType
+  /** condition_type === 'item_owned' uniquement (NULL sinon). */
+  item_nom: string | null
+  /** 'pokedex_count' / 'variant_pokedex_count' uniquement (NULL sinon), >= 1. */
+  amount: number | null
+  /** condition_type === 'variant_completed' uniquement (NULL sinon) : parcours à terminer, jamais celui-ci. Sa suppression emporte la condition (ON DELETE CASCADE). */
+  target_variant_id: number | null
+  sort_order: number
+  created_at: string
+}
+
 export interface AutoBattleLevel {
   id: number
   variant_id: number
@@ -1578,6 +1618,7 @@ export type AutoBattleResolveStatus =
   | 'duplicate_request'
   | 'not_found'
   | 'variant_disabled'
+  | 'variant_locked'
   | 'variant_completed'
   | 'wrong_level'
   | 'ineligible_pokemon'

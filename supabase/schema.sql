@@ -2459,6 +2459,80 @@ ALTER TABLE autobattle_variants ADD CONSTRAINT autobattle_variants_game_mode_che
 -- joueur supprimé laisse un id orphelin, que le client traite comme NULL.
 ALTER TABLE autobattle_variants ADD COLUMN IF NOT EXISTS npc_player_id bigint;
 
+-- Conditions de DÉVERROUILLAGE du parcours, EN PLUS de la bascule `enabled`
+-- (autobattle_variants.enabled) : la bascule reste le premier filtre — un
+-- parcours désactivé n'est jamais déverrouillable, quelles que soient ses
+-- conditions. Un parcours activé SANS aucune ligne ici est immédiatement
+-- disponible (cas par défaut).
+--
+-- Plusieurs lignes = ET (toutes doivent être remplies), et on peut mélanger
+-- les types librement. condition_type :
+--   'item_owned'            le joueur possède l'objet item_nom (quantité > 0,
+--                           la quantité exacte n'est jamais demandée) — une
+--                           ligne par objet exigé.
+--   'pokedex_count'         au moins `amount` pokémon découverts au Pokédex.
+--                           Le Pokédex est GLOBAL (discovered_pokemon, partagé
+--                           par tous les joueurs) : cette condition l'est donc
+--                           aussi, contrairement à 'item_owned' qui dépend de
+--                           l'inventaire du joueur.
+--   'variant_pokedex_count' idem mais restreint aux espèces figurant dans les
+--                           niveaux DE CE PARCOURS (autobattle_levels.
+--                           opponent_pokemon_nom) — aucune saisie d'espèces :
+--                           la liste suit automatiquement les niveaux.
+--   'variant_completed'     le joueur a TERMINÉ le parcours target_variant_id
+--                           (tous ses niveaux, autobattle_player_variant_
+--                           progress.variant_completed) — condition PAR JOUEUR,
+--                           comme 'item_owned'.
+--
+-- Jamais mémorisé : l'état verrouillé/déverrouillé est recalculé à chaque
+-- lecture (voir autobattle_variant_unlocked), donc consommer un objet requis
+-- referme le parcours. Côté joueur, un parcours verrouillé est masqué de la
+-- liste, pas grisé (voir AutoBattlePopup).
+CREATE TABLE IF NOT EXISTS autobattle_variant_unlock_conditions (
+  id             bigserial PRIMARY KEY,
+  variant_id     bigint NOT NULL REFERENCES autobattle_variants(id) ON DELETE CASCADE,
+  condition_type text NOT NULL,
+  item_nom       text,
+  amount         integer,
+  target_variant_id bigint REFERENCES autobattle_variants(id) ON DELETE CASCADE,
+  sort_order     integer NOT NULL DEFAULT 0,
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_autobattle_variant_unlock_conditions_variant_id
+  ON autobattle_variant_unlock_conditions(variant_id);
+-- Parcours EXIGÉ par une condition 'variant_completed'. ON DELETE CASCADE :
+-- supprimer le parcours exigé emporte la condition — une exigence sans cible
+-- serait ininterprétable (et, laissée à NULL, déverrouillerait silencieusement
+-- le parcours qu'elle protégeait).
+ALTER TABLE autobattle_variant_unlock_conditions
+  ADD COLUMN IF NOT EXISTS target_variant_id bigint REFERENCES autobattle_variants(id) ON DELETE CASCADE;
+
+ALTER TABLE autobattle_variant_unlock_conditions DROP CONSTRAINT IF EXISTS autobattle_variant_unlock_conditions_type_check;
+ALTER TABLE autobattle_variant_unlock_conditions ADD CONSTRAINT autobattle_variant_unlock_conditions_type_check
+  CHECK (condition_type IN ('item_owned', 'pokedex_count', 'variant_pokedex_count', 'variant_completed'));
+-- Champs obligatoires par type — l'UI admin envoie toujours un groupe
+-- cohérent, ces contraintes ne font qu'empêcher une condition inexploitable
+-- (un objet vide serait impossible à remplir, un compte NULL toujours rempli).
+ALTER TABLE autobattle_variant_unlock_conditions DROP CONSTRAINT IF EXISTS autobattle_variant_unlock_conditions_fields;
+ALTER TABLE autobattle_variant_unlock_conditions ADD CONSTRAINT autobattle_variant_unlock_conditions_fields
+  CHECK (
+    (condition_type = 'item_owned' AND item_nom IS NOT NULL AND item_nom <> '')
+    OR (condition_type IN ('pokedex_count', 'variant_pokedex_count') AND amount IS NOT NULL AND amount >= 1)
+    -- target_variant_id <> variant_id : un parcours qui exigerait sa propre
+    -- complétion serait définitivement inatteignable.
+    OR (condition_type = 'variant_completed' AND target_variant_id IS NOT NULL AND target_variant_id <> variant_id)
+  );
+
+ALTER TABLE autobattle_variant_unlock_conditions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public read autobattle_variant_unlock_conditions" ON autobattle_variant_unlock_conditions;
+DROP POLICY IF EXISTS "Public insert autobattle_variant_unlock_conditions" ON autobattle_variant_unlock_conditions;
+DROP POLICY IF EXISTS "Public update autobattle_variant_unlock_conditions" ON autobattle_variant_unlock_conditions;
+DROP POLICY IF EXISTS "Public delete autobattle_variant_unlock_conditions" ON autobattle_variant_unlock_conditions;
+CREATE POLICY "Public read autobattle_variant_unlock_conditions"   ON autobattle_variant_unlock_conditions FOR SELECT TO anon USING (true);
+CREATE POLICY "Public insert autobattle_variant_unlock_conditions" ON autobattle_variant_unlock_conditions FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "Public update autobattle_variant_unlock_conditions" ON autobattle_variant_unlock_conditions FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Public delete autobattle_variant_unlock_conditions" ON autobattle_variant_unlock_conditions FOR DELETE TO anon USING (true);
+
 -- Un niveau = un combat prédéfini dans une variante, joué séquentiellement.
 -- opponent_pokemon_nom / opponent_ability_nom référencent pokemon.nom /
 -- attacks.nom par nom (pas de FK, même convention que tout le schéma) — les
@@ -7472,6 +7546,76 @@ GRANT EXECUTE ON FUNCTION autobattle_resolve_round_core(integer, integer, text, 
 -- niveau et fait avancer la progression ; à la défaite, marque seulement le
 -- niveau comme découvert. Tout ceci dans une seule transaction implicite
 -- (fonction plpgsql) : soit tout est appliqué, soit rien ne l'est.
+-- Le parcours p_variant_id est-il DÉVERROUILLÉ pour ce joueur ? Ne regarde QUE
+-- les conditions (autobattle_variant_unlock_conditions), jamais la bascule
+-- `enabled` — les deux gardes sont volontairement distinctes côté appelant.
+-- Aucune condition = TRUE (cas par défaut). Toutes les conditions doivent être
+-- remplies (ET). Recalculé à chaque appel, rien n'est mémorisé.
+CREATE OR REPLACE FUNCTION autobattle_variant_unlocked(p_variant_id bigint, p_player_id bigint)
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+AS $$
+DECLARE
+  v_cond  record;
+  v_count integer;
+BEGIN
+  FOR v_cond IN
+    SELECT * FROM autobattle_variant_unlock_conditions WHERE variant_id = p_variant_id
+  LOOP
+    IF v_cond.condition_type = 'item_owned' THEN
+      -- Possession seule : quantity > 0, aucune quantité exigée.
+      IF NOT EXISTS (
+        SELECT 1 FROM player_items
+        WHERE player_id = p_player_id AND item_nom = v_cond.item_nom AND quantity > 0
+      ) THEN
+        RETURN false;
+      END IF;
+
+    ELSIF v_cond.condition_type = 'pokedex_count' THEN
+      -- Jointure sur pokemon : discovered_pokemon référence par NOM sans FK et
+      -- peut garder des lignes orphelines après un réimport CSV — on compte ce
+      -- que le Pokédex affiche réellement, comme le client.
+      SELECT count(*) INTO v_count
+        FROM discovered_pokemon d
+        JOIN pokemon p ON p.nom = d.pokemon_nom;
+      IF v_count < COALESCE(v_cond.amount, 0) THEN
+        RETURN false;
+      END IF;
+
+    ELSIF v_cond.condition_type = 'variant_completed' THEN
+      -- Complétion PAR JOUEUR du parcours exigé (drapeau posé par
+      -- autobattle_resolve_battle / autobattle_resolve_manual_round au dernier
+      -- niveau gagné). Aucune ligne de progression = parcours jamais joué.
+      IF NOT EXISTS (
+        SELECT 1 FROM autobattle_player_variant_progress
+        WHERE player_id = p_player_id
+          AND variant_id = v_cond.target_variant_id
+          AND variant_completed = true
+      ) THEN
+        RETURN false;
+      END IF;
+
+    ELSIF v_cond.condition_type = 'variant_pokedex_count' THEN
+      -- Espèces DISTINCTES des niveaux du parcours (le même pokémon sur deux
+      -- niveaux ne compte qu'une fois, comme le maximum affiché en admin).
+      SELECT count(DISTINCT l.opponent_pokemon_nom) INTO v_count
+        FROM autobattle_levels l
+        JOIN discovered_pokemon d ON d.pokemon_nom = l.opponent_pokemon_nom
+       WHERE l.variant_id = p_variant_id
+         AND COALESCE(l.opponent_pokemon_nom, '') <> '';
+      IF v_count < COALESCE(v_cond.amount, 0) THEN
+        RETURN false;
+      END IF;
+    END IF;
+  END LOOP;
+
+  RETURN true;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION autobattle_variant_unlocked(bigint, bigint) TO anon, authenticated;
+
 CREATE OR REPLACE FUNCTION autobattle_resolve_battle(
   p_player_id bigint,
   p_level_id bigint,
@@ -7868,6 +8012,14 @@ BEGIN
   SELECT * INTO v_variant FROM autobattle_variants WHERE id = v_level.variant_id;
   IF v_variant IS NULL OR v_variant.enabled = false THEN
     RETURN jsonb_build_object('status', 'variant_disabled');
+  END IF;
+  -- Conditions de déverrouillage (voir autobattle_variant_unlock_conditions) :
+  -- garde SÉPARÉE de `enabled`, et volontairement absente de
+  -- autobattle_resolve_manual_round — un combat manuel déjà engagé doit
+  -- toujours pouvoir se terminer, même si le joueur consomme entre deux tours
+  -- l'objet qui déverrouillait le parcours.
+  IF NOT autobattle_variant_unlocked(v_variant.id, p_player_id) THEN
+    RETURN jsonb_build_object('status', 'variant_locked');
   END IF;
 
   INSERT INTO autobattle_player_variant_progress (player_id, variant_id)
@@ -10061,6 +10213,14 @@ BEGIN
   IF v_variant IS NULL OR v_variant.enabled = false THEN
     RETURN jsonb_build_object('status', 'variant_disabled');
   END IF;
+  -- Conditions de déverrouillage (voir autobattle_variant_unlock_conditions) :
+  -- garde SÉPARÉE de `enabled`, et volontairement absente de
+  -- autobattle_resolve_manual_round — un combat manuel déjà engagé doit
+  -- toujours pouvoir se terminer, même si le joueur consomme entre deux tours
+  -- l'objet qui déverrouillait le parcours.
+  IF NOT autobattle_variant_unlocked(v_variant.id, p_player_id) THEN
+    RETURN jsonb_build_object('status', 'variant_locked');
+  END IF;
   IF v_variant.game_mode <> 'manual' THEN
     RETURN jsonb_build_object('status', 'wrong_mode');
   END IF;
@@ -11366,7 +11526,8 @@ BEGIN
   FOREACH t IN ARRAY ARRAY[
     'autobattle_config', 'autobattle_variants', 'autobattle_levels', 'autobattle_level_rewards',
     'autobattle_player_state', 'autobattle_player_variant_progress', 'autobattle_player_level_state',
-    'autobattle_battles', 'autobattle_banned_attacks', 'autobattle_ability_rules'
+    'autobattle_battles', 'autobattle_banned_attacks', 'autobattle_ability_rules',
+    'autobattle_variant_unlock_conditions'
   ]
   LOOP
     IF NOT EXISTS (

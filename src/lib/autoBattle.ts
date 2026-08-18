@@ -1,5 +1,6 @@
 import type {
-  Attack, Item, PlayerPokemon, AutoBattleLevelReward, AutoBattleStatusEffect, AutoBattleAbilityRule,
+  Attack, Item, PlayerPokemon, AutoBattleLevel, AutoBattleLevelReward, AutoBattleStatusEffect, AutoBattleAbilityRule,
+  AutoBattleVariantUnlockCondition,
   AutoBattleTalent, AutoBattleTalentKind, AutoBattleTalentTrigger,
   AutoBattleWeatherEffect, AutoBattleWeatherEffectKind, AutoBattleWeatherTargetScope,
   AutoBattleWeatherCondition, AutoBattleTurn,
@@ -122,6 +123,65 @@ export function getEligiblePlayerPokemon(
   bannedAttacks: Set<string> = new Set()
 ): PlayerPokemon[] {
   return roster.filter((pp) => !pp.in_daycare && getEligibleAbilities(pp.moves, attacksByName, bannedAttacks).length > 0)
+}
+
+// --- Déverrouillage d'un parcours -------------------------------------------
+// Miroir EXACT de la fonction SQL autobattle_variant_unlocked (schema.sql), qui
+// reste l'autorité : le client s'en sert pour masquer de la liste les parcours
+// verrouillés, le serveur pour refuser un combat lancé dessus. Les deux
+// doivent évoluer ensemble.
+//
+// Aucune condition = déverrouillé (cas par défaut de tous les parcours).
+// Sinon TOUTES les conditions doivent être remplies (ET). La bascule
+// `enabled` est un filtre SÉPARÉ, testé par l'appelant : un parcours
+// désactivé n'est jamais accessible, avec ou sans condition.
+export interface VariantUnlockContext {
+  /** Objets du joueur en quantité > 0 (l'inventaire ne conserve pas les lignes à 0 pour ce test). */
+  ownedItemNames: Set<string>
+  /** Nombre de pokémon découverts au Pokédex — GLOBAL, le Pokédex est partagé par tous les joueurs. */
+  discoveredCount: number
+  /** Nombre d'espèces DISTINCTES des niveaux de CE parcours déjà découvertes (voir countVariantDiscovered). */
+  variantDiscoveredCount: number
+  /** Parcours déjà TERMINÉS par ce joueur (autobattle_player_variant_progress.variant_completed). */
+  completedVariantIds: Set<number>
+}
+
+export function isVariantUnlocked(
+  conditions: AutoBattleVariantUnlockCondition[] | undefined,
+  ctx: VariantUnlockContext
+): boolean {
+  if (!conditions || conditions.length === 0) return true
+  return conditions.every((c) => {
+    switch (c.condition_type) {
+      case 'item_owned':
+        return !!c.item_nom && ctx.ownedItemNames.has(c.item_nom)
+      case 'pokedex_count':
+        return ctx.discoveredCount >= (c.amount ?? 0)
+      case 'variant_pokedex_count':
+        return ctx.variantDiscoveredCount >= (c.amount ?? 0)
+      case 'variant_completed':
+        // Cible manquante (parcours supprimé entre-temps, ligne héritée) :
+        // condition ignorée plutôt que bloquante — côté SQL le ON DELETE
+        // CASCADE a déjà emporté la ligne, on ne fait que rattraper un état
+        // client pas encore rafraîchi.
+        return c.target_variant_id == null || ctx.completedVariantIds.has(c.target_variant_id)
+      default:
+        return true
+    }
+  })
+}
+
+// Espèces DISTINCTES apparaissant dans les niveaux d'un parcours : le même
+// pokémon posé sur deux niveaux ne compte qu'une fois — c'est le maximum
+// atteignable par la condition 'variant_pokedex_count', affiché en admin.
+export function variantSpeciesNames(levels: AutoBattleLevel[]): Set<string> {
+  return new Set(levels.map((l) => l.opponent_pokemon_nom).filter((nom) => !!nom))
+}
+
+export function countVariantDiscovered(levels: AutoBattleLevel[], discovered: Set<string>): number {
+  let count = 0
+  for (const nom of variantSpeciesNames(levels)) if (discovered.has(nom)) count += 1
+  return count
 }
 
 // Récompense à prévisualiser sous un niveau donné de la bannière de

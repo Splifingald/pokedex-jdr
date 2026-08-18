@@ -593,6 +593,7 @@ export function HomeTab({ player, players, isAdmin, pokemonByName, discoveredPok
           playerItems={playerItems}
           roster={roster}
           pokemonByName={pokemonByName}
+          discoveredPokemon={discoveredPokemon}
           attacksByName={attacksByName}
           itemsByName={itemsByName}
           evolutionsByPokemonNom={evolutionsByPokemonNom}

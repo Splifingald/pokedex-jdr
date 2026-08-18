@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
-import type { AutoBattleVariant, AutoBattleLevel, AutoBattleLevelReward } from '../types'
+import type {
+  AutoBattleVariant, AutoBattleLevel, AutoBattleLevelReward,
+  AutoBattleVariantUnlockCondition, AutoBattleUnlockConditionType,
+} from '../types'
 
 // CRUD complet des variantes de Combat Auto (créées en admin, pas d'import
 // CSV) : variantes + leurs niveaux + les récompenses de chaque niveau —
@@ -10,6 +13,7 @@ export function useAutoBattleVariants() {
   const [variants, setVariants] = useState<AutoBattleVariant[]>([])
   const [levels, setLevels] = useState<AutoBattleLevel[]>([])
   const [rewards, setRewards] = useState<AutoBattleLevelReward[]>([])
+  const [unlockConditions, setUnlockConditions] = useState<AutoBattleVariantUnlockCondition[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -17,10 +21,11 @@ export function useAutoBattleVariants() {
     setLoading(true)
     setError(null)
     try {
-      const [variantsRes, levelsRes, rewardsRes] = await Promise.all([
+      const [variantsRes, levelsRes, rewardsRes, conditionsRes] = await Promise.all([
         supabase.from('autobattle_variants').select('*').order('sort_order'),
         supabase.from('autobattle_levels').select('*').order('level_index'),
         supabase.from('autobattle_level_rewards').select('*').order('sort_order'),
+        supabase.from('autobattle_variant_unlock_conditions').select('*').order('sort_order'),
       ])
       if (variantsRes.error) throw variantsRes.error
       if (levelsRes.error) throw levelsRes.error
@@ -28,6 +33,19 @@ export function useAutoBattleVariants() {
       setVariants(variantsRes.data ?? [])
       setLevels(levelsRes.data ?? [])
       setRewards(rewardsRes.data ?? [])
+      // Conditions de déverrouillage : erreur NON bloquante, contrairement aux
+      // trois autres. Tant que la migration correspondante n'a pas été jouée
+      // sur Supabase, la table n'existe pas — la faire échouer ici viderait
+      // toute la liste des parcours au lieu de la seule nouveauté. Sans
+      // conditions chargées, tous les parcours activés restent visibles
+      // (comportement d'avant la fonctionnalité) ; le serveur, lui, continue
+      // de refuser un combat sur un parcours verrouillé.
+      if (conditionsRes.error) {
+        console.error('Erreur lors du chargement des conditions de déverrouillage :', conditionsRes.error)
+        setUnlockConditions([])
+      } else {
+        setUnlockConditions(conditionsRes.data ?? [])
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur de chargement')
     } finally {
@@ -78,6 +96,18 @@ export function useAutoBattleVariants() {
         const id = (payload.old as { id: number }).id
         setRewards((prev) => prev.filter((r) => r.id !== id))
       })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'autobattle_variant_unlock_conditions' }, (payload) => {
+        const row = payload.new as AutoBattleVariantUnlockCondition
+        setUnlockConditions((prev) => (prev.some((r) => r.id === row.id) ? prev : [...prev, row]))
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'autobattle_variant_unlock_conditions' }, (payload) => {
+        const row = payload.new as AutoBattleVariantUnlockCondition
+        setUnlockConditions((prev) => prev.map((r) => (r.id === row.id ? row : r)))
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'autobattle_variant_unlock_conditions' }, (payload) => {
+        const id = (payload.old as { id: number }).id
+        setUnlockConditions((prev) => prev.filter((r) => r.id !== id))
+      })
       .subscribe()
 
     return () => {
@@ -111,6 +141,20 @@ export function useAutoBattleVariants() {
     for (const list of map.values()) list.sort((a, b) => a.level_index - b.level_index)
     return map
   }, [levels])
+
+  // Conditions de déverrouillage groupées par parcours — une variante absente
+  // de la map n'a AUCUNE condition, donc elle est disponible dès qu'elle est
+  // activée (voir isVariantUnlocked dans lib/autoBattle).
+  const unlockConditionsByVariant = useMemo(() => {
+    const map = new Map<number, AutoBattleVariantUnlockCondition[]>()
+    for (const row of unlockConditions) {
+      const list = map.get(row.variant_id)
+      if (list) list.push(row)
+      else map.set(row.variant_id, [row])
+    }
+    for (const list of map.values()) list.sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
+    return map
+  }, [unlockConditions])
 
   const rewardsByLevel = useMemo(() => {
     const map = new Map<number, AutoBattleLevelReward[]>()
@@ -301,6 +345,60 @@ export function useAutoBattleVariants() {
     }
   }, [fetchAll])
 
+  // --- Conditions de déverrouillage d'un parcours ---------------------------
+  // Une condition 'item_owned' naît avec son objet (jamais vide : la contrainte
+  // autobattle_variant_unlock_conditions_fields la rejetterait), les deux
+  // conditions de comptage avec amount = 1.
+  const addUnlockCondition = useCallback(async (
+    variantId: number,
+    condition: AutoBattleUnlockConditionType,
+    value: { item_nom?: string; amount?: number; target_variant_id?: number } = {}
+  ) => {
+    const existing = unlockConditions.filter((c) => c.variant_id === variantId)
+    const { data, error } = await supabase
+      .from('autobattle_variant_unlock_conditions')
+      .insert({
+        variant_id: variantId,
+        condition_type: condition,
+        item_nom: condition === 'item_owned' ? (value.item_nom ?? '') : null,
+        amount: condition === 'pokedex_count' || condition === 'variant_pokedex_count'
+          ? Math.max(1, value.amount ?? 1)
+          : null,
+        target_variant_id: condition === 'variant_completed' ? (value.target_variant_id ?? null) : null,
+        sort_order: existing.reduce((max, c) => Math.max(max, c.sort_order), -1) + 1,
+      })
+      .select()
+      .single()
+    if (error) {
+      console.error("Erreur lors de l'ajout de la condition de déverrouillage :", error)
+      return null
+    }
+    const row = data as AutoBattleVariantUnlockCondition
+    setUnlockConditions((prev) => [...prev, row])
+    return row
+  }, [unlockConditions])
+
+  const updateUnlockCondition = useCallback(async (
+    id: number,
+    patch: Partial<Omit<AutoBattleVariantUnlockCondition, 'id' | 'variant_id' | 'created_at'>>
+  ) => {
+    setUnlockConditions((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)))
+    const { error } = await supabase.from('autobattle_variant_unlock_conditions').update(patch).eq('id', id)
+    if (error) {
+      console.error('Erreur lors de la mise à jour de la condition de déverrouillage :', error)
+      await fetchAll()
+    }
+  }, [fetchAll])
+
+  const removeUnlockCondition = useCallback(async (id: number) => {
+    setUnlockConditions((prev) => prev.filter((c) => c.id !== id))
+    const { error } = await supabase.from('autobattle_variant_unlock_conditions').delete().eq('id', id)
+    if (error) {
+      console.error('Erreur lors du retrait de la condition de déverrouillage :', error)
+      await fetchAll()
+    }
+  }, [fetchAll])
+
   // Remet une variante à zéro pour TOUS les joueurs (pas seulement l'admin) :
   // supprime la ligne de progression (le prochain combat en recrée une avec
   // current_level_index=0/variant_completed=false, voir autobattle_resolve_battle)
@@ -376,6 +474,24 @@ export function useAutoBattleVariants() {
         }
       }
 
+      // Conditions de déverrouillage : copiées telles quelles — une copie
+      // doit s'ouvrir exactement dans les mêmes circonstances que l'original
+      // (elle reste désactivée, c'est la bascule qui protège la relecture).
+      const sourceConditions = unlockConditionsByVariant.get(variantId) ?? []
+      if (sourceConditions.length > 0) {
+        const { error: conditionsError } = await supabase.from('autobattle_variant_unlock_conditions').insert(
+          sourceConditions.map((c) => ({
+            variant_id: newVariantRow.id,
+            condition_type: c.condition_type,
+            item_nom: c.item_nom,
+            amount: c.amount,
+            target_variant_id: c.target_variant_id,
+            sort_order: c.sort_order,
+          }))
+        )
+        if (conditionsError) throw conditionsError
+      }
+
       await fetchAll()
       return newVariantRow
     } catch (err) {
@@ -383,10 +499,12 @@ export function useAutoBattleVariants() {
       await fetchAll()
       return null
     }
-  }, [variants, nextSortOrder, levelsByVariant, rewardsByLevel, fetchAll])
+  }, [variants, nextSortOrder, levelsByVariant, rewardsByLevel, unlockConditionsByVariant, fetchAll])
 
   return {
     variants: sortedVariants, levels, rewards, levelsByVariant, rewardsByLevel, loading, error,
+    unlockConditions, unlockConditionsByVariant,
+    addUnlockCondition, updateUnlockCondition, removeUnlockCondition,
     addVariant, updateVariant, deleteVariant, swapVariantOrder,
     addLevel, updateLevel, swapLevelOrder, deleteLevel,
     addReward, updateReward, removeReward,

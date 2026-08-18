@@ -1,5 +1,9 @@
 import { useState, useMemo } from 'react'
-import type { AutoBattleVariant, AutoBattleLevel, AutoBattleLevelReward, AutoBattleRewardType, AutoBattleGameMode, Pokemon, PokemonEvolution, Attack, Item } from '../types'
+import type {
+  AutoBattleVariant, AutoBattleLevel, AutoBattleLevelReward, AutoBattleRewardType, AutoBattleGameMode,
+  AutoBattleVariantUnlockCondition, AutoBattleUnlockConditionType,
+  Pokemon, PokemonEvolution, Attack, Item,
+} from '../types'
 import { useAutoBattleVariants } from '../hooks/useAutoBattleVariants'
 import { useAutoBattleBannedAttacks } from '../hooks/useAutoBattleBannedAttacks'
 import { usePlayers } from '../hooks/usePlayers'
@@ -7,7 +11,7 @@ import { usePokemon } from '../hooks/usePokemon'
 import { useAttacks } from '../hooks/useAttacks'
 import { useItems } from '../hooks/useItems'
 import { usePokemonEvolutions } from '../hooks/usePokemonEvolutions'
-import { getStatusEffectDisplay } from '../lib/autoBattle'
+import { getStatusEffectDisplay, variantSpeciesNames } from '../lib/autoBattle'
 import { getAttaquesWithPreEvolutions } from '../lib/pokemonFacts'
 import { NumberInput } from './NumberInput'
 import { PokemonSearchInput } from './PokemonSearchInput'
@@ -465,12 +469,186 @@ function LevelEditor({
   )
 }
 
+// Conditions de DÉVERROUILLAGE du parcours — s'empilent PAR-DESSUS la bascule
+// d'activation de la liste : un parcours désactivé reste invisible quoi qu'il
+// arrive, un parcours activé sans aucune condition ici est disponible tout de
+// suite (cas par défaut). Avec des conditions, elles doivent TOUTES être
+// remplies, et un parcours verrouillé est MASQUÉ de la liste du joueur (aucun
+// indice n'est donné sur ce qu'il faudrait faire).
+//
+// Les deux conditions de comptage n'ont aucun sens en double (deux seuils sur
+// le même compteur : seul le plus haut compterait), d'où leurs boutons
+// désactivés une fois posées. Les objets et les parcours à terminer, eux,
+// s'ajoutent librement — un par objet exigé (sans quantité), un par parcours
+// exigé.
+function UnlockConditionsEditor({
+  variantId, conditions, levels, items, pokemonTotal, otherVariants, onAdd, onUpdate, onRemove,
+}: {
+  variantId: number
+  conditions: AutoBattleVariantUnlockCondition[]
+  levels: AutoBattleLevel[]
+  items: Item[]
+  pokemonTotal: number
+  /** Cibles possibles d'une condition 'variant_completed' : tous les parcours SAUF celui-ci (s'exiger soi-même serait inatteignable, la contrainte SQL le refuse aussi). */
+  otherVariants: AutoBattleVariant[]
+  onAdd: (variantId: number, condition: AutoBattleUnlockConditionType, value?: { item_nom?: string; amount?: number; target_variant_id?: number }) => void
+  onUpdate: (id: number, patch: Partial<Omit<AutoBattleVariantUnlockCondition, 'id' | 'variant_id' | 'created_at'>>) => void
+  onRemove: (id: number) => void
+}) {
+  // Objet en cours de choix : une condition 'item_owned' n'est écrite en base
+  // qu'une fois l'objet choisi (item_nom vide violerait la contrainte
+  // autobattle_variant_unlock_conditions_fields, rejet serveur invisible).
+  const [pickingItem, setPickingItem] = useState(false)
+
+  const hasPokedex = conditions.some((c) => c.condition_type === 'pokedex_count')
+  const hasVariantPokedex = conditions.some((c) => c.condition_type === 'variant_pokedex_count')
+  // Maximum atteignable par 'variant_pokedex_count' : espèces DISTINCTES des
+  // niveaux du parcours (un même pokémon posé sur deux niveaux ne compte
+  // qu'une fois, comme côté SQL).
+  const variantSpeciesTotal = variantSpeciesNames(levels).size
+
+  return (
+    <div className="border-t-2 border-[#cfc7a8] pt-3">
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-ink-muted-2 text-sm font-bold">Conditions de déverrouillage</p>
+        <span className="text-ink-muted-2 text-xs">{conditions.length === 0 ? 'aucune' : `${conditions.length} condition(s)`}</span>
+      </div>
+      <p className="text-ink-muted-2 text-xs italic mb-2">
+        {conditions.length === 0
+          ? "Aucune condition : le parcours est disponible dès qu'il est activé."
+          : "Toutes les conditions doivent être remplies. Tant qu'elles ne le sont pas, le parcours est masqué de la liste des joueurs."}
+      </p>
+
+      {conditions.length > 0 && (
+        <div className="flex flex-col gap-2 mb-2">
+          {conditions.map((condition) => {
+            if (condition.condition_type === 'item_owned') {
+              const item = items.find((it) => it.nom === condition.item_nom)
+              return (
+                <div key={condition.id} className={`flex items-center gap-2 p-2 rounded ${PIXEL_BORDER_SM} bg-white`}>
+                  <span className="w-6 h-6 shrink-0 flex items-center justify-center">
+                    {item?.image_url ? <img src={item.image_url} alt="" className="w-full h-full object-contain" /> : <span className="text-sm">🎒</span>}
+                  </span>
+                  <span className="text-ink text-sm flex-1 truncate">
+                    Posséder <span className="font-bold">{condition.item_nom}</span>
+                  </span>
+                  <button onClick={() => onRemove(condition.id)} title="Retirer la condition" className={`text-xs px-2 py-1 rounded shrink-0 ${BUTTON_STYLE.gray}`}>
+                    <CloseIcon className="w-3 h-3" />
+                  </button>
+                </div>
+              )
+            }
+            if (condition.condition_type === 'variant_completed') {
+              return (
+                <div key={condition.id} className={`flex items-center gap-2 p-2 rounded ${PIXEL_BORDER_SM} bg-white`}>
+                  <span className="text-sm shrink-0">🏁</span>
+                  <span className="text-ink text-sm shrink-0">Avoir terminé</span>
+                  <select
+                    value={condition.target_variant_id ?? ''}
+                    onChange={(e) => onUpdate(condition.id, { target_variant_id: Number(e.target.value) })}
+                    className="flex-1 min-w-0 bg-white border-2 border-ink rounded px-2 py-1 text-ink text-sm outline-none"
+                  >
+                    {/* Cible disparue (parcours supprimé) : l'option vide évite
+                        que le select affiche silencieusement un AUTRE parcours.
+                        En base la ligne est déjà partie (ON DELETE CASCADE), on
+                        ne voit ça qu'entre deux rafraîchissements. */}
+                    {condition.target_variant_id != null
+                      && !otherVariants.some((v) => v.id === condition.target_variant_id) && (
+                      <option value="">(parcours supprimé)</option>
+                    )}
+                    {otherVariants.map((v) => (
+                      <option key={v.id} value={v.id}>{v.nom || '(sans nom)'}</option>
+                    ))}
+                  </select>
+                  <button onClick={() => onRemove(condition.id)} title="Retirer la condition" className={`text-xs px-2 py-1 rounded shrink-0 ${BUTTON_STYLE.gray}`}>
+                    <CloseIcon className="w-3 h-3" />
+                  </button>
+                </div>
+              )
+            }
+            const isVariantScope = condition.condition_type === 'variant_pokedex_count'
+            const max = isVariantScope ? variantSpeciesTotal : pokemonTotal
+            const amount = condition.amount ?? 1
+            return (
+              <div key={condition.id} className={`flex items-center gap-2 p-2 rounded ${PIXEL_BORDER_SM} bg-white`}>
+                <span className="text-sm shrink-0">{isVariantScope ? '⚔️' : '📕'}</span>
+                <NumberInput
+                  min={1}
+                  fallback={amount}
+                  value={amount}
+                  onCommit={(v) => onUpdate(condition.id, { amount: Math.max(1, v) })}
+                  className="w-16 bg-white border-2 border-ink rounded px-2 py-1 text-ink text-sm outline-none shrink-0"
+                />
+                <span className="text-ink text-sm flex-1">
+                  {isVariantScope ? 'pokémon de ce parcours découverts' : 'pokémon découverts au Pokédex'}
+                  <span className="text-ink-muted-2 text-xs"> (max {max})</span>
+                  {amount > max && (
+                    <span className="block text-red-700 text-xs font-bold">
+                      Impossible à remplir : {isVariantScope ? 'ce parcours ne contient pas autant de pokémon différents.' : 'le Pokédex ne contient pas autant de pokémon.'}
+                    </span>
+                  )}
+                </span>
+                <button onClick={() => onRemove(condition.id)} title="Retirer la condition" className={`text-xs px-2 py-1 rounded shrink-0 ${BUTTON_STYLE.gray}`}>
+                  <CloseIcon className="w-3 h-3" />
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {pickingItem ? (
+        <div className={`p-2 rounded ${PIXEL_BORDER_SM} bg-white`}>
+          <ItemSearchInput
+            options={items}
+            onSelect={(item) => { onAdd(variantId, 'item_owned', { item_nom: item.nom }); setPickingItem(false) }}
+          />
+          <button onClick={() => setPickingItem(false)} className={`mt-2 text-xs px-2 py-1 rounded ${BUTTON_STYLE.gray}`}>Annuler</button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => setPickingItem(true)} className={`text-xs px-3 py-1.5 rounded font-bold ${BUTTON_STYLE.gray}`}>
+            + Objet possédé
+          </button>
+          <button
+            onClick={() => onAdd(variantId, 'pokedex_count', { amount: 1 })}
+            disabled={hasPokedex}
+            title={hasPokedex ? 'Déjà présente : un seul seuil de Pokédex par parcours' : undefined}
+            className={`text-xs px-3 py-1.5 rounded font-bold disabled:opacity-40 disabled:cursor-not-allowed ${BUTTON_STYLE.gray}`}
+          >
+            + Pokédex
+          </button>
+          <button
+            onClick={() => onAdd(variantId, 'variant_pokedex_count', { amount: 1 })}
+            disabled={hasVariantPokedex || variantSpeciesTotal === 0}
+            title={hasVariantPokedex
+              ? 'Déjà présente : un seul seuil par parcours'
+              : variantSpeciesTotal === 0 ? 'Aucun pokémon dans les niveaux de ce parcours' : undefined}
+            className={`text-xs px-3 py-1.5 rounded font-bold disabled:opacity-40 disabled:cursor-not-allowed ${BUTTON_STYLE.gray}`}
+          >
+            + Pokémon de ce parcours
+          </button>
+          <button
+            onClick={() => otherVariants[0] && onAdd(variantId, 'variant_completed', { target_variant_id: otherVariants[0].id })}
+            disabled={otherVariants.length === 0}
+            title={otherVariants.length === 0 ? 'Aucun autre parcours à exiger' : undefined}
+            className={`text-xs px-3 py-1.5 rounded font-bold disabled:opacity-40 disabled:cursor-not-allowed ${BUTTON_STYLE.gray}`}
+          >
+            + Parcours terminé
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function AdminAutoBattleVariantsPanel() {
   const {
     variants, levelsByVariant, rewardsByLevel, loading,
     addVariant, updateVariant, deleteVariant, swapVariantOrder,
     addLevel, updateLevel, swapLevelOrder, deleteLevel,
     addReward, updateReward, removeReward,
+    unlockConditionsByVariant, addUnlockCondition, updateUnlockCondition, removeUnlockCondition,
     resetVariantProgress, duplicateVariant,
   } = useAutoBattleVariants()
   const { bannedNames } = useAutoBattleBannedAttacks()
@@ -546,6 +724,7 @@ export function AdminAutoBattleVariantsPanel() {
                 qu'avant son déplacement dans la liste. */}
             {variants.map((selectedVariant, i) => {
               const selectedLevels = levelsByVariant.get(selectedVariant.id) ?? []
+              const selectedConditions = unlockConditionsByVariant.get(selectedVariant.id) ?? []
               const canEnable = !!selectedVariant.nom.trim() && !!selectedVariant.banner_url.trim()
                 && !!selectedVariant.icon_url.trim() && selectedLevels.length > 0
               const variantRewardTotals = computeRewardTotals(selectedLevels, rewardsByLevel)
@@ -571,6 +750,9 @@ export function AdminAutoBattleVariantsPanel() {
                       </span>
                       <span className="text-ink text-sm font-bold truncate">{selectedVariant.nom || '(sans nom)'}</span>
                       <span className="text-ink-muted-2 text-xs shrink-0">{selectedLevels.length} niv.</span>
+                      {selectedConditions.length > 0 && (
+                        <span title={`${selectedConditions.length} condition(s) de déverrouillage`} className="text-xs shrink-0">🔒</span>
+                      )}
                     </button>
 
                     {/* Récapitulatif des récompenses du parcours : icônes seules
@@ -711,7 +893,19 @@ export function AdminAutoBattleVariantsPanel() {
                         </div>
                       </div>
 
-                      <div className="border-t-2 border-[#cfc7a8] pt-3">
+                      <UnlockConditionsEditor
+                        variantId={selectedVariant.id}
+                        conditions={selectedConditions}
+                        levels={selectedLevels}
+                        items={items}
+                        pokemonTotal={pokemon.length}
+                        otherVariants={variants.filter((v) => v.id !== selectedVariant.id)}
+                        onAdd={addUnlockCondition}
+                        onUpdate={updateUnlockCondition}
+                        onRemove={removeUnlockCondition}
+                      />
+
+                      <div className="border-t-2 border-[#cfc7a8] pt-3 mt-3">
                         <div className="flex items-center justify-between mb-2">
                           <p className="text-ink-muted-2 text-sm font-bold">Niveaux ({selectedLevels.length})</p>
                           <button onClick={() => addLevel(selectedVariant.id)} className={`text-xs px-3 py-1.5 rounded font-bold ${BUTTON_STYLE.gray}`}>+ Ajouter un niveau</button>
