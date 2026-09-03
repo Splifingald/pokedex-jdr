@@ -3,6 +3,12 @@ import { usePokemon } from './hooks/usePokemon'
 import { useAttacks } from './hooks/useAttacks'
 import { usePlayerContext } from './context/PlayerContext'
 import { usePlayerPokemon } from './hooks/usePlayerPokemon'
+import { backfillVitalsFromLocalStorage } from './lib/vitalsBackfill'
+import { useOnlineState } from './hooks/useOnlineState'
+import { shouldShowSessionAnnouncement } from './lib/onlineSession'
+import { SessionAnnouncementModal } from './components/SessionAnnouncementModal'
+import { BattleInviteModal } from './components/online/BattleInviteModal'
+import { getMaxHp } from './lib/maxHp'
 import { useItems } from './hooks/useItems'
 import { usePlayerItems } from './hooks/usePlayerItems'
 import { usePokemonEvolutions } from './hooks/usePokemonEvolutions'
@@ -54,6 +60,22 @@ const TAB_TITLES: Record<TabId, string> = {
   admin: 'ADMIN',
 }
 
+/** Dernière génération de bataille pour laquelle l'invitation a été montrée sur
+ *  CET appareil. Sur l'appareil et non par onglet : rafraîchir la page ne doit
+ *  pas réinviter à la même bataille. */
+const SEEN_BATTLE_GEN_KEY = 'online_seen_battle_gen'
+
+function readSeenBattleGen(): number | null {
+  try {
+    const raw = localStorage.getItem(SEEN_BATTLE_GEN_KEY)
+    if (raw === null) return null
+    const parsed = Number(raw)
+    return Number.isFinite(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
 export default function App() {
   const { pokemon, discovered, discoverPokemon, undiscoverPokemon, refetch } = usePokemon()
   const { byName: attacksByName, refetch: refetchAttacks } = useAttacks()
@@ -94,6 +116,48 @@ export default function App() {
   const [showLoginModal, setShowLoginModal] = useState(false)
   const [activeTab, setActiveTab] = useState<TabId>('accueil')
 
+  // Mode En ligne. L'invitation est montée ICI et pas dans HomeTab : elle doit
+  // apparaître quel que soit l'onglet de l'app affiché à ce moment-là.
+  const online = useOnlineState()
+  const onlineEnabled = parameters.feature_online_enabled
+  const battleMode = onlineEnabled && online.state.mode === 'battle'
+  const [sessionDismissed, setSessionDismissed] = useState(false)
+
+  // L'écran partagé vit dans son propre onglet. Cible nommée : recliquer
+  // réutilise l'onglet déjà ouvert au lieu d'en empiler un nouveau.
+  // /display et /battle rendent le même écran ; on ouvre /display, le mode
+  // affichage étant celui par défaut.
+  const openOnlineTab = () => { window.open('/display', 'pokedex-online') }
+
+  // battle_generation est incrémenté quand le MJ entre en mode bataille : on
+  // propose alors le plateau à tout le monde, une fois.
+  //
+  // La génération déjà vue est MÉMORISÉE sur l'appareil : sans ça, elle
+  // repartait de zéro à chaque chargement et l'invitation réapparaissait à
+  // chaque ouverture de l'app tant que le mode restait « bataille ».
+  //
+  // Ajusté au rendu plutôt que dans un effet (patron « adapter l'état quand les
+  // props changent » de React) : pas de rendu intermédiaire à contretemps.
+  const [seenBattleGen, setSeenBattleGen] = useState<number | null>(readSeenBattleGen)
+  const [showBattleInvite, setShowBattleInvite] = useState(false)
+  if (battleMode && seenBattleGen !== online.state.battle_generation) {
+    setSeenBattleGen(online.state.battle_generation)
+    setShowBattleInvite(true)
+  } else if (!battleMode && showBattleInvite) {
+    setShowBattleInvite(false)
+  }
+  useEffect(() => {
+    if (seenBattleGen === null) return
+    try {
+      localStorage.setItem(SEEN_BATTLE_GEN_KEY, String(seenBattleGen))
+    } catch {
+      // Navigation privée, quota plein… : l'invitation réapparaîtra, sans plus.
+    }
+  }, [seenBattleGen])
+
+  const showSessionAnnouncement =
+    onlineEnabled && !sessionDismissed && !showBattleInvite && shouldShowSessionAnnouncement(online.state)
+
   // Chorégraphie post-découverte : célébration puis ouverture auto dans le Pokédex
   const [celebration, setCelebration] = useState<Pokemon | null>(null)
   const [autoOpenNumero, setAutoOpenNumero] = useState<string | null>(null)
@@ -111,6 +175,15 @@ export default function App() {
   }, [activeTab, player, isAdmin, parameters])
 
   const pokemonByName = useMemo(() => new Map(pokemon.map((p) => [p.nom, p])), [pokemon])
+
+  // Reprise unique des PV/statuts encore stockés dans le localStorage de cet
+  // appareil (avant leur passage en base avec le mode En ligne). Ne s'exécute
+  // qu'une fois par appareil et n'écrase jamais une valeur déjà en base.
+  useEffect(() => {
+    if (roster.length === 0 || pokemon.length === 0) return
+    void backfillVitalsFromLocalStorage(roster, (pp) => getMaxHp(pp, pokemonByName.get(pp.pokemon_nom)))
+  }, [roster, pokemon.length, pokemonByName])
+
   const teamFull = player?.is_npc ? false : roster.filter((r) => r.in_team).length >= parameters.max_team_size
 
   const handleAddToRoster = async (p: Pokemon) => {
@@ -244,6 +317,8 @@ export default function App() {
               canScan={canScan}
               onScan={() => setShowScannerModal(true)}
               onRequestLogin={() => setShowLoginModal(true)}
+              onlineAvailable={onlineEnabled}
+              onOpenOnline={openOnlineTab}
             />
           )}
 
@@ -379,8 +454,23 @@ export default function App() {
       {showNotifPrompt && (
         <NotificationPromptModal
           loading={push.loading}
-          onEnable={() => { void push.enable().then(() => setNotifPromptDismissed(true)) }}
+          onEnable={() => {
+            void push.enable().then((ok) => {
+              if (!ok) showToast('Notifications non activées.')
+            }).finally(() => setNotifPromptDismissed(true))
+          }}
           onClose={() => setNotifPromptDismissed(true)}
+        />
+      )}
+
+      {showSessionAnnouncement && (
+        <SessionAnnouncementModal state={online.state} onClose={() => setSessionDismissed(true)} />
+      )}
+
+      {showBattleInvite && battleMode && (
+        <BattleInviteModal
+          onOpen={() => { openOnlineTab(); setShowBattleInvite(false) }}
+          onClose={() => setShowBattleInvite(false)}
         />
       )}
 

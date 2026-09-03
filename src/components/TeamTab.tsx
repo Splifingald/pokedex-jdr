@@ -6,8 +6,7 @@ import type { usePlayerItems } from '../hooks/usePlayerItems'
 import { useAdminParameters } from '../hooks/useAdminParameters'
 import { useGiftLootboxes } from '../hooks/useGiftLootboxes'
 import { useToast } from '../context/ToastContext'
-import { restoreLocalHp, getLocalHp } from '../hooks/useLocalHp'
-import { restoreLocalStatus } from '../hooks/useLocalStatus'
+import { peekHp, restoreVitals } from '../lib/pokemonVitals'
 import { logHistoryEvent } from '../lib/historyLog'
 import { getMaxHp } from '../lib/maxHp'
 import { maybeResetGiftTimerOnEntry } from '../lib/gifting'
@@ -144,11 +143,15 @@ export function TeamTab({ player, pokemonList, discovered, isAdmin, pokemonByNam
   }
 
   const handleRestoreAll = () => {
+    // Un seul passage : restoreVitals met à jour l'affichage tout de suite et
+    // groupe les écritures (voir lib/pokemonVitals.ts).
+    const entries = sortedRoster.map((pp) => ({ id: pp.id, maxHp: getMaxHp(pp, pokemonByName.get(pp.pokemon_nom)) }))
+    const koBefore = new Set(
+      sortedRoster.filter((pp, i) => peekHp(pp, entries[i].maxHp) <= 0).map((pp) => pp.id)
+    )
+    restoreVitals(entries)
     sortedRoster.forEach((pp) => {
-      const wasKo = (getLocalHp(pp.id) ?? getMaxHp(pp, pokemonByName.get(pp.pokemon_nom))) <= 0
-      restoreLocalHp(pp.id, getMaxHp(pp, pokemonByName.get(pp.pokemon_nom)))
-      restoreLocalStatus(pp.id)
-      if (wasKo) {
+      if (koBefore.has(pp.id)) {
         void logHistoryEvent('combat', 'ko', player.id, {
           pokemon_nom: pp.pokemon_nom,
           player_pokemon_id: pp.id,

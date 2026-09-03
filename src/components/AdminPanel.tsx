@@ -2,6 +2,7 @@ import { useState, useRef } from 'react'
 import Papa from 'papaparse'
 import type { CsvRow, AttackCsvRow, CarteCsvRow, ItemCsvRow, EncounterCsvRow, DisplayAssetCsvRow, PokemonEvolutionCsvRow, PokemonEggGroupCsvRow } from '../types'
 import { CSV_REQUIRED_HEADERS, ATTACK_CSV_REQUIRED_HEADERS, CARTE_CSV_REQUIRED_HEADERS, ITEM_CSV_REQUIRED_HEADERS, ENCOUNTER_CSV_REQUIRED_HEADERS, DISPLAY_ASSET_CSV_REQUIRED_HEADERS, POKEMON_EVOLUTION_CSV_REQUIRED_HEADERS, POKEMON_EGG_GROUP_CSV_REQUIRED_HEADERS } from '../types'
+import { parseAttackDistance } from '../lib/abilityRange'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { parseStatusEffectCsvLabel } from '../lib/autoBattle'
 import { parseBattleAnimationCsvLabel } from '../lib/battleAnimations'
@@ -96,7 +97,7 @@ function mapAttackCsvRow(row: AttackCsvRow) {
     degats_base:   row['Dégâts de base']?.trim() ? parseInt(row['Dégâts de base']) : null,
     degats_de:     row['Dégâts dé']?.trim() ? parseInt(row['Dégâts dé']) : null,
     cible:         row['Cible']?.trim() || null,
-    distance:      row['Distance']?.trim() ? parseInt(row['Distance']) : null,
+    distance:      parseAttackDistance(row['Distance']),
     // Une case "-" (ou tout autre texte non numérique) vaut précision ABSOLUE,
     // au même titre qu'une case vide : la capacité ne peut jamais rater (voir
     // isAbsolutePrecision). Sans le test Number.isFinite, parseInt('-') donne
@@ -240,8 +241,9 @@ async function importOneFile(file: File): Promise<ImportResult> {
   // Une colonne "Groupe 1" n'existe que dans le CSV de groupes d'œufs (Pension Pokémon)
   const isEggGroupsCsv = fields.includes('Groupe 1')
   // Le CSV du mode Affichage contient ces 4 colonnes (Nom + Type + Image + Reference) —
-  // couvre aussi les fonds d'écran (Type = "Background") et les calques superposés à la
-  // Carte (Type = "Map Add-On"). Reference permet à plusieurs images de partager le même
+  // couvre aussi les fonds d'écran (Type = "Background"), les calques superposés à la
+  // Carte (Type = "Map Add-On") et les fonds du plateau de bataille du mode En ligne
+  // (Type = "Battle Background"). Reference permet à plusieurs images de partager le même
   // PNJ/lieu (Nom reste unique par image).
   const isDisplayAssetsCsv = fields.length === 4 && fields.includes('Nom') && fields.includes('Type') && fields.includes('Image') && fields.includes('Reference')
 

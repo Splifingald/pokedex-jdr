@@ -3,8 +3,7 @@ import { ownedPokemonName } from '../types'
 import { TypeBadge } from './TypeBadge'
 import { HpGauge } from './HpGauge'
 import { PixelIcon } from './icons/PixelIcon'
-import { useLocalHp } from '../hooks/useLocalHp'
-import { useLocalStatus } from '../hooks/useLocalStatus'
+import { usePokemonHp, usePokemonStatus } from '../hooks/usePokemonVitals'
 import { getMaxHp } from '../lib/maxHp'
 import { getStatusInfo } from '../lib/status'
 import { STATUS_ICON, PC_ICON } from '../lib/icons'
@@ -23,8 +22,8 @@ interface Props {
 
 export function PokemonOwnedCard({ playerPokemon, pokemon, variant, showPcBadge = false, showDaycareBadge = false, onClick }: Props) {
   const maxHp = getMaxHp(playerPokemon, pokemon)
-  const [hp] = useLocalHp(playerPokemon.id, maxHp)
-  const [status] = useLocalStatus(playerPokemon.id)
+  const [hp] = usePokemonHp(playerPokemon, maxHp)
+  const [status] = usePokemonStatus(playerPokemon)
   const isKo = hp <= 0
   const displayName = ownedPokemonName(playerPokemon)
   const hasStatus = status !== 'aucun'

@@ -1,4 +1,5 @@
 import type { BattleAnimationId } from './lib/battleAnimations'
+import type { StatusId } from './lib/status'
 
 export interface Pokemon {
   id: number
@@ -312,6 +313,15 @@ export interface PlayerPokemon {
   egg_reveal_seen: boolean
   /** Combats gagnés par cette instance précise (pas l'espèce) — conservé à travers les évolutions, voir supabase/schema.sql. */
   battles_won: number
+  /** PV courants. `null` = jamais renseigné ⇒ le Pokémon est à ses PV max (voir lib/pokemonVitals.ts).
+   *  Historiquement stockés dans le localStorage de chaque appareil ; passés en base avec le mode En ligne
+   *  pour que le MJ et le plateau de bataille voient le même état que le joueur. */
+  current_hp: number | null
+  /** PV max au moment où `current_hp` a été écrit : sert à reporter le gain d'un palier d'XP
+   *  sur les PV courants À LA LECTURE, sans effet ni écriture (voir lib/pokemonVitals.ts). */
+  hp_ref_max: number | null
+  /** Statut. `null` = jamais renseigné ⇒ 'aucun'. */
+  status: StatusId | null
   created_at: string
 }
 
@@ -341,6 +351,7 @@ export interface AdminParameters {
   feature_autobattle_enabled: boolean
   feature_pvp_enabled: boolean
   feature_chat_enabled: boolean
+  feature_online_enabled: boolean
   chat_max_message_length: number
   chat_spam_limit_per_minute: number
   chat_last_notified_at: string | null
@@ -1086,8 +1097,11 @@ export type AutoBattleStatusEffect = 'paralysis' | 'fear' | 'confusion' | 'sleep
 export type AutoBattleRecoilType = 'range' | 'percent_damage'
 // Dégâts additionnels appliqués après le dé si la condition associée est
 // vérifiée : 'multiply' multiplie le total, 'flat' ajoute un montant fixe,
-// 'range' ajoute un montant tiré entre min/max.
-export type AutoBattleBonusDamageType = 'multiply' | 'flat' | 'range'
+// 'range' ajoute un montant tiré entre min/max, 'weight_scale' ajoute le
+// montant lu dans une échelle de poids (voir bonus_damage_weight_scale). C'est
+// le seul type pour lequel la condition est FACULTATIVE : son barème dose déjà
+// le bonus, et une condition renseignée continue malgré tout de le conditionner.
+export type AutoBattleBonusDamageType = 'multiply' | 'flat' | 'range' | 'weight_scale'
 // took_damage_last_turn : ce camp a été touché par l'adversaire depuis son
 // propre dernier tour. first_use : 1ère fois que ce camp attaque dans le
 // combat. dice_equals : le dé de dégâts de CETTE capacité est tombé sur
@@ -1107,6 +1121,22 @@ export type AutoBattleBonusDamageCondition = 'took_damage_last_turn' | 'first_us
 // double ». Poids manquant d'un côté = condition jamais remplie.
 export type AutoBattleWeightTarget = 'self' | 'opponent'
 export type AutoBattleWeightComparison = 'greater' | 'lower'
+// Échelle de poids du type de dégâts additionnels 'weight_scale' : là où la
+// condition 'weight_ratio' ci-dessus COMPARE les deux poids en tout ou rien,
+// celle-ci lit le poids d'UN SEUL camp (bonus_damage_weight_scale_target) dans
+// un barème par tranches. Chaque palier s'applique à partir de son poids `min`
+// (en kg, inclus) et court jusqu'au `min` du palier suivant (exclu) ; le
+// dernier est ouvert vers le haut. Un poids sous le plus petit palier, ou
+// inconnu (pokemon.poids NULL), ne donne rien. Miroir TS de
+// autobattle_weight_scale_bonus côté SQL.
+export interface AutoBattleWeightScaleEntry {
+  /** Poids en kg à partir duquel ce palier s'applique (inclus). */
+  min: number
+  /** Dégâts ajoutés au coup quand le palier s'applique. */
+  bonus: number
+}
+/** Sens de tri des paliers dans le panneau admin — AFFICHAGE uniquement, sans aucun effet en combat. */
+export type AutoBattleWeightScaleOrder = 'asc' | 'desc'
 // Modificateur de stat (dégâts de base ou précision) — la CIBLE ('opponent' =
 // l'adversaire du lanceur, 'self' = le lanceur lui-même) et le SENS
 // (stat_mod_direction : 'buff' = hausse, 'debuff' = baisse) sont deux réglages
@@ -1162,6 +1192,12 @@ export interface AutoBattleAbilityRule {
   bonus_damage_weight_target: AutoBattleWeightTarget | null
   bonus_damage_weight_comparison: AutoBattleWeightComparison | null
   bonus_damage_weight_percent: number | null
+  // Réglages du type 'weight_scale' ci-dessus — ignorés par les autres types,
+  // obligatoires (échelle non vide + camp regardé) pour celui-là. L'ordre, lui,
+  // ne sert qu'à l'affichage du barème dans le panneau admin.
+  bonus_damage_weight_scale: AutoBattleWeightScaleEntry[] | null
+  bonus_damage_weight_scale_target: AutoBattleWeightTarget | null
+  bonus_damage_weight_scale_order: AutoBattleWeightScaleOrder | null
   stat_mod_target: AutoBattleStatModTarget | null
   /** NULL sur les règles antérieures au sens explicite : traité comme 'debuff' si la cible est l'adversaire, 'buff' si c'est le lanceur. */
   stat_mod_direction: AutoBattleStatModDirection | null
@@ -1884,8 +1920,15 @@ export interface PushSubscriptionRow {
 
 // ── Mode Affichage ───────────────────────────────────────────
 // Types en usage dans display_assets.type : 'NPC' (figures PNJ), 'Background'
-// (fonds d'écran, table `backgrounds` fusionnée ici — voir schema.sql) et
-// 'Map Add-On' (calque superposé à la Carte, voir CarteTab.tsx).
+// (fonds d'écran, table `backgrounds` fusionnée ici — voir schema.sql),
+// 'Map Add-On' (calque superposé à la Carte, voir CarteTab.tsx) et
+// 'Battle Background' (fond du plateau de bataille, mode En ligne).
+// `DisplayAsset.type` reste un `string` libre (la colonne Postgres n'a pas de
+// contrainte) : cette liste documente les valeurs connues et sert aux filtres,
+// sans empêcher un CSV d'en apporter d'autres.
+export const DISPLAY_ASSET_TYPES = ['NPC', 'Background', 'Map Add-On', 'Battle Background'] as const
+export type DisplayAssetType = (typeof DISPLAY_ASSET_TYPES)[number]
+
 export interface DisplayAsset {
   id: number
   nom: string
@@ -1913,6 +1956,139 @@ export interface DisplayState {
   item_ids: number[]
   updated_at: string
 }
+
+// ── Mode En ligne (session + plateau de bataille partagé) ────
+// Ligne unique (id = 1), comme display_state : l'annonce de la prochaine
+// session ET la configuration du plateau tiennent dans le même enregistrement,
+// donc un seul abonnement Realtime côté client.
+export type OnlineMode = 'display' | 'battle'
+
+/** Affichage du suivi des tours. Les variantes « compact » remplacent le sprite
+ *  par l'initiale du Pokémon sur un fond à la couleur de son type. */
+export type TurnOrderPosition = 'top' | 'bottom' | 'compact_top' | 'compact_bottom' | 'hidden'
+
+/** Étapes de la fin de partie : 'pending' = les joueurs patientent pendant que
+ *  le MJ prépare le bilan ; 'rewards' = leur récapitulatif est ouvert. */
+export type EndgamePhase = 'none' | 'pending' | 'rewards'
+export type EndgameOutcome = 'win' | 'lose'
+
+export interface EndgameXpReward {
+  player_pokemon_id: number
+  nom: string
+  gained: number
+  total: number
+}
+
+export interface EndgameItemReward {
+  item_nom: string
+  quantity: number
+}
+
+/** Indexé par id de joueur (converti en chaîne par jsonb). */
+export type EndgameRewards = Record<string, { xp: EndgameXpReward[]; items: EndgameItemReward[] }>
+
+/** Une ligne du journal de bataille : un Pokémon ayant participé au combat. */
+export interface OnlineBattleLogRow {
+  id: number
+  entity_key: string
+  token_id: number | null
+  owner_player_id: number | null
+  player_pokemon_id: number | null
+  pokemon_nom: string
+  label: string
+  is_ally: boolean
+  /** PV max à la pose — base du calcul d'XP sur les ennemis mis K.O. */
+  max_hp: number
+  /** PV en quittant le plateau ; `null` = encore en jeu, on lit ses PV courants. */
+  last_hp: number | null
+  left_at: string | null
+  created_at: string
+}
+
+/** Palette de l'outil de coloriage du MJ (cases teintées, purement indicatives). */
+export const ONLINE_TILE_COLORS = ['red', 'blue', 'green', 'orange', 'purple', 'pink'] as const
+export type OnlineTileColor = (typeof ONLINE_TILE_COLORS)[number]
+
+export interface OnlineState {
+  id: number
+  /** Date+heure de la prochaine session (ISO). `null` = aucune annonce programmée. */
+  session_at: string | null
+  session_message: string
+  session_announce_enabled: boolean
+  /** La pop-up n'apparaît qu'à partir de N jours avant la session. */
+  session_visible_days_before: number
+  session_notified_at: string | null
+  /** 'display' = écran d'affichage historique (display_state) ; 'battle' = plateau interactif. */
+  mode: OnlineMode
+  /** Fond du plateau : nom d'un display_assets de type 'Battle Background'
+   *  (référence par NOM, l'import CSV réattribue les id à chaque passage). */
+  battle_background_nom: string
+  grid_cols: number
+  grid_rows: number
+  /** Cases inaccessibles, au format "col,row" (voir lib/onlineBoard.ts). */
+  blocked_cells: string[]
+  /** Cases coloriées par le MJ : { "col,row": couleur }. Repère visuel, sans effet de jeu. */
+  colored_cells: Record<string, OnlineTileColor>
+  players_sidebar_enabled: boolean
+  players_move_enabled: boolean
+  /** Vue épurée : masque grille, cases bloquées et couleurs, garde les Pokémon.
+   *  Partagée, car la fin de partie l'active pour tout le monde d'un coup. */
+  hide_layout: boolean
+  /** Ordre du tour : liste ordonnée d'`OnlineToken.id`. */
+  turn_order: number[]
+  /** Jeton mis en avant dans l'ordre du tour (« c'est son tour »). */
+  turn_active_token_id: number | null
+  /** Affichage du suivi des tours : en haut, en bas, ou masqué. */
+  turn_order_position: TurnOrderPosition
+  endgame_phase: EndgamePhase
+  endgame_outcome: EndgameOutcome | null
+  /** Récompenses DÉJÀ attribuées, indexées par id de joueur — récapitulatif de lecture. */
+  endgame_rewards: EndgameRewards
+  /** Ids des joueurs ayant accusé réception de leur récapitulatif. */
+  endgame_acked: number[]
+  /** Incrémenté à chaque entrée en mode bataille et à chaque réinitialisation :
+   *  rouvre la pop-up chez tout le monde sans la rouvrir après une fermeture manuelle. */
+  battle_generation: number
+  updated_at: string
+}
+
+/** Un jeton posé sur le plateau. Trois provenances possibles :
+ *  - joueur : player_pokemon_id + owner_player_id, placed_by_admin = false ;
+ *  - MJ incarnant un personnage : idem mais placed_by_admin = true ;
+ *  - MJ / espèce libre : player_pokemon_id null, PV et dégâts dans les champs free_*. */
+export interface OnlineToken {
+  id: number
+  owner_player_id: number | null
+  player_pokemon_id: number | null
+  /** Espèce, référence par nom vers pokemon.nom. */
+  pokemon_nom: string
+  placed_by_admin: boolean
+  /** Camp : les Pokémon des vrais joueurs sont alliés, les espèces libres et les
+   *  PNJ ennemis par défaut — le MJ peut basculer un personnage incarné. */
+  is_ally: boolean
+  cell_col: number
+  cell_row: number
+  free_max_hp: number | null
+  free_current_hp: number | null
+  free_damage: number | null
+  free_status: StatusId
+  free_label: string
+  created_at: string
+}
+
+/** Statuts renvoyés par les RPC online_* (voir supabase/schema.sql). */
+export type OnlinePlaceStatus =
+  | 'ok'
+  | 'no_state'
+  | 'not_in_battle'
+  | 'move_disabled'
+  | 'out_of_bounds'
+  | 'cell_blocked'
+  | 'cell_occupied'
+  | 'already_placed'
+  | 'not_found'
+  | 'forbidden'
+  | 'error'
 
 // ── Rencontres ────────────────────────────────────────────────
 export interface Encounter {

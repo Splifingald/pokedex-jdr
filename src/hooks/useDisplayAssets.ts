@@ -28,6 +28,7 @@ export function useDisplayAssets() {
   const npcs = useMemo(() => assets.filter((a) => a.type === 'NPC'), [assets])
   const backgrounds = useMemo(() => assets.filter((a) => a.type === 'Background'), [assets])
   const mapAddOns = useMemo(() => assets.filter((a) => a.type === 'Map Add-On'), [assets])
+  const battleBackgrounds = useMemo(() => assets.filter((a) => a.type === 'Battle Background'), [assets])
 
-  return { assets, npcs, backgrounds, mapAddOns, loading, error, refetch: fetchAll }
+  return { assets, npcs, backgrounds, mapAddOns, battleBackgrounds, loading, error, refetch: fetchAll }
 }

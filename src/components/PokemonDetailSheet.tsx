@@ -22,8 +22,8 @@ import { PixelIcon } from './icons/PixelIcon'
 import { CloseIcon } from './icons/CloseIcon'
 import { TrashIcon } from './icons/TrashIcon'
 import { STAT_ICON, PC_ICON, GIFT_ICON } from '../lib/icons'
-import { useLocalHp, restoreLocalHp } from '../hooks/useLocalHp'
-import { useLocalStatus } from '../hooks/useLocalStatus'
+import { usePokemonHp, usePokemonStatus } from '../hooks/usePokemonVitals'
+import { restoreVitals } from '../lib/pokemonVitals'
 import { useHoldRepeat } from '../hooks/useHoldRepeat'
 import { getMaxHp } from '../lib/maxHp'
 import { getHpBreakdown, getDamageBreakdown, getMilestones, getMaxXp } from '../lib/xpBonuses'
@@ -90,7 +90,7 @@ interface Props {
 }
 
 // Bloc PV / Statut / XP d'une instance possédée — composant séparé pour isoler
-// les hooks liés à l'instance (useLocalHp exige un id).
+// les hooks liés à l'instance (usePokemonHp exige la ligne player_pokemon).
 function OwnedVitals({
   playerPokemon,
   pokemon,
@@ -111,8 +111,8 @@ function OwnedVitals({
   onEvolve?: (id: number, newPokemonNom: string, newPokemonNumero: string | null) => Promise<void>
 }) {
   const maxHp = getMaxHp(playerPokemon, pokemon)
-  const [hp, setHp] = useLocalHp(playerPokemon.id, maxHp)
-  const [status, setStatus] = useLocalStatus(playerPokemon.id)
+  const [hp, setHp] = usePokemonHp(playerPokemon, maxHp)
+  const [status, setStatus] = usePokemonStatus(playerPokemon)
   const hpRef = useRef(hp)
   useEffect(() => { hpRef.current = hp }, [hp])
   const { showToast } = useToast()
@@ -228,8 +228,8 @@ function OwnedVitals({
     void (async () => {
       await onEvolve(playerPokemon.id, picked.evolution_nom, toSpecies?.numero ?? null)
 
-      if (toSpecies) restoreLocalHp(playerPokemon.id, getMaxHp({ ...playerPokemon, xp: 0 }, toSpecies))
-      setStatus('aucun')
+      if (toSpecies) restoreVitals([{ id: playerPokemon.id, maxHp: getMaxHp({ ...playerPokemon, xp: 0 }, toSpecies) }])
+      else setStatus('aucun')
 
       void logHistoryEvent('team', 'pokemon_evolve', playerPokemon.player_id, {
         pokemon_nom: playerPokemon.pokemon_nom,
@@ -281,8 +281,8 @@ function OwnedVitals({
       // evolvePokemon remet toujours l'XP à 0 côté serveur — on calcule les PV max
       // sur cette base plutôt que sur playerPokemon.xp, qui est figé (fermeture) sur
       // l'XP d'avant évolution tant que ce composant n'a pas re-rendu avec les nouvelles props.
-      if (toSpecies) restoreLocalHp(playerPokemon.id, getMaxHp({ ...playerPokemon, xp: 0 }, toSpecies))
-      setStatus('aucun')
+      if (toSpecies) restoreVitals([{ id: playerPokemon.id, maxHp: getMaxHp({ ...playerPokemon, xp: 0 }, toSpecies) }])
+      else setStatus('aucun')
 
       void logHistoryEvent('team', 'pokemon_evolve', playerPokemon.player_id, {
         pokemon_nom: playerPokemon.pokemon_nom,

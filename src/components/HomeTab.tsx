@@ -38,7 +38,7 @@ import { hasAnyMinigameAvailable } from '../lib/magikarpGame'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { PixelIcon } from './icons/PixelIcon'
-import { PHOTO_ICON, CASINO_MASCOT_ICON, MINIGAMES_ICON, MINING_ICON, PENSION_ICON, SAFARI_ICON, AUTOBATTLE_ICON, PVP_ICON } from '../lib/icons'
+import { PHOTO_ICON, CASINO_MASCOT_ICON, MINIGAMES_ICON, MINING_ICON, PENSION_ICON, SAFARI_ICON, AUTOBATTLE_ICON, PVP_ICON, ONLINE_ICON } from '../lib/icons'
 import { isGiftReady, resolveLootboxForSpecies, drawLootboxReward, randomNextGiftAt, maybeResetGiftTimerOnEntry } from '../lib/gifting'
 import { logHistoryEvent } from '../lib/historyLog'
 
@@ -55,6 +55,9 @@ interface Props {
   canScan: boolean
   onScan: () => void
   onRequestLogin: () => void
+  /** Le mode En ligne est actif : on propose d'ouvrir l'écran partagé. */
+  onlineAvailable: boolean
+  onOpenOnline: () => void
 }
 
 // Fond d'accueil : image configurable dans Admin → Paramètres.
@@ -70,7 +73,7 @@ const homeBgStyle = (url: string): React.CSSProperties => ({
   backgroundRepeat: 'no-repeat',
 })
 
-export function HomeTab({ player, players, isAdmin, pokemonByName, discoveredPokemon, attacksByName, itemsByName, playerItems, evolutionsByPokemonNom, canScan, onScan, onRequestLogin }: Props) {
+export function HomeTab({ player, players, isAdmin, pokemonByName, discoveredPokemon, attacksByName, itemsByName, playerItems, evolutionsByPokemonNom, canScan, onScan, onRequestLogin, onlineAvailable, onOpenOnline }: Props) {
   const { roster, updateXp, updateNickname, evolvePokemon, toggleInTeam, setNextGiftAt, addMove, removeMove, deleteOwnedPokemon, markEggRevealSeen } = usePlayerPokemon(player?.id ?? null)
   const { pokedollars, addItems, setPokedollars } = playerItems
   const { parameters } = useAdminParameters()
@@ -410,6 +413,15 @@ export function HomeTab({ player, players, isAdmin, pokemonByName, discoveredPok
       {/* Widgets épinglés à droite : plus petits sur mobile (~70%), en grille de
           6 lignes max par colonne sur PC (colonne suivante au-delà) */}
       <div className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 z-[35] flex flex-col sm:grid sm:grid-flow-col sm:grid-rows-6 items-center gap-2 sm:gap-3">
+        {onlineAvailable && (
+          <button
+            onClick={onOpenOnline}
+            title="Écran partagé"
+            className="w-10 h-10 sm:w-14 sm:h-14 rounded-full border-2 sm:border-[3px] border-ink bg-gradient-to-br from-[#e8933d] to-[#8a4a0f] flex items-center justify-center shadow-[var(--shadow-pixel)] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-all"
+          >
+            <img src={ONLINE_ICON} alt="Écran partagé" className="pixelated w-6 h-6 sm:w-9 sm:h-9 object-contain" />
+          </button>
+        )}
         {player && parameters.feature_minijeux_enabled && hasAnyMinigameAvailable(minigamesConfig, roster) && (
           <button
             onClick={() => setShowMiniGames(true)}

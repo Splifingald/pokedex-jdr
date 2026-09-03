@@ -330,6 +330,17 @@ html, body, #root {
     drop-shadow(0.3cqh 0.6cqh 0.5cqh rgba(0, 0, 0, 0.4));
 }
 
+/* Contour blanc fin des Pokémon sur le plateau de bataille : les détache du
+   décor sans l'effet « autocollant » (halo + ombre portée) de sticker-effect,
+   trop épais à la taille d'une case. */
+.token-outline {
+  filter:
+    drop-shadow(0 0 1px #fff)
+    drop-shadow(0 0 1px #fff)
+    drop-shadow(0 0 1px #fff)
+    drop-shadow(0 0 1px #fff);
+}
+
 /* Variante silhouette du même effet (Pokémon pas encore découvert) : le PNG
    est noirci avant le contour blanc, pour une ombre chinoise cerclée plutôt
    que la couleur réelle. */
@@ -340,6 +351,33 @@ html, body, #root {
     drop-shadow(0 0 0.8cqh #fff)
     drop-shadow(0 0 0.8cqh #fff)
     drop-shadow(0 0 0.8cqh #fff);
+}
+
+/* Ping de case du plateau de bataille (mode En ligne) : une onde circulaire
+   part de la case et s'étend un peu au-delà, à la couleur de qui a pointé. */
+@keyframes ping-ripple {
+  from { transform: scale(0.45); opacity: 0.85; }
+  to   { transform: scale(1.75); opacity: 0; }
+}
+@keyframes ping-tile {
+  from { opacity: 0.5; }
+  to   { opacity: 0.18; }
+}
+/* Sortie en fondu : le ping s'efface au lieu de disparaître d'un coup.
+   Le délai doit rester aligné sur PING_MS de src/hooks/useOnlinePings.ts. */
+@keyframes ping-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+/* Résultat d'un lancer de dé : deux secondes pleines, puis une seconde de
+   fondu. La durée totale doit rester alignée sur RESULT_MS de DiceRoller.tsx. */
+@keyframes dice-result {
+  0%   { opacity: 0; transform: scale(0.6); }
+  8%   { opacity: 1; transform: scale(1.08); }
+  16%  { transform: scale(1); }
+  66%  { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 /* Scrollbar sombre */

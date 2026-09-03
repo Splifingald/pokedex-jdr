@@ -11,9 +11,12 @@ interface Props {
   barBorderClassName?: string
   /** Côté où coller le texte "current / max" (défaut: droite) — passé à gauche pour le pokémon de gauche en combat, afin de dégager le centre de l'arène (voir AutoBattleScreen : la pastille de météo s'y pose). */
   valueAlign?: 'left' | 'right'
+  /** Version réduite (barre plus fine, texte plus petit) : utilisée sous les jetons
+   *  du plateau de bataille, où la jauge doit rester plus étroite que la pastille. */
+  compact?: boolean
 }
 
-export function HpGauge({ current, max, onChange, showValue = true, barBorderClassName = 'border border-ink', valueAlign = 'right' }: Props) {
+export function HpGauge({ current, max, onChange, showValue = true, barBorderClassName = 'border border-ink', valueAlign = 'right', compact = false }: Props) {
   // Ref plutôt que state : évite un re-render (donc un ré-attachement de listener)
   // entre le pointerdown et le premier pointermove du drag.
   const dragging = useRef(false)
@@ -47,7 +50,7 @@ export function HpGauge({ current, max, onChange, showValue = true, barBorderCla
 
   const bar = (
     <div
-      className={`h-2.5 rounded-full bg-[#cfc7a8] ${barBorderClassName} overflow-hidden ${onChange ? 'cursor-pointer touch-none select-none' : ''}`}
+      className={`${compact ? 'h-1.5' : 'h-2.5'} rounded-full bg-[#cfc7a8] ${barBorderClassName} overflow-hidden ${onChange ? 'cursor-pointer touch-none select-none' : ''}`}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={stopDragging}
@@ -62,7 +65,7 @@ export function HpGauge({ current, max, onChange, showValue = true, barBorderCla
     return (
       <div>
         <div className="text-center">
-          <span className="text-hp-red font-bold text-lg tracking-wide">K.O.</span>
+          <span className={`text-hp-red font-bold tracking-wide ${compact ? 'text-[0.6rem] leading-none' : 'text-lg'}`}>K.O.</span>
         </div>
         {/* Barre vide conservée quand elle est éditable, pour pouvoir re-soigner au clic */}
         {onChange && bar}
@@ -73,7 +76,7 @@ export function HpGauge({ current, max, onChange, showValue = true, barBorderCla
   return (
     <div>
       {showValue && (
-        <div className={`text-xs font-bold ${valueAlign === 'left' ? 'text-left' : 'text-right'} mb-0.5 ${textColor}`}>{current} / {max}</div>
+        <div className={`${compact ? 'text-[0.6rem] leading-none text-center' : 'text-xs'} font-bold ${compact ? '' : valueAlign === 'left' ? 'text-left' : 'text-right'} mb-0.5 ${textColor}`}>{current} / {max}</div>
       )}
       {bar}
     </div>

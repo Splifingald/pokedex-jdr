@@ -23,6 +23,7 @@ const DEFAULTS: AdminParameters = {
   feature_autobattle_enabled: true,
   feature_pvp_enabled: true,
   feature_chat_enabled: true,
+  feature_online_enabled: true,
   chat_max_message_length: 300,
   chat_spam_limit_per_minute: 3,
   chat_last_notified_at: null,

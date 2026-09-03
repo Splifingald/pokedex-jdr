@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import type { PlayerPokemon } from '../types'
+import { primeVitals } from '../lib/pokemonVitals'
 
 export function usePlayerPokemon(playerId: number | null) {
   const channelId = useRef(Math.random().toString(36).slice(2))
@@ -34,6 +35,13 @@ export function usePlayerPokemon(playerId: number | null) {
   useEffect(() => {
     fetchAll()
   }, [fetchAll])
+
+  // Les PV et le statut sont partagés via un petit store (lib/pokemonVitals.ts)
+  // pour rester instantanés à l'écran et groupés à l'écriture. On l'alimente
+  // hors rendu, à chaque nouvelle version du roster.
+  useEffect(() => {
+    if (roster.length > 0) primeVitals(roster)
+  }, [roster])
 
   // Abonnement temps réel : filtré côté client comme discovered_pokemon
   useEffect(() => {

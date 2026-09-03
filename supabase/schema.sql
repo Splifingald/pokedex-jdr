@@ -3046,10 +3046,14 @@ ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS invulnerable_next_
 -- dé, avant le contre-coup, uniquement si bonus_damage_condition est vérifiée
 -- ce coup-ci. 'multiply' multiplie le total (dégâts arrondis à l'entier
 -- inférieur) ; 'flat' ajoute un montant fixe ; 'range' ajoute un montant tiré
--- entre bonus_damage_min/max. Une condition est requise dès qu'un type est
--- choisi (pas de bonus inconditionnel — utiliser le dé/dégâts de base pour
--- ça). 'dice_equals' compare au résultat du dé de CETTE capacité
--- (bonus_damage_condition_dice_value, borné par attacks.degats_de, pas 1-6).
+-- entre bonus_damage_min/max ; 'weight_scale' ajoute le montant lu dans une
+-- ÉCHELLE DE POIDS (voir bonus_damage_weight_scale plus bas). Une condition est
+-- requise dès qu'un type est choisi (pas de bonus inconditionnel — utiliser le
+-- dé/dégâts de base pour ça), SAUF pour 'weight_scale' dont l'échelle se suffit
+-- à elle-même : la condition y reste facultative (et continue de conditionner
+-- le bonus si elle est renseignée). 'dice_equals' compare au résultat du dé de
+-- CETTE capacité (bonus_damage_condition_dice_value, borné par
+-- attacks.degats_de, pas 1-6).
 ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS bonus_damage_type text;
 ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS bonus_damage_multiplier numeric;
 ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS bonus_damage_flat integer;
@@ -3059,7 +3063,7 @@ ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS bonus_damage_condi
 ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS bonus_damage_condition_dice_value integer;
 ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_bonus_damage_type_check;
 ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_bonus_damage_type_check
-  CHECK (bonus_damage_type IS NULL OR bonus_damage_type IN ('multiply', 'flat', 'range'));
+  CHECK (bonus_damage_type IS NULL OR bonus_damage_type IN ('multiply', 'flat', 'range', 'weight_scale'));
 ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_bonus_damage_condition_check;
 ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_bonus_damage_condition_check
   CHECK (bonus_damage_condition IS NULL OR bonus_damage_condition IN ('took_damage_last_turn', 'first_use', 'dice_equals', 'has_status', 'self_has_status', 'weight_ratio'));
@@ -3068,8 +3072,8 @@ ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_bon
   CHECK (
     bonus_damage_type IS NULL
     OR (
-      bonus_damage_condition IS NOT NULL
-      AND (bonus_damage_condition <> 'dice_equals' OR bonus_damage_condition_dice_value IS NOT NULL)
+      (bonus_damage_condition IS NOT NULL OR bonus_damage_type = 'weight_scale')
+      AND (bonus_damage_condition IS DISTINCT FROM 'dice_equals' OR bonus_damage_condition_dice_value IS NOT NULL)
       AND (bonus_damage_type <> 'multiply' OR (bonus_damage_multiplier IS NOT NULL AND bonus_damage_multiplier > 0))
       AND (bonus_damage_type <> 'flat' OR bonus_damage_flat IS NOT NULL)
       AND (bonus_damage_type <> 'range' OR (bonus_damage_min IS NOT NULL AND bonus_damage_max IS NOT NULL AND bonus_damage_max >= bonus_damage_min))
@@ -3115,6 +3119,39 @@ ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_bon
     -- conditions les ignorent et peuvent les laisser à NULL).
     AND (bonus_damage_condition IS DISTINCT FROM 'weight_ratio'
       OR (bonus_damage_weight_target IS NOT NULL AND bonus_damage_weight_comparison IS NOT NULL AND bonus_damage_weight_percent IS NOT NULL))
+  );
+
+-- Réglages du type de dégâts additionnels 'weight_scale' — l'ÉCHELLE DE POIDS,
+-- indépendante de la condition 'weight_ratio' ci-dessus : là où celle-ci
+-- COMPARE les deux poids pour tout ou rien, celle-ci lit le poids d'UN SEUL des
+-- deux camps (bonus_damage_weight_scale_target : 'self' = le lanceur,
+-- 'opponent' = sa cible) dans un barème par tranches et ajoute le montant
+-- correspondant aux dégâts du coup.
+--   bonus_damage_weight_scale = tableau jsonb de paliers
+--     [{"min": 0, "bonus": 0}, {"min": 50, "bonus": 3}, {"min": 100, "bonus": 5}]
+--     où "min" est le poids EN KG à partir duquel le palier s'applique
+--     (inclus) et "bonus" les PV de dégâts ajoutés. Chaque palier court
+--     jusqu'au "min" du suivant (exclu), le dernier est ouvert vers le haut ;
+--     un poids inférieur au plus petit "min" (ou inconnu, pokemon.poids NULL)
+--     ne donne rien. Le barème n'a donc jamais ni trou ni chevauchement, quel
+--     que soit l'ordre de saisie — voir autobattle_weight_scale_bonus.
+--   bonus_damage_weight_scale_order = 'asc' | 'desc' : réglage d'AFFICHAGE
+--     seulement (sens de tri des paliers dans le panneau admin), sans aucun
+--     effet en combat — le bonus reste toujours celui écrit en face du palier.
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS bonus_damage_weight_scale jsonb;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS bonus_damage_weight_scale_target text;
+ALTER TABLE autobattle_ability_rules ADD COLUMN IF NOT EXISTS bonus_damage_weight_scale_order text;
+ALTER TABLE autobattle_ability_rules DROP CONSTRAINT IF EXISTS autobattle_ability_rules_bonus_damage_weight_scale_check;
+ALTER TABLE autobattle_ability_rules ADD CONSTRAINT autobattle_ability_rules_bonus_damage_weight_scale_check
+  CHECK (
+    (bonus_damage_weight_scale IS NULL OR jsonb_typeof(bonus_damage_weight_scale) = 'array')
+    AND (bonus_damage_weight_scale_target IS NULL OR bonus_damage_weight_scale_target IN ('self', 'opponent'))
+    AND (bonus_damage_weight_scale_order IS NULL OR bonus_damage_weight_scale_order IN ('asc', 'desc'))
+    -- Le type 'weight_scale' exige une échelle non vide et un camp regardé
+    -- (les autres types les ignorent et peuvent les laisser à NULL).
+    AND (bonus_damage_type IS DISTINCT FROM 'weight_scale'
+      OR (bonus_damage_weight_scale IS NOT NULL AND jsonb_array_length(bonus_damage_weight_scale) > 0
+          AND bonus_damage_weight_scale_target IS NOT NULL))
   );
 
 -- Modificateur de stat (dégâts de base ou précision), appliqué sur un coup
@@ -5453,6 +5490,28 @@ AS $$
   END
 $$;
 
+-- Dégâts additionnels du type 'weight_scale' (voir autobattle_ability_rules.
+-- bonus_damage_weight_scale) : montant du palier dont le "min" est le plus
+-- grand parmi ceux que p_weight atteint. Poids inconnu (pokemon.poids NULL),
+-- échelle absente/vide/mal formée, ou poids sous le plus petit palier : 0, ce
+-- qui laisse les dégâts inchangés. p_scale peut arriver en NULL SQL comme en
+-- 'null' jsonb — les deux sont traités comme un tableau vide.
+CREATE OR REPLACE FUNCTION autobattle_weight_scale_bonus(p_scale jsonb, p_weight numeric)
+RETURNS integer
+LANGUAGE sql IMMUTABLE
+AS $$
+  SELECT COALESCE((
+    SELECT (e ->> 'bonus')::integer
+    FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_scale) = 'array' THEN p_scale ELSE '[]'::jsonb END) AS e
+    WHERE p_weight IS NOT NULL
+      AND (e ->> 'min') IS NOT NULL
+      AND (e ->> 'bonus') IS NOT NULL
+      AND p_weight >= (e ->> 'min')::numeric
+    ORDER BY (e ->> 'min')::numeric DESC
+    LIMIT 1
+  ), 0)
+$$;
+
 -- Signe d'un modificateur de stat (voir autobattle_ability_rules.stat_mod_*) :
 -- 'debuff' = baisse (montant négatif), 'buff' = hausse (montant positif), et ce
 -- INDÉPENDAMMENT de la cible — un lanceur peut donc se baisser une stat à
@@ -5473,6 +5532,7 @@ GRANT EXECUTE ON FUNCTION autobattle_dot_tick(text, integer, integer, integer, i
 GRANT EXECUTE ON FUNCTION autobattle_status_dot_tick(text, integer, integer, text, text, integer, jsonb, jsonb, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION autobattle_type_immune(text, text, text, text, integer, integer) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION autobattle_weight_condition(text, text, integer, numeric, numeric) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION autobattle_weight_scale_bonus(jsonb, numeric) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION autobattle_stat_mod_signed(integer, text, text) TO anon, authenticated;
 
 -- ============================================================
@@ -5665,7 +5725,14 @@ CREATE TYPE autobattle_combatant_ability AS (
   -- 'debuff' = baisse, NULL = ancienne convention déduite de la cible) — voir
   -- autobattle_stat_mod_signed. Ajouté en fin de type pour rester aligné sur
   -- l'ALTER TYPE ... ADD ATTRIBUTE joué sur les bases déjà en place.
-  stat_mod_direction              text
+  stat_mod_direction              text,
+  -- Échelle de poids du type de dégâts additionnels 'weight_scale' (voir
+  -- autobattle_ability_rules.bonus_damage_weight_scale et le helper
+  -- autobattle_weight_scale_bonus) : le barème lui-même et le camp dont on lit
+  -- le poids ('self' = celui qui joue la capacité, 'opponent' = sa cible).
+  -- Même remarque que ci-dessus : ajoutés en fin de type.
+  bonus_weight_scale              jsonb,
+  bonus_weight_scale_target       text
 );
 
 DROP TYPE IF EXISTS autobattle_round_result CASCADE;
@@ -6745,13 +6812,22 @@ BEGIN
               OR p_player_ability.bonus_condition = 'weight_ratio' AND autobattle_weight_condition(
                    p_player_ability.bonus_weight_target, p_player_ability.bonus_weight_comparison,
                    p_player_ability.bonus_weight_percent, p_player_weight, p_opponent_weight);
-            IF p_player_ability.bonus_type IS NOT NULL AND v_bonus_condition_met THEN
+            -- Seul 'weight_scale' peut se passer de condition (son barème fait
+            -- office de dosage) : partout ailleurs, pas de condition = pas de
+            -- bonus, comme avant (voir la contrainte ..._bonus_damage_fields).
+            IF p_player_ability.bonus_type IS NOT NULL AND (p_player_ability.bonus_condition IS NULL OR v_bonus_condition_met) THEN
               IF p_player_ability.bonus_type = 'multiply' THEN
                 v_hit_damage := floor(v_hit_damage * COALESCE(p_player_ability.bonus_multiplier, 1))::integer;
               ELSIF p_player_ability.bonus_type = 'flat' THEN
                 v_hit_damage := v_hit_damage + COALESCE(p_player_ability.bonus_flat, 0);
               ELSIF p_player_ability.bonus_type = 'range' THEN
                 v_hit_damage := v_hit_damage + (p_player_ability.bonus_min + floor(random() * (p_player_ability.bonus_max - p_player_ability.bonus_min + 1))::integer);
+              ELSIF p_player_ability.bonus_type = 'weight_scale' THEN
+                -- Poids d'UN SEUL camp lu dans le barème (voir
+                -- autobattle_weight_scale_bonus) : ici « self » = le joueur.
+                v_hit_damage := v_hit_damage + autobattle_weight_scale_bonus(
+                  p_player_ability.bonus_weight_scale,
+                  CASE WHEN p_player_ability.bonus_weight_scale_target = 'opponent' THEN p_opponent_weight ELSE p_player_weight END);
               END IF;
               v_hit_damage := GREATEST(0, v_hit_damage);
             END IF;
@@ -7192,13 +7268,20 @@ BEGIN
               OR p_opponent_ability.bonus_condition = 'weight_ratio' AND autobattle_weight_condition(
                    p_opponent_ability.bonus_weight_target, p_opponent_ability.bonus_weight_comparison,
                    p_opponent_ability.bonus_weight_percent, p_opponent_weight, p_player_weight);
-            IF p_opponent_ability.bonus_type IS NOT NULL AND v_bonus_condition_met THEN
+            -- Condition facultative pour 'weight_scale' seulement, voir le
+            -- bloc symétrique du joueur plus haut.
+            IF p_opponent_ability.bonus_type IS NOT NULL AND (p_opponent_ability.bonus_condition IS NULL OR v_bonus_condition_met) THEN
               IF p_opponent_ability.bonus_type = 'multiply' THEN
                 v_hit_damage := floor(v_hit_damage * COALESCE(p_opponent_ability.bonus_multiplier, 1))::integer;
               ELSIF p_opponent_ability.bonus_type = 'flat' THEN
                 v_hit_damage := v_hit_damage + COALESCE(p_opponent_ability.bonus_flat, 0);
               ELSIF p_opponent_ability.bonus_type = 'range' THEN
                 v_hit_damage := v_hit_damage + (p_opponent_ability.bonus_min + floor(random() * (p_opponent_ability.bonus_max - p_opponent_ability.bonus_min + 1))::integer);
+              ELSIF p_opponent_ability.bonus_type = 'weight_scale' THEN
+                -- Ici « self » = le camp adverse, qui est celui qui frappe.
+                v_hit_damage := v_hit_damage + autobattle_weight_scale_bonus(
+                  p_opponent_ability.bonus_weight_scale,
+                  CASE WHEN p_opponent_ability.bonus_weight_scale_target = 'opponent' THEN p_player_weight ELSE p_opponent_weight END);
               END IF;
               v_hit_damage := GREATEST(0, v_hit_damage);
             END IF;
@@ -7910,6 +7993,12 @@ DECLARE
   v_opponent_bonus_weight_target     text;
   v_opponent_bonus_weight_comparison text;
   v_opponent_bonus_weight_percent    integer;
+  -- Échelle de poids du type de bonus 'weight_scale' (voir
+  -- autobattle_weight_scale_bonus).
+  v_player_bonus_weight_scale          jsonb;
+  v_player_bonus_weight_scale_target   text;
+  v_opponent_bonus_weight_scale        jsonb;
+  v_opponent_bonus_weight_scale_target text;
   -- Purges de la capacité de chaque camp (voir clear_damage_dot/clear_weather/
   -- cure_status).
   v_player_clear_damage_dot     boolean;
@@ -8221,12 +8310,14 @@ BEGIN
          leech_dot_amount, leech_dot_duration_turns, leech_dot_type, leech_dot_percent,
          pierce_immunity_type, pierce_immunity_turns, requires_target_status,
          bonus_damage_weight_target, bonus_damage_weight_comparison, bonus_damage_weight_percent,
+         bonus_damage_weight_scale, bonus_damage_weight_scale_target,
          clear_damage_dot, clear_weather, cure_status,
          status_dot_status, status_dot_chance, status_dot_duration_turns, percent_hp_damage_basis
     INTO v_player_damage_dot_config_amount, v_player_damage_dot_config_turns, v_player_damage_dot_config_type, v_player_damage_dot_config_percent,
          v_player_leech_dot_config_amount, v_player_leech_dot_config_turns, v_player_leech_dot_config_type, v_player_leech_dot_config_percent,
          v_player_pierce_immunity_config_type, v_player_pierce_immunity_config_turns, v_player_requires_target_status,
          v_player_bonus_weight_target, v_player_bonus_weight_comparison, v_player_bonus_weight_percent,
+         v_player_bonus_weight_scale, v_player_bonus_weight_scale_target,
          v_player_clear_damage_dot, v_player_clear_weather, v_player_cure_status,
          v_player_status_dot_config_status, v_player_status_dot_config_chance, v_player_status_dot_config_turns,
          v_player_percent_hp_damage_basis
@@ -8268,12 +8359,14 @@ BEGIN
          leech_dot_amount, leech_dot_duration_turns, leech_dot_type, leech_dot_percent,
          pierce_immunity_type, pierce_immunity_turns, requires_target_status,
          bonus_damage_weight_target, bonus_damage_weight_comparison, bonus_damage_weight_percent,
+         bonus_damage_weight_scale, bonus_damage_weight_scale_target,
          clear_damage_dot, clear_weather, cure_status,
          status_dot_status, status_dot_chance, status_dot_duration_turns, percent_hp_damage_basis
     INTO v_opponent_damage_dot_config_amount, v_opponent_damage_dot_config_turns, v_opponent_damage_dot_config_type, v_opponent_damage_dot_config_percent,
          v_opponent_leech_dot_config_amount, v_opponent_leech_dot_config_turns, v_opponent_leech_dot_config_type, v_opponent_leech_dot_config_percent,
          v_opponent_pierce_immunity_config_type, v_opponent_pierce_immunity_config_turns, v_opponent_requires_target_status,
          v_opponent_bonus_weight_target, v_opponent_bonus_weight_comparison, v_opponent_bonus_weight_percent,
+         v_opponent_bonus_weight_scale, v_opponent_bonus_weight_scale_target,
          v_opponent_clear_damage_dot, v_opponent_clear_weather, v_opponent_cure_status,
          v_opponent_status_dot_config_status, v_opponent_status_dot_config_chance, v_opponent_status_dot_config_turns,
          v_opponent_percent_hp_damage_basis
@@ -9303,13 +9396,21 @@ BEGIN
               OR v_player_bonus_condition = 'weight_ratio' AND autobattle_weight_condition(
                    v_player_bonus_weight_target, v_player_bonus_weight_comparison,
                    v_player_bonus_weight_percent, v_player_weight, v_opponent_weight);
-            IF v_player_bonus_type IS NOT NULL AND v_bonus_condition_met THEN
+            -- Seul 'weight_scale' peut se passer de condition (voir la
+            -- contrainte ..._bonus_damage_fields et le moteur partagé).
+            IF v_player_bonus_type IS NOT NULL AND (v_player_bonus_condition IS NULL OR v_bonus_condition_met) THEN
               IF v_player_bonus_type = 'multiply' THEN
                 v_hit_damage := floor(v_hit_damage * COALESCE(v_player_bonus_multiplier, 1))::integer;
               ELSIF v_player_bonus_type = 'flat' THEN
                 v_hit_damage := v_hit_damage + COALESCE(v_player_bonus_flat, 0);
               ELSIF v_player_bonus_type = 'range' THEN
                 v_hit_damage := v_hit_damage + (v_player_bonus_min + floor(random() * (v_player_bonus_max - v_player_bonus_min + 1))::integer);
+              ELSIF v_player_bonus_type = 'weight_scale' THEN
+                -- Poids d'UN SEUL camp lu dans le barème (voir
+                -- autobattle_weight_scale_bonus) : ici « self » = le joueur.
+                v_hit_damage := v_hit_damage + autobattle_weight_scale_bonus(
+                  v_player_bonus_weight_scale,
+                  CASE WHEN v_player_bonus_weight_scale_target = 'opponent' THEN v_opponent_weight ELSE v_player_weight END);
               END IF;
               v_hit_damage := GREATEST(0, v_hit_damage);
             END IF;
@@ -9766,13 +9867,20 @@ BEGIN
               OR v_opponent_bonus_condition = 'weight_ratio' AND autobattle_weight_condition(
                    v_opponent_bonus_weight_target, v_opponent_bonus_weight_comparison,
                    v_opponent_bonus_weight_percent, v_opponent_weight, v_player_weight);
-            IF v_opponent_bonus_type IS NOT NULL AND v_bonus_condition_met THEN
+            -- Condition facultative pour 'weight_scale' seulement, voir le
+            -- bloc symétrique du joueur plus haut.
+            IF v_opponent_bonus_type IS NOT NULL AND (v_opponent_bonus_condition IS NULL OR v_bonus_condition_met) THEN
               IF v_opponent_bonus_type = 'multiply' THEN
                 v_hit_damage := floor(v_hit_damage * COALESCE(v_opponent_bonus_multiplier, 1))::integer;
               ELSIF v_opponent_bonus_type = 'flat' THEN
                 v_hit_damage := v_hit_damage + COALESCE(v_opponent_bonus_flat, 0);
               ELSIF v_opponent_bonus_type = 'range' THEN
                 v_hit_damage := v_hit_damage + (v_opponent_bonus_min + floor(random() * (v_opponent_bonus_max - v_opponent_bonus_min + 1))::integer);
+              ELSIF v_opponent_bonus_type = 'weight_scale' THEN
+                -- Ici « self » = le camp adverse, qui est celui qui frappe.
+                v_hit_damage := v_hit_damage + autobattle_weight_scale_bonus(
+                  v_opponent_bonus_weight_scale,
+                  CASE WHEN v_opponent_bonus_weight_scale_target = 'opponent' THEN v_player_weight ELSE v_opponent_weight END);
               END IF;
               v_hit_damage := GREATEST(0, v_hit_damage);
             END IF;
@@ -11173,12 +11281,14 @@ BEGIN
          leech_dot_amount, leech_dot_duration_turns, leech_dot_type, leech_dot_percent,
          pierce_immunity_type, pierce_immunity_turns, requires_target_status,
          bonus_damage_weight_target, bonus_damage_weight_comparison, bonus_damage_weight_percent,
+         bonus_damage_weight_scale, bonus_damage_weight_scale_target,
          clear_damage_dot, clear_weather, cure_status,
          status_dot_status, status_dot_chance, status_dot_duration_turns, percent_hp_damage_basis
     INTO v_player_ability_cfg.damage_dot_config_amount, v_player_ability_cfg.damage_dot_config_turns, v_player_ability_cfg.damage_dot_config_type, v_player_ability_cfg.damage_dot_config_percent,
          v_player_ability_cfg.leech_dot_config_amount, v_player_ability_cfg.leech_dot_config_turns, v_player_ability_cfg.leech_dot_config_type, v_player_ability_cfg.leech_dot_config_percent,
          v_player_ability_cfg.pierce_immunity_type, v_player_ability_cfg.pierce_immunity_turns, v_player_ability_cfg.requires_target_status,
          v_player_ability_cfg.bonus_weight_target, v_player_ability_cfg.bonus_weight_comparison, v_player_ability_cfg.bonus_weight_percent,
+         v_player_ability_cfg.bonus_weight_scale, v_player_ability_cfg.bonus_weight_scale_target,
          v_player_ability_cfg.clear_damage_dot, v_player_ability_cfg.clear_weather, v_player_ability_cfg.cure_status,
          v_player_ability_cfg.status_dot_config_status, v_player_ability_cfg.status_dot_config_chance, v_player_ability_cfg.status_dot_config_turns,
          v_player_ability_cfg.percent_hp_damage_basis
@@ -11248,12 +11358,14 @@ BEGIN
          leech_dot_amount, leech_dot_duration_turns, leech_dot_type, leech_dot_percent,
          pierce_immunity_type, pierce_immunity_turns, requires_target_status,
          bonus_damage_weight_target, bonus_damage_weight_comparison, bonus_damage_weight_percent,
+         bonus_damage_weight_scale, bonus_damage_weight_scale_target,
          clear_damage_dot, clear_weather, cure_status,
          status_dot_status, status_dot_chance, status_dot_duration_turns, percent_hp_damage_basis
     INTO v_opponent_ability_cfg.damage_dot_config_amount, v_opponent_ability_cfg.damage_dot_config_turns, v_opponent_ability_cfg.damage_dot_config_type, v_opponent_ability_cfg.damage_dot_config_percent,
          v_opponent_ability_cfg.leech_dot_config_amount, v_opponent_ability_cfg.leech_dot_config_turns, v_opponent_ability_cfg.leech_dot_config_type, v_opponent_ability_cfg.leech_dot_config_percent,
          v_opponent_ability_cfg.pierce_immunity_type, v_opponent_ability_cfg.pierce_immunity_turns, v_opponent_ability_cfg.requires_target_status,
          v_opponent_ability_cfg.bonus_weight_target, v_opponent_ability_cfg.bonus_weight_comparison, v_opponent_ability_cfg.bonus_weight_percent,
+         v_opponent_ability_cfg.bonus_weight_scale, v_opponent_ability_cfg.bonus_weight_scale_target,
          v_opponent_ability_cfg.clear_damage_dot, v_opponent_ability_cfg.clear_weather, v_opponent_ability_cfg.cure_status,
          v_opponent_ability_cfg.status_dot_config_status, v_opponent_ability_cfg.status_dot_config_chance, v_opponent_ability_cfg.status_dot_config_turns,
          v_opponent_ability_cfg.percent_hp_damage_basis
@@ -12800,12 +12912,14 @@ BEGIN
          leech_dot_amount, leech_dot_duration_turns, leech_dot_type, leech_dot_percent,
          pierce_immunity_type, pierce_immunity_turns, requires_target_status,
          bonus_damage_weight_target, bonus_damage_weight_comparison, bonus_damage_weight_percent,
+         bonus_damage_weight_scale, bonus_damage_weight_scale_target,
          clear_damage_dot, clear_weather, cure_status,
          status_dot_status, status_dot_chance, status_dot_duration_turns, percent_hp_damage_basis
     INTO v_a_ability_cfg.damage_dot_config_amount, v_a_ability_cfg.damage_dot_config_turns, v_a_ability_cfg.damage_dot_config_type, v_a_ability_cfg.damage_dot_config_percent,
          v_a_ability_cfg.leech_dot_config_amount, v_a_ability_cfg.leech_dot_config_turns, v_a_ability_cfg.leech_dot_config_type, v_a_ability_cfg.leech_dot_config_percent,
          v_a_ability_cfg.pierce_immunity_type, v_a_ability_cfg.pierce_immunity_turns, v_a_ability_cfg.requires_target_status,
          v_a_ability_cfg.bonus_weight_target, v_a_ability_cfg.bonus_weight_comparison, v_a_ability_cfg.bonus_weight_percent,
+         v_a_ability_cfg.bonus_weight_scale, v_a_ability_cfg.bonus_weight_scale_target,
          v_a_ability_cfg.clear_damage_dot, v_a_ability_cfg.clear_weather, v_a_ability_cfg.cure_status,
          v_a_ability_cfg.status_dot_config_status, v_a_ability_cfg.status_dot_config_chance, v_a_ability_cfg.status_dot_config_turns,
          v_a_ability_cfg.percent_hp_damage_basis
@@ -12852,12 +12966,14 @@ BEGIN
          leech_dot_amount, leech_dot_duration_turns, leech_dot_type, leech_dot_percent,
          pierce_immunity_type, pierce_immunity_turns, requires_target_status,
          bonus_damage_weight_target, bonus_damage_weight_comparison, bonus_damage_weight_percent,
+         bonus_damage_weight_scale, bonus_damage_weight_scale_target,
          clear_damage_dot, clear_weather, cure_status,
          status_dot_status, status_dot_chance, status_dot_duration_turns, percent_hp_damage_basis
     INTO v_d_ability_cfg.damage_dot_config_amount, v_d_ability_cfg.damage_dot_config_turns, v_d_ability_cfg.damage_dot_config_type, v_d_ability_cfg.damage_dot_config_percent,
          v_d_ability_cfg.leech_dot_config_amount, v_d_ability_cfg.leech_dot_config_turns, v_d_ability_cfg.leech_dot_config_type, v_d_ability_cfg.leech_dot_config_percent,
          v_d_ability_cfg.pierce_immunity_type, v_d_ability_cfg.pierce_immunity_turns, v_d_ability_cfg.requires_target_status,
          v_d_ability_cfg.bonus_weight_target, v_d_ability_cfg.bonus_weight_comparison, v_d_ability_cfg.bonus_weight_percent,
+         v_d_ability_cfg.bonus_weight_scale, v_d_ability_cfg.bonus_weight_scale_target,
          v_d_ability_cfg.clear_damage_dot, v_d_ability_cfg.clear_weather, v_d_ability_cfg.cure_status,
          v_d_ability_cfg.status_dot_config_status, v_d_ability_cfg.status_dot_config_chance, v_d_ability_cfg.status_dot_config_turns,
          v_d_ability_cfg.percent_hp_damage_basis
@@ -13653,12 +13769,14 @@ BEGIN
          leech_dot_amount, leech_dot_duration_turns, leech_dot_type, leech_dot_percent,
          pierce_immunity_type, pierce_immunity_turns, requires_target_status,
          bonus_damage_weight_target, bonus_damage_weight_comparison, bonus_damage_weight_percent,
+         bonus_damage_weight_scale, bonus_damage_weight_scale_target,
          clear_damage_dot, clear_weather, cure_status,
          status_dot_status, status_dot_chance, status_dot_duration_turns, percent_hp_damage_basis
     INTO v_a_ability_cfg.damage_dot_config_amount, v_a_ability_cfg.damage_dot_config_turns, v_a_ability_cfg.damage_dot_config_type, v_a_ability_cfg.damage_dot_config_percent,
          v_a_ability_cfg.leech_dot_config_amount, v_a_ability_cfg.leech_dot_config_turns, v_a_ability_cfg.leech_dot_config_type, v_a_ability_cfg.leech_dot_config_percent,
          v_a_ability_cfg.pierce_immunity_type, v_a_ability_cfg.pierce_immunity_turns, v_a_ability_cfg.requires_target_status,
          v_a_ability_cfg.bonus_weight_target, v_a_ability_cfg.bonus_weight_comparison, v_a_ability_cfg.bonus_weight_percent,
+         v_a_ability_cfg.bonus_weight_scale, v_a_ability_cfg.bonus_weight_scale_target,
          v_a_ability_cfg.clear_damage_dot, v_a_ability_cfg.clear_weather, v_a_ability_cfg.cure_status,
          v_a_ability_cfg.status_dot_config_status, v_a_ability_cfg.status_dot_config_chance, v_a_ability_cfg.status_dot_config_turns,
          v_a_ability_cfg.percent_hp_damage_basis
@@ -13705,12 +13823,14 @@ BEGIN
          leech_dot_amount, leech_dot_duration_turns, leech_dot_type, leech_dot_percent,
          pierce_immunity_type, pierce_immunity_turns, requires_target_status,
          bonus_damage_weight_target, bonus_damage_weight_comparison, bonus_damage_weight_percent,
+         bonus_damage_weight_scale, bonus_damage_weight_scale_target,
          clear_damage_dot, clear_weather, cure_status,
          status_dot_status, status_dot_chance, status_dot_duration_turns, percent_hp_damage_basis
     INTO v_d_ability_cfg.damage_dot_config_amount, v_d_ability_cfg.damage_dot_config_turns, v_d_ability_cfg.damage_dot_config_type, v_d_ability_cfg.damage_dot_config_percent,
          v_d_ability_cfg.leech_dot_config_amount, v_d_ability_cfg.leech_dot_config_turns, v_d_ability_cfg.leech_dot_config_type, v_d_ability_cfg.leech_dot_config_percent,
          v_d_ability_cfg.pierce_immunity_type, v_d_ability_cfg.pierce_immunity_turns, v_d_ability_cfg.requires_target_status,
          v_d_ability_cfg.bonus_weight_target, v_d_ability_cfg.bonus_weight_comparison, v_d_ability_cfg.bonus_weight_percent,
+         v_d_ability_cfg.bonus_weight_scale, v_d_ability_cfg.bonus_weight_scale_target,
          v_d_ability_cfg.clear_damage_dot, v_d_ability_cfg.clear_weather, v_d_ability_cfg.cure_status,
          v_d_ability_cfg.status_dot_config_status, v_d_ability_cfg.status_dot_config_chance, v_d_ability_cfg.status_dot_config_turns,
          v_d_ability_cfg.percent_hp_damage_basis
@@ -13890,3 +14010,803 @@ BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE chat_read_receipts;
   END IF;
 END $$;
+
+
+-- ============================================================
+-- Mode « En ligne » (annonce de session + plateau de bataille partagé)
+-- ------------------------------------------------------------
+-- Un écran de jeu commun : le MJ annonce la prochaine session, bascule
+-- l'affichage partagé en mode bataille (fond + grille), et chacun place ses
+-- Pokémon sur la grille pendant que les curseurs de tout le monde s'affichent
+-- en direct. Le mode « display » historique (table display_state) est intact :
+-- online_state.mode ne fait que choisir lequel des deux l'écran /display rend.
+--
+-- Les curseurs ne touchent jamais Postgres : ils passent par un canal Realtime
+-- « broadcast » + « presence » côté client (voir src/hooks/useOnlineCursors.ts).
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 1. PV et statut des Pokémon possédés : du localStorage vers la base
+-- ------------------------------------------------------------
+-- Jusqu'ici les PV courants et le statut vivaient uniquement dans le
+-- localStorage de chaque navigateur (hooks useLocalHp / useLocalStatus) :
+-- invisibles pour le MJ, perdus au changement d'appareil. Le plateau de
+-- bataille partagé impose une source de vérité unique et temps réel.
+--
+-- current_hp NULL = « jamais touché » ⇒ le client affiche les PV max.
+-- hp_ref_max mémorise les PV max au moment de l'écriture : quand un palier
+-- d'XP fait grandir les PV max, le client ajoute le même delta aux PV
+-- courants À LA LECTURE (pas d'effet, pas d'écriture en cascade).
+ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS current_hp integer;
+ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS hp_ref_max integer;
+ALTER TABLE player_pokemon ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'aucun';
+
+ALTER TABLE player_pokemon DROP CONSTRAINT IF EXISTS player_pokemon_status_check;
+ALTER TABLE player_pokemon ADD CONSTRAINT player_pokemon_status_check
+  CHECK (status IN ('aucun','paralysie','apeure','confusion','endormi','brule','empoisonne','gele'));
+
+-- ------------------------------------------------------------
+-- 2. Drapeau de fonctionnalité
+-- ------------------------------------------------------------
+ALTER TABLE admin_parameters ADD COLUMN IF NOT EXISTS feature_online_enabled boolean NOT NULL DEFAULT true;
+
+-- ------------------------------------------------------------
+-- 3. online_state — ligne unique : annonce de session + mode + config plateau
+-- ------------------------------------------------------------
+-- Tout ce que pilote l'onglet Admin → En ligne tient dans une seule ligne,
+-- donc un seul abonnement Realtime côté client (même patron que
+-- display_state / admin_parameters).
+CREATE TABLE IF NOT EXISTS online_state (
+  id bigint PRIMARY KEY DEFAULT 1,
+
+  -- Annonce de la prochaine session (pop-up sur l'accueil des joueurs)
+  session_at                  timestamptz,
+  session_message             text    NOT NULL DEFAULT '',
+  session_announce_enabled    boolean NOT NULL DEFAULT false,
+  session_visible_days_before integer NOT NULL DEFAULT 5 CHECK (session_visible_days_before BETWEEN 0 AND 365),
+  session_notified_at         timestamptz,
+
+  -- Mode de l'écran partagé : 'display' = comportement historique (display_state),
+  -- 'battle' = plateau de bataille interactif.
+  mode text NOT NULL DEFAULT 'display' CHECK (mode IN ('display','battle')),
+
+  -- Plateau de bataille.
+  -- Le fond est référencé par NOM et non par display_assets.id : l'import CSV
+  -- (netlify/functions/import-display-assets.js) vide et réinsère toute la
+  -- table, ce qui invaliderait un id à chaque réimport.
+  battle_background_nom   text    NOT NULL DEFAULT '',
+  grid_cols               integer NOT NULL DEFAULT 16 CHECK (grid_cols BETWEEN 1 AND 60),
+  grid_rows               integer NOT NULL DEFAULT 10 CHECK (grid_rows BETWEEN 1 AND 60),
+  -- Cases rendues inaccessibles par le MJ, au format ["col,row", ...].
+  -- Un jsonb sur la ligne unique suffit : seul l'admin y écrit, donc pas de
+  -- lecture-modification-écriture concurrente (contrairement aux jetons).
+  blocked_cells           jsonb   NOT NULL DEFAULT '[]'::jsonb,
+  -- Cases coloriées par le MJ (repère purement visuel, sans effet de jeu),
+  -- au format {"col,row": "red"} — voir ONLINE_TILE_COLORS côté client.
+  colored_cells           jsonb   NOT NULL DEFAULT '{}'::jsonb,
+  -- Deux interrupteurs indépendants : consulter son équipe / bouger ses jetons.
+  players_sidebar_enabled boolean NOT NULL DEFAULT true,
+  players_move_enabled    boolean NOT NULL DEFAULT true,
+  -- Incrémenté à chaque entrée en mode bataille et à chaque réinitialisation :
+  -- pilote la réouverture automatique de la pop-up chez tous les joueurs, sans
+  -- la rouvrir après une fermeture manuelle (le client mémorise la génération vue).
+  battle_generation       integer NOT NULL DEFAULT 0,
+
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT online_state_single_row CHECK (id = 1)
+);
+
+-- Colonnes ajoutées après coup : ALTER idempotents pour les bases où
+-- online_state existe déjà (CREATE TABLE IF NOT EXISTS ne les aurait pas posées).
+ALTER TABLE online_state ADD COLUMN IF NOT EXISTS battle_generation integer NOT NULL DEFAULT 0;
+ALTER TABLE online_state ADD COLUMN IF NOT EXISTS colored_cells jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+INSERT INTO online_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- ------------------------------------------------------------
+-- 4. online_tokens — un jeton posé sur le plateau, une ligne
+-- ------------------------------------------------------------
+-- Une ligne par jeton plutôt qu'un blob jsonb, pour la même raison que
+-- mining_grid_cells : plusieurs personnes déplacent leurs pions en même
+-- temps, un blob provoquerait des écrasements lecture-modification-écriture.
+CREATE TABLE IF NOT EXISTS online_tokens (
+  id bigserial PRIMARY KEY,
+  -- Personnage propriétaire (players.id). NULL = « personnage inconnu » posé par le MJ.
+  owner_player_id   bigint,
+  -- Instance possédée (player_pokemon.id) : PV/statut partagés avec le Pokédex.
+  -- NULL = espèce libre piochée au catalogue par le MJ (voir colonnes free_*).
+  player_pokemon_id bigint,
+  -- Espèce, référence par nom vers pokemon.nom (pas de FK, survit aux réimports CSV)
+  pokemon_nom       text NOT NULL,
+  placed_by_admin   boolean NOT NULL DEFAULT false,
+  cell_col integer NOT NULL,
+  cell_row integer NOT NULL,
+  -- Surcharges, jetons « espèce libre » uniquement (le MJ fixe PV et dégâts)
+  free_max_hp     integer,
+  free_current_hp integer,
+  free_damage     integer,
+  free_status     text NOT NULL DEFAULT 'aucun',
+  free_label      text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE online_tokens DROP CONSTRAINT IF EXISTS online_tokens_free_status_check;
+ALTER TABLE online_tokens ADD CONSTRAINT online_tokens_free_status_check
+  CHECK (free_status IN ('aucun','paralysie','apeure','confusion','endormi','brule','empoisonne','gele'));
+
+-- Un Pokémon possédé n'apparaît qu'une seule fois sur le plateau
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_online_tokens_pp
+  ON online_tokens(player_pokemon_id) WHERE player_pokemon_id IS NOT NULL;
+-- Un joueur ne pose qu'un jeton à la fois (les jetons du MJ ne comptent pas)
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_online_tokens_player_slot
+  ON online_tokens(owner_player_id) WHERE placed_by_admin = false AND owner_player_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_online_tokens_cell ON online_tokens(cell_col, cell_row);
+
+-- ------------------------------------------------------------
+-- 5. Fonctions
+-- ------------------------------------------------------------
+-- Note : p_placed_by_admin / p_is_admin viennent du client et sont donc
+-- falsifiables. C'est assumé : l'app n'a pas d'authentification (voir les
+-- politiques RLS ouvertes à anon partout dans ce schéma). Ces fonctions
+-- servent l'atomicité et la cohérence des règles, pas la sécurité.
+
+-- Pose OU déplacement d'un jeton, en une seule transaction.
+CREATE OR REPLACE FUNCTION online_place_token(
+  p_token_id          bigint,
+  p_owner_player_id   bigint,
+  p_player_pokemon_id bigint,
+  p_pokemon_nom       text,
+  p_cell_col          integer,
+  p_cell_row          integer,
+  p_placed_by_admin   boolean,
+  p_free              jsonb DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_state    online_state%ROWTYPE;
+  v_token_id bigint;
+  v_existing bigint;
+BEGIN
+  -- Sérialise les poses concurrentes SUR LA MÊME CASE (deux joueurs qui lâchent
+  -- leur jeton au même endroit en même temps) sans bloquer le reste du plateau.
+  -- Même approche que mining_dig_cell.
+  PERFORM pg_advisory_xact_lock(hashtext('online_board'), p_cell_col * 1000 + p_cell_row);
+
+  SELECT * INTO v_state FROM online_state WHERE id = 1;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('status', 'no_state');
+  END IF;
+
+  IF v_state.mode <> 'battle' THEN
+    RETURN jsonb_build_object('status', 'not_in_battle');
+  END IF;
+
+  IF NOT COALESCE(p_placed_by_admin, false) AND NOT v_state.players_move_enabled THEN
+    RETURN jsonb_build_object('status', 'move_disabled');
+  END IF;
+
+  IF p_cell_col < 0 OR p_cell_col >= v_state.grid_cols
+     OR p_cell_row < 0 OR p_cell_row >= v_state.grid_rows THEN
+    RETURN jsonb_build_object('status', 'out_of_bounds');
+  END IF;
+
+  IF v_state.blocked_cells ? (p_cell_col || ',' || p_cell_row) THEN
+    RETURN jsonb_build_object('status', 'cell_blocked');
+  END IF;
+
+  -- Case occupée ? Un jeton à 0 PV reste visible mais libère sa case.
+  -- COALESCE(..., 1) : des PV jamais initialisés comptent comme vivants.
+  IF EXISTS (
+    SELECT 1
+      FROM online_tokens t
+      LEFT JOIN player_pokemon pp ON pp.id = t.player_pokemon_id
+     WHERE t.cell_col = p_cell_col
+       AND t.cell_row = p_cell_row
+       AND (p_token_id IS NULL OR t.id <> p_token_id)
+       AND COALESCE(pp.current_hp, t.free_current_hp, 1) > 0
+  ) THEN
+    RETURN jsonb_build_object('status', 'cell_occupied');
+  END IF;
+
+  -- Déplacement explicite d'un jeton connu
+  IF p_token_id IS NOT NULL THEN
+    UPDATE online_tokens SET cell_col = p_cell_col, cell_row = p_cell_row
+     WHERE id = p_token_id
+     RETURNING id INTO v_token_id;
+    IF v_token_id IS NULL THEN
+      RETURN jsonb_build_object('status', 'not_found');
+    END IF;
+    RETURN jsonb_build_object('status', 'ok', 'token_id', v_token_id);
+  END IF;
+
+  -- Ce Pokémon possédé est déjà sur le plateau : on le déplace, on ne le duplique pas.
+  IF p_player_pokemon_id IS NOT NULL THEN
+    SELECT id INTO v_existing FROM online_tokens WHERE player_pokemon_id = p_player_pokemon_id LIMIT 1;
+    IF v_existing IS NOT NULL THEN
+      UPDATE online_tokens SET cell_col = p_cell_col, cell_row = p_cell_row WHERE id = v_existing;
+      RETURN jsonb_build_object('status', 'ok', 'token_id', v_existing);
+    END IF;
+  END IF;
+
+  -- Un joueur n'a qu'un jeton : choisir un autre Pokémon remplace le précédent.
+  IF NOT COALESCE(p_placed_by_admin, false) AND p_owner_player_id IS NOT NULL THEN
+    SELECT id INTO v_existing FROM online_tokens
+     WHERE owner_player_id = p_owner_player_id AND placed_by_admin = false LIMIT 1;
+    IF v_existing IS NOT NULL THEN
+      UPDATE online_tokens
+         SET player_pokemon_id = p_player_pokemon_id,
+             pokemon_nom       = p_pokemon_nom,
+             cell_col          = p_cell_col,
+             cell_row          = p_cell_row
+       WHERE id = v_existing;
+      RETURN jsonb_build_object('status', 'ok', 'token_id', v_existing);
+    END IF;
+  END IF;
+
+  INSERT INTO online_tokens (
+    owner_player_id, player_pokemon_id, pokemon_nom, placed_by_admin,
+    cell_col, cell_row, free_max_hp, free_current_hp, free_damage, free_status, free_label
+  ) VALUES (
+    p_owner_player_id, p_player_pokemon_id, p_pokemon_nom, COALESCE(p_placed_by_admin, false),
+    p_cell_col, p_cell_row,
+    NULLIF(p_free->>'max_hp', '')::integer,
+    NULLIF(p_free->>'current_hp', '')::integer,
+    NULLIF(p_free->>'damage', '')::integer,
+    COALESCE(NULLIF(p_free->>'status', ''), 'aucun'),
+    COALESCE(p_free->>'label', '')
+  ) RETURNING id INTO v_token_id;
+
+  RETURN jsonb_build_object('status', 'ok', 'token_id', v_token_id);
+EXCEPTION
+  WHEN unique_violation THEN
+    RETURN jsonb_build_object('status', 'already_placed');
+END;
+$$;
+
+-- Retrait d'un jeton (le MJ retire n'importe lequel, un joueur seulement le sien).
+CREATE OR REPLACE FUNCTION online_remove_token(
+  p_token_id bigint,
+  p_player_id bigint,
+  p_is_admin boolean
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_owner    bigint;
+  v_by_admin boolean;
+BEGIN
+  SELECT owner_player_id, placed_by_admin INTO v_owner, v_by_admin
+    FROM online_tokens WHERE id = p_token_id;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('status', 'not_found');
+  END IF;
+  IF NOT COALESCE(p_is_admin, false)
+     AND (v_by_admin OR v_owner IS DISTINCT FROM p_player_id) THEN
+    RETURN jsonb_build_object('status', 'forbidden');
+  END IF;
+  DELETE FROM online_tokens WHERE id = p_token_id;
+  RETURN jsonb_build_object('status', 'ok');
+END;
+$$;
+
+-- Réinitialisation totale du plateau : jetons, cases bloquées, fond et grille.
+CREATE OR REPLACE FUNCTION online_reset_board()
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  -- WHERE obligatoire : ce projet Supabase refuse les DELETE sans clause WHERE
+  -- (garde-fou « DELETE requires a WHERE clause », le même que contourne déjà
+  -- netlify/functions/import-display-assets.js avec .neq('id', 0)).
+  DELETE FROM online_tokens WHERE id > 0;
+  UPDATE online_state
+     SET battle_background_nom = '',
+         grid_cols     = 16,
+         grid_rows     = 10,
+         blocked_cells = '[]'::jsonb,
+         colored_cells = '{}'::jsonb,
+         battle_generation = battle_generation + 1,
+         updated_at    = now()
+   WHERE id = 1;
+  RETURN jsonb_build_object('status', 'ok');
+END;
+$$;
+
+-- Après un rétrécissement de la grille : purge silencieuse de ce qui déborde.
+CREATE OR REPLACE FUNCTION online_prune_board()
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_cols    integer;
+  v_rows    integer;
+  v_removed integer;
+BEGIN
+  SELECT grid_cols, grid_rows INTO v_cols, v_rows FROM online_state WHERE id = 1;
+  IF v_cols IS NULL THEN
+    RETURN jsonb_build_object('status', 'no_state');
+  END IF;
+
+  DELETE FROM online_tokens WHERE cell_col >= v_cols OR cell_row >= v_rows;
+  GET DIAGNOSTICS v_removed = ROW_COUNT;
+
+  UPDATE online_state
+     SET blocked_cells = COALESCE((
+           SELECT jsonb_agg(e)
+             FROM jsonb_array_elements_text(blocked_cells) AS e
+            WHERE split_part(e, ',', 1)::integer < v_cols
+              AND split_part(e, ',', 2)::integer < v_rows
+         ), '[]'::jsonb),
+         colored_cells = COALESCE((
+           SELECT jsonb_object_agg(k, v)
+             FROM jsonb_each(colored_cells) AS e(k, v)
+            WHERE split_part(k, ',', 1)::integer < v_cols
+              AND split_part(k, ',', 2)::integer < v_rows
+         ), '{}'::jsonb)
+   WHERE id = 1;
+
+  RETURN jsonb_build_object('status', 'ok', 'removed', v_removed);
+END;
+$$;
+
+-- Reprise unique du localStorage vers la base : n'écrit QUE les lignes dont
+-- current_hp est encore NULL, pour qu'un second appareil au localStorage
+-- périmé ne puisse pas écraser une valeur fraîche.
+CREATE OR REPLACE FUNCTION online_backfill_vitals(p_rows jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_updated integer;
+BEGIN
+  UPDATE player_pokemon pp
+     SET current_hp = NULLIF(r.value->>'current_hp', '')::integer,
+         hp_ref_max = NULLIF(r.value->>'hp_ref_max', '')::integer,
+         status     = COALESCE(NULLIF(r.value->>'status', ''), 'aucun')
+    FROM jsonb_array_elements(COALESCE(p_rows, '[]'::jsonb)) AS r
+   WHERE pp.id = (r.value->>'id')::bigint
+     AND pp.current_hp IS NULL;
+  GET DIAGNOSTICS v_updated = ROW_COUNT;
+  RETURN jsonb_build_object('status', 'ok', 'updated', v_updated);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION online_place_token(bigint, bigint, bigint, text, integer, integer, boolean, jsonb) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION online_remove_token(bigint, bigint, boolean) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION online_reset_board() TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION online_prune_board() TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION online_backfill_vitals(jsonb) TO anon, authenticated;
+
+-- ------------------------------------------------------------
+-- 6. RLS — lecture/écriture publiques (app sans vraie sécurité, comme le reste du schéma)
+-- ------------------------------------------------------------
+ALTER TABLE online_state  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE online_tokens ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public read online_state" ON online_state;
+CREATE POLICY "Public read online_state" ON online_state FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS "Public insert online_state" ON online_state;
+CREATE POLICY "Public insert online_state" ON online_state FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS "Public update online_state" ON online_state;
+CREATE POLICY "Public update online_state" ON online_state FOR UPDATE TO anon USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public read online_tokens" ON online_tokens;
+CREATE POLICY "Public read online_tokens" ON online_tokens FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS "Public insert online_tokens" ON online_tokens;
+CREATE POLICY "Public insert online_tokens" ON online_tokens FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS "Public update online_tokens" ON online_tokens;
+CREATE POLICY "Public update online_tokens" ON online_tokens FOR UPDATE TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Public delete online_tokens" ON online_tokens;
+CREATE POLICY "Public delete online_tokens" ON online_tokens FOR DELETE TO anon USING (true);
+
+-- ------------------------------------------------------------
+-- 7. Diffusion Realtime
+-- ------------------------------------------------------------
+-- online_state / online_tokens : nouvelles tables, à ajouter explicitement.
+-- player_pokemon : table ancienne, normalement déjà membre de la publication
+-- (activée à la main dans le Dashboard) — le test rend l'ajout inoffensif.
+-- C'est LE point de défaillance silencieuse : sans publication, tout persiste
+-- mais rien ne bouge sur les autres écrans (cf. le bug documenté plus haut
+-- dans ce fichier pour history_events).
+--
+-- Les pings de case NE passent PAS par la base : ce sont des messages
+-- éphémères sur un canal Realtime « broadcast » côté client, sans la moindre
+-- écriture Postgres (voir src/hooks/useOnlinePings.ts).
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['online_state', 'online_tokens', 'player_pokemon']
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = t
+    ) THEN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE %I', t);
+    END IF;
+  END LOOP;
+END $$;
+
+
+-- ============================================================
+-- Mode « En ligne » — lot 2 : ordre du tour, vue épurée, camps,
+-- journal de bataille et fin de partie
+-- ------------------------------------------------------------
+-- Le plateau devient la seule surface partagée (/display et /battle rendent
+-- le même écran, le MJ bascule entre affichage et bataille depuis ses
+-- réglages). Ce bloc ajoute : la vue épurée (masquer grille/cases/couleurs),
+-- l'ordre du tour, le camp allié/ennemi des jetons, un journal simplifié du
+-- combat et la remise des récompenses en fin de partie.
+--
+-- online_place_token change de signature (PV max et camp en plus) : l'ancienne
+-- est donc explicitement supprimée avant d'être recréée, sinon Postgres
+-- créerait une surcharge et l'appel à 8 arguments deviendrait ambigu.
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 1. online_state : vue épurée, ordre du tour, fin de partie
+-- ------------------------------------------------------------
+-- Vue épurée : masque grille, cases bloquées et couleurs en gardant les
+-- Pokémon. Partagée (et non locale) car la fin de partie l'active pour tout
+-- le monde d'un coup.
+ALTER TABLE online_state ADD COLUMN IF NOT EXISTS hide_layout boolean NOT NULL DEFAULT false;
+
+-- Ordre du tour : liste ordonnée d'online_tokens.id, et le jeton mis en avant.
+ALTER TABLE online_state ADD COLUMN IF NOT EXISTS turn_order jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE online_state ADD COLUMN IF NOT EXISTS turn_active_token_id bigint;
+
+-- Fin de partie. 'none' = pas en cours ; 'pending' = les joueurs voient
+-- « Chargement des résultats… » pendant que le MJ prépare ; 'rewards' = le
+-- récapitulatif est ouvert chez les joueurs, on attend leurs accusés.
+ALTER TABLE online_state ADD COLUMN IF NOT EXISTS endgame_phase text NOT NULL DEFAULT 'none';
+ALTER TABLE online_state DROP CONSTRAINT IF EXISTS online_state_endgame_phase_check;
+ALTER TABLE online_state ADD CONSTRAINT online_state_endgame_phase_check
+  CHECK (endgame_phase IN ('none', 'pending', 'rewards'));
+
+ALTER TABLE online_state ADD COLUMN IF NOT EXISTS endgame_outcome text;
+ALTER TABLE online_state DROP CONSTRAINT IF EXISTS online_state_endgame_outcome_check;
+ALTER TABLE online_state ADD CONSTRAINT online_state_endgame_outcome_check
+  CHECK (endgame_outcome IS NULL OR endgame_outcome IN ('win', 'lose'));
+
+-- Récompenses distribuées, indexées par id de joueur :
+-- { "<playerId>": { "xp": [{ "player_pokemon_id", "nom", "gained", "total" }],
+--                   "items": [{ "item_nom", "quantity" }] } }
+-- Les gains sont DÉJÀ appliqués en base quand ceci est renseigné : c'est un
+-- récapitulatif de lecture, pas une file d'attente.
+ALTER TABLE online_state ADD COLUMN IF NOT EXISTS endgame_rewards jsonb NOT NULL DEFAULT '{}'::jsonb;
+-- Ids des joueurs ayant cliqué « OK » sur leur récapitulatif.
+ALTER TABLE online_state ADD COLUMN IF NOT EXISTS endgame_acked jsonb NOT NULL DEFAULT '[]'::jsonb;
+
+-- ------------------------------------------------------------
+-- 2. online_tokens : camp
+-- ------------------------------------------------------------
+-- Les Pokémon des vrais joueurs sont alliés ; les espèces libres et les PNJ
+-- sont ennemis par défaut, mais le MJ peut basculer un personnage incarné du
+-- côté allié (interrupteur sur la ligne du personnage).
+ALTER TABLE online_tokens ADD COLUMN IF NOT EXISTS is_ally boolean NOT NULL DEFAULT false;
+
+-- ------------------------------------------------------------
+-- 3. online_battle_log — journal simplifié du combat
+-- ------------------------------------------------------------
+-- Une ligne par Pokémon ayant participé, pour que le bilan de fin de partie
+-- connaisse aussi ceux qui ont quitté le plateau (retirés, remplacés, K.O.).
+-- `entity_key` dédoublonne : un Pokémon retiré puis reposé garde UNE ligne,
+-- avec ses PV les plus récents.
+CREATE TABLE IF NOT EXISTS online_battle_log (
+  id bigserial PRIMARY KEY,
+  -- 'pp:<player_pokemon_id>' pour un Pokémon possédé, 'tok:<online_tokens.id>'
+  -- pour une espèce libre (chaque jeton libre est une créature distincte).
+  entity_key        text NOT NULL,
+  token_id          bigint,
+  owner_player_id   bigint,
+  player_pokemon_id bigint,
+  pokemon_nom       text NOT NULL,
+  label             text NOT NULL DEFAULT '',
+  is_ally           boolean NOT NULL DEFAULT false,
+  -- PV max à la pose : c'est cette valeur que le MJ additionne pour calculer
+  -- l'XP gagnée sur les ennemis mis K.O.
+  max_hp            integer NOT NULL DEFAULT 0,
+  -- PV au moment de quitter le plateau. NULL tant que le Pokémon y est encore :
+  -- le bilan lit alors ses PV courants.
+  last_hp           integer,
+  left_at           timestamptz,
+  created_at        timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_online_battle_log_entity ON online_battle_log(entity_key);
+
+ALTER TABLE online_battle_log ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public read online_battle_log" ON online_battle_log;
+CREATE POLICY "Public read online_battle_log" ON online_battle_log FOR SELECT TO anon USING (true);
+DROP POLICY IF EXISTS "Public insert online_battle_log" ON online_battle_log;
+CREATE POLICY "Public insert online_battle_log" ON online_battle_log FOR INSERT TO anon WITH CHECK (true);
+DROP POLICY IF EXISTS "Public update online_battle_log" ON online_battle_log;
+CREATE POLICY "Public update online_battle_log" ON online_battle_log FOR UPDATE TO anon USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Public delete online_battle_log" ON online_battle_log;
+CREATE POLICY "Public delete online_battle_log" ON online_battle_log FOR DELETE TO anon USING (true);
+
+-- ------------------------------------------------------------
+-- 4. online_place_token — nouvelle signature (camp + PV max) et journalisation
+-- ------------------------------------------------------------
+-- L'ancienne version est SUPPRIMÉE explicitement : ajouter des paramètres même
+-- avec valeur par défaut créerait une surcharge, et un appel à 8 arguments
+-- deviendrait ambigu.
+DROP FUNCTION IF EXISTS online_place_token(bigint, bigint, bigint, text, integer, integer, boolean, jsonb);
+
+CREATE OR REPLACE FUNCTION online_place_token(
+  p_token_id          bigint,
+  p_owner_player_id   bigint,
+  p_player_pokemon_id bigint,
+  p_pokemon_nom       text,
+  p_cell_col          integer,
+  p_cell_row          integer,
+  p_placed_by_admin   boolean,
+  p_free              jsonb DEFAULT NULL,
+  -- PV max calculés côté client (ils dépendent des paliers d'XP, parsés depuis
+  -- les colonnes texte de l'espèce — impraticable en SQL).
+  p_max_hp            integer DEFAULT 0,
+  p_is_ally           boolean DEFAULT false
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_state    online_state%ROWTYPE;
+  v_token_id bigint;
+  v_existing bigint;
+  v_old_pp   bigint;
+  v_entity   text;
+BEGIN
+  -- Sérialise les poses concurrentes SUR LA MÊME CASE sans bloquer le reste.
+  PERFORM pg_advisory_xact_lock(hashtext('online_board'), p_cell_col * 1000 + p_cell_row);
+
+  SELECT * INTO v_state FROM online_state WHERE id = 1;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('status', 'no_state');
+  END IF;
+
+  IF v_state.mode <> 'battle' THEN
+    RETURN jsonb_build_object('status', 'not_in_battle');
+  END IF;
+
+  IF NOT COALESCE(p_placed_by_admin, false) AND NOT v_state.players_move_enabled THEN
+    RETURN jsonb_build_object('status', 'move_disabled');
+  END IF;
+
+  IF p_cell_col < 0 OR p_cell_col >= v_state.grid_cols
+     OR p_cell_row < 0 OR p_cell_row >= v_state.grid_rows THEN
+    RETURN jsonb_build_object('status', 'out_of_bounds');
+  END IF;
+
+  IF v_state.blocked_cells ? (p_cell_col || ',' || p_cell_row) THEN
+    RETURN jsonb_build_object('status', 'cell_blocked');
+  END IF;
+
+  -- Case occupée ? Un jeton à 0 PV reste visible mais libère sa case.
+  IF EXISTS (
+    SELECT 1
+      FROM online_tokens t
+      LEFT JOIN player_pokemon pp ON pp.id = t.player_pokemon_id
+     WHERE t.cell_col = p_cell_col
+       AND t.cell_row = p_cell_row
+       AND (p_token_id IS NULL OR t.id <> p_token_id)
+       AND COALESCE(pp.current_hp, t.free_current_hp, 1) > 0
+  ) THEN
+    RETURN jsonb_build_object('status', 'cell_occupied');
+  END IF;
+
+  -- Déplacement explicite d'un jeton connu : rien ne change côté journal.
+  IF p_token_id IS NOT NULL THEN
+    UPDATE online_tokens SET cell_col = p_cell_col, cell_row = p_cell_row
+     WHERE id = p_token_id
+     RETURNING id INTO v_token_id;
+    IF v_token_id IS NULL THEN
+      RETURN jsonb_build_object('status', 'not_found');
+    END IF;
+    RETURN jsonb_build_object('status', 'ok', 'token_id', v_token_id);
+  END IF;
+
+  -- Ce Pokémon possédé est déjà sur le plateau : on le déplace, sans doublon.
+  IF p_player_pokemon_id IS NOT NULL THEN
+    SELECT id INTO v_existing FROM online_tokens WHERE player_pokemon_id = p_player_pokemon_id LIMIT 1;
+    IF v_existing IS NOT NULL THEN
+      UPDATE online_tokens SET cell_col = p_cell_col, cell_row = p_cell_row WHERE id = v_existing;
+      RETURN jsonb_build_object('status', 'ok', 'token_id', v_existing);
+    END IF;
+  END IF;
+
+  -- Un joueur n'a qu'un jeton : choisir un autre Pokémon remplace le précédent.
+  IF NOT COALESCE(p_placed_by_admin, false) AND p_owner_player_id IS NOT NULL THEN
+    SELECT id, player_pokemon_id INTO v_existing, v_old_pp FROM online_tokens
+     WHERE owner_player_id = p_owner_player_id AND placed_by_admin = false LIMIT 1;
+    IF v_existing IS NOT NULL THEN
+      UPDATE online_tokens
+         SET player_pokemon_id = p_player_pokemon_id,
+             pokemon_nom       = p_pokemon_nom,
+             is_ally           = COALESCE(p_is_ally, false),
+             cell_col          = p_cell_col,
+             cell_row          = p_cell_row
+       WHERE id = v_existing;
+      -- Le Pokémon remplacé quitte le plateau sans passer par un retrait
+      -- explicite : on clôt sa ligne de journal ici, sinon il manquerait au bilan.
+      IF v_old_pp IS NOT NULL AND v_old_pp IS DISTINCT FROM p_player_pokemon_id THEN
+        UPDATE online_battle_log l
+           SET left_at = now(),
+               last_hp = COALESCE((SELECT pp.current_hp FROM player_pokemon pp WHERE pp.id = v_old_pp), l.max_hp)
+         WHERE l.entity_key = 'pp:' || v_old_pp AND l.left_at IS NULL;
+      END IF;
+      v_token_id := v_existing;
+    END IF;
+  END IF;
+
+  IF v_token_id IS NULL THEN
+    INSERT INTO online_tokens (
+      owner_player_id, player_pokemon_id, pokemon_nom, placed_by_admin, is_ally,
+      cell_col, cell_row, free_max_hp, free_current_hp, free_damage, free_status, free_label
+    ) VALUES (
+      p_owner_player_id, p_player_pokemon_id, p_pokemon_nom, COALESCE(p_placed_by_admin, false), COALESCE(p_is_ally, false),
+      p_cell_col, p_cell_row,
+      NULLIF(p_free->>'max_hp', '')::integer,
+      NULLIF(p_free->>'current_hp', '')::integer,
+      NULLIF(p_free->>'damage', '')::integer,
+      COALESCE(NULLIF(p_free->>'status', ''), 'aucun'),
+      COALESCE(p_free->>'label', '')
+    ) RETURNING id INTO v_token_id;
+  END IF;
+
+  -- Journal : une ligne par Pokémon ayant participé au combat.
+  v_entity := CASE WHEN p_player_pokemon_id IS NOT NULL
+                   THEN 'pp:' || p_player_pokemon_id
+                   ELSE 'tok:' || v_token_id END;
+  INSERT INTO online_battle_log (
+    entity_key, token_id, owner_player_id, player_pokemon_id, pokemon_nom, label, is_ally, max_hp
+  ) VALUES (
+    v_entity, v_token_id, p_owner_player_id, p_player_pokemon_id, p_pokemon_nom,
+    COALESCE(p_free->>'label', ''), COALESCE(p_is_ally, false),
+    COALESCE(NULLIF(p_max_hp, 0), NULLIF(p_free->>'max_hp', '')::integer, 0)
+  )
+  ON CONFLICT (entity_key) DO UPDATE SET
+    token_id = EXCLUDED.token_id,
+    is_ally  = EXCLUDED.is_ally,
+    -- Reposé après un retrait : il est de nouveau en jeu.
+    left_at  = NULL,
+    last_hp  = NULL,
+    max_hp   = GREATEST(online_battle_log.max_hp, EXCLUDED.max_hp);
+
+  RETURN jsonb_build_object('status', 'ok', 'token_id', v_token_id);
+EXCEPTION
+  WHEN unique_violation THEN
+    RETURN jsonb_build_object('status', 'already_placed');
+END;
+$$;
+
+-- ------------------------------------------------------------
+-- 5. Retrait d'un jeton : clôture de sa ligne de journal
+-- ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION online_remove_token(
+  p_token_id bigint,
+  p_player_id bigint,
+  p_is_admin boolean
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_owner    bigint;
+  v_by_admin boolean;
+  v_pp       bigint;
+  v_free_hp  integer;
+BEGIN
+  SELECT owner_player_id, placed_by_admin, player_pokemon_id, free_current_hp
+    INTO v_owner, v_by_admin, v_pp, v_free_hp
+    FROM online_tokens WHERE id = p_token_id;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('status', 'not_found');
+  END IF;
+  IF NOT COALESCE(p_is_admin, false)
+     AND (v_by_admin OR v_owner IS DISTINCT FROM p_player_id) THEN
+    RETURN jsonb_build_object('status', 'forbidden');
+  END IF;
+
+  -- PV au moment de quitter le plateau : c'est ce que le bilan affichera.
+  UPDATE online_battle_log l
+     SET left_at = now(),
+         last_hp = COALESCE(
+           (SELECT pp.current_hp FROM player_pokemon pp WHERE pp.id = v_pp),
+           v_free_hp,
+           l.max_hp)
+   WHERE l.entity_key = CASE WHEN v_pp IS NOT NULL THEN 'pp:' || v_pp ELSE 'tok:' || p_token_id END;
+
+  DELETE FROM online_tokens WHERE id = p_token_id;
+  RETURN jsonb_build_object('status', 'ok');
+END;
+$$;
+
+-- ------------------------------------------------------------
+-- 6. Réinitialisation : vide aussi le journal, l'ordre du tour et la fin de partie
+-- ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION online_reset_board()
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  -- WHERE obligatoire : ce projet Supabase refuse les DELETE sans clause WHERE
+  -- (garde-fou « DELETE requires a WHERE clause », le même que contourne déjà
+  -- netlify/functions/import-display-assets.js avec .neq('id', 0)).
+  DELETE FROM online_tokens WHERE id > 0;
+  DELETE FROM online_battle_log WHERE id > 0;
+  UPDATE online_state
+     SET battle_background_nom = '',
+         grid_cols     = 16,
+         grid_rows     = 10,
+         blocked_cells = '[]'::jsonb,
+         colored_cells = '{}'::jsonb,
+         -- La vue épurée revient à « tout affiché » à chaque remise à zéro.
+         hide_layout   = false,
+         turn_order    = '[]'::jsonb,
+         turn_active_token_id = NULL,
+         endgame_phase   = 'none',
+         endgame_outcome = NULL,
+         endgame_rewards = '{}'::jsonb,
+         endgame_acked   = '[]'::jsonb,
+         -- battle_generation n'est VOLONTAIREMENT pas incrémenté ici : une
+         -- remise à zéro nettoie le plateau, elle ne lance pas une bataille.
+         -- L'incrémenter réinvitait tout le monde (« Une bataille commence ! »)
+         -- à chaque nettoyage.
+         updated_at    = now()
+   WHERE id = 1;
+  RETURN jsonb_build_object('status', 'ok');
+END;
+$$;
+
+-- Fin de partie validée : le journal est vidé et l'écran revient à l'affichage.
+CREATE OR REPLACE FUNCTION online_finish_endgame()
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  DELETE FROM online_battle_log WHERE id > 0;
+  UPDATE online_state
+     SET mode = 'display',
+         endgame_phase   = 'none',
+         endgame_outcome = NULL,
+         endgame_rewards = '{}'::jsonb,
+         endgame_acked   = '[]'::jsonb,
+         updated_at      = now()
+   WHERE id = 1;
+  RETURN jsonb_build_object('status', 'ok');
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION online_place_token(bigint, bigint, bigint, text, integer, integer, boolean, jsonb, integer, boolean) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION online_remove_token(bigint, bigint, boolean) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION online_reset_board() TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION online_finish_endgame() TO anon, authenticated;
+
+-- ------------------------------------------------------------
+-- 7. Diffusion Realtime
+-- ------------------------------------------------------------
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['online_battle_log']
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = t
+    ) THEN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE %I', t);
+    END IF;
+  END LOOP;
+END $$;
+
+-- ------------------------------------------------------------
+-- Affichage du suivi des tours : le MJ choisit s'il s'affiche, sous quelle
+-- forme (normale ou compacte) et de quel côté du plateau.
+-- ------------------------------------------------------------
+ALTER TABLE online_state ADD COLUMN IF NOT EXISTS turn_order_position text NOT NULL DEFAULT 'top';
+ALTER TABLE online_state DROP CONSTRAINT IF EXISTS online_state_turn_order_position_check;
+ALTER TABLE online_state ADD CONSTRAINT online_state_turn_order_position_check
+  CHECK (turn_order_position IN ('top', 'bottom', 'compact_top', 'compact_bottom', 'hidden'));

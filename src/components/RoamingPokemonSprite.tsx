@@ -1,7 +1,7 @@
 import { useRef, useLayoutEffect, useEffect, type RefObject } from 'react'
 import type { Pokemon, PlayerPokemon } from '../types'
 import { useRoamPosition, setGlobalDragActive, subscribeGlobalDrag, subscribeAttract, getAttractTarget, attractSpeedPxPerS, type RoamPos } from '../hooks/useRoamPosition'
-import { useLocalHp } from '../hooks/useLocalHp'
+import { usePokemonHp } from '../hooks/usePokemonVitals'
 import { getMaxHp } from '../lib/maxHp'
 import { warmSpriteAlpha, isOpaqueAt } from '../lib/spriteAlpha'
 import { PixelIcon } from './icons/PixelIcon'
@@ -38,7 +38,7 @@ function pointInRect(clientX: number, clientY: number, rect: DOMRect): boolean {
 export function RoamingPokemonSprite({ playerPokemon, pokemon, index, isJumping, hasGift = false, containerRef, onClick, onBackgroundPress }: Props) {
   const { pos, duration, setPos, consumeInstant } = useRoamPosition(playerPokemon.id, pokemon?.distance_deplacement ?? 0, containerRef)
   const maxHp = getMaxHp(playerPokemon, pokemon)
-  const [hp] = useLocalHp(playerPokemon.id, maxHp)
+  const [hp] = usePokemonHp(playerPokemon, maxHp)
   const isKo = hp <= 0
 
   const bobDuration = 2.2 + index * 0.35

@@ -1,5 +1,6 @@
 import type { Attack } from '../types'
 import { getPrecisionColor, formatPrecision } from '../lib/precisionColor'
+import { formatDistance } from '../lib/abilityRange'
 import { PixelIcon } from './icons/PixelIcon'
 import { STAT_ICON, DICE_GENERIC_ICON, ABILITY_DISTANCE_ICON } from '../lib/icons'
 
@@ -20,7 +21,7 @@ export function AttackDetailCard({ attack }: { attack: Attack }) {
       )}
       <div className="grid grid-cols-2 gap-x-3 gap-y-1">
         <div className="flex flex-col gap-1">
-          <MoveStatIcon icon={<PixelIcon src={ABILITY_DISTANCE_ICON} size={14} colored />} value={attack.distance} />
+          <MoveStatIcon icon={<PixelIcon src={ABILITY_DISTANCE_ICON} size={14} colored />} value={formatDistance(attack.distance)} />
           <MoveStatIcon icon={<PixelIcon src={STAT_ICON.damage} size={14} colored />} value={attack.degats_base} />
           <MoveStatIcon icon={<PixelIcon src={DICE_GENERIC_ICON} size={14} colored />} value={attack.degats_de} />
         </div>
