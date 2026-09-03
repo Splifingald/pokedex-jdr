@@ -12,6 +12,27 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return outputArray
 }
 
+// `navigator.serviceWorker.ready` ne se résout JAMAIS tant qu'aucun service worker
+// n'est actif (enregistrement échoué, navigateur intégré à une autre app, mode
+// navigation privée…) : sans garde-fou, l'UI reste bloquée sur « Activation… »
+// indéfiniment. On borne donc l'attente et on traite l'absence de SW comme un échec.
+export async function getReadyRegistration(timeoutMs = 10000): Promise<ServiceWorkerRegistration | null> {
+  if (!('serviceWorker' in navigator)) return null
+  let timer: number | undefined
+  try {
+    return await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise<null>((resolve) => {
+        timer = window.setTimeout(() => resolve(null), timeoutMs)
+      }),
+    ])
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export function isPushSupported(): boolean {
   return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
 }
@@ -41,45 +62,61 @@ export function isStandalone(): boolean {
 // dans Supabase pour que la fonction planifiée puisse envoyer des notifications
 // à ce joueur. Retourne false si la permission est refusée ou en cas d'erreur.
 export async function subscribeToPush(playerId: number): Promise<boolean> {
-  const permission = await Notification.requestPermission()
-  if (permission !== 'granted') return false
+  try {
+    const permission = await Notification.requestPermission()
+    if (permission !== 'granted') return false
 
-  const registration = await navigator.serviceWorker.ready
-  let subscription = await registration.pushManager.getSubscription()
-  if (!subscription) {
-    const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY as string
-    if (!vapidPublicKey) {
-      console.error('VITE_VAPID_PUBLIC_KEY manquante')
+    const registration = await getReadyRegistration()
+    if (!registration) {
+      console.error('Service worker indisponible : abonnement push impossible')
       return false
     }
-    subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) as BufferSource,
-    })
-  }
+    let subscription = await registration.pushManager.getSubscription()
+    if (!subscription) {
+      const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY as string
+      if (!vapidPublicKey) {
+        console.error('VITE_VAPID_PUBLIC_KEY manquante')
+        return false
+      }
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) as BufferSource,
+      })
+    }
 
-  const json = subscription.toJSON()
-  if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) return false
+    const json = subscription.toJSON()
+    if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) return false
 
-  const { error } = await supabase
-    .from('push_subscriptions')
-    .upsert(
-      { player_id: playerId, endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth },
-      { onConflict: 'endpoint' }
-    )
-  if (error) {
-    console.error("Erreur lors de l'enregistrement de l'abonnement push :", error)
+    const { error } = await supabase
+      .from('push_subscriptions')
+      .upsert(
+        { player_id: playerId, endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth },
+        { onConflict: 'endpoint' }
+      )
+    if (error) {
+      console.error("Erreur lors de l'enregistrement de l'abonnement push :", error)
+      return false
+    }
+    return true
+  } catch (e) {
+    // pushManager.subscribe() peut échouer (services Google indisponibles sur
+    // Android, réseau coupé…) : on renvoie un échec au lieu de propager, sinon
+    // l'appelant reste coincé sur une promesse rejetée.
+    console.error("Échec de l'abonnement push :", e)
     return false
   }
-  return true
 }
 
 export async function unsubscribeFromPush(): Promise<void> {
-  if (!('serviceWorker' in navigator)) return
-  const registration = await navigator.serviceWorker.ready
-  const subscription = await registration.pushManager.getSubscription()
-  if (!subscription) return
-  const endpoint = subscription.endpoint
-  await subscription.unsubscribe()
-  await supabase.from('push_subscriptions').delete().eq('endpoint', endpoint)
+  const registration = await getReadyRegistration()
+  if (!registration) return
+  try {
+    const subscription = await registration.pushManager.getSubscription()
+    if (!subscription) return
+    const endpoint = subscription.endpoint
+    await subscription.unsubscribe()
+    await supabase.from('push_subscriptions').delete().eq('endpoint', endpoint)
+  } catch (e) {
+    console.error('Échec du désabonnement push :', e)
+  }
 }

@@ -3,7 +3,7 @@ import type {
   AutoBattleVariantUnlockCondition,
   AutoBattleTalent, AutoBattleTalentKind, AutoBattleTalentTrigger,
   AutoBattleWeatherEffect, AutoBattleWeatherEffectKind, AutoBattleWeatherTargetScope,
-  AutoBattleWeatherCondition, AutoBattleTurn,
+  AutoBattleWeatherCondition, AutoBattleTurn, AutoBattleWeightScaleEntry,
 } from '../types'
 import { getStatusInfo, type StatusId } from './status'
 import { isAbsolutePrecision } from './precisionColor'
@@ -241,6 +241,30 @@ export function describeWeightCondition(rule: AutoBattleAbilityRule): string {
   return `${subject} ${heavier ? 'plus' : 'moins'} de ${percent}% de ${other}`
 }
 
+// Paliers d'une échelle de poids (bonus_damage_weight_scale) triés du plus
+// léger au plus lourd, en écartant les entrées mal formées : ordre de LECTURE
+// du barème, partagé par le résumé ci-dessous et par le panneau admin — à ne
+// pas confondre avec bonus_damage_weight_scale_order, qui n'est qu'un sens
+// d'affichage. Miroir du ORDER BY de autobattle_weight_scale_bonus côté SQL.
+export function sortedWeightScale(scale: AutoBattleWeightScaleEntry[] | null | undefined): AutoBattleWeightScaleEntry[] {
+  if (!Array.isArray(scale)) return []
+  return scale
+    .filter((e) => e && Number.isFinite(e.min) && Number.isFinite(e.bonus))
+    .sort((a, b) => a.min - b.min)
+}
+
+// Libellé du type de dégâts additionnels 'weight_scale' : « +0/+3/+5 dégâts
+// selon le poids de l'adversaire (0, 50, 100 kg) ». Chaque palier court du
+// poids affiché jusqu'au suivant, le dernier est ouvert vers le haut.
+export function describeWeightScale(rule: AutoBattleAbilityRule): string {
+  const entries = sortedWeightScale(rule.bonus_damage_weight_scale)
+  const whose = rule.bonus_damage_weight_scale_target === 'opponent' ? "de l'adversaire" : 'du pokémon'
+  if (entries.length === 0) return `Dégâts additionnels selon le poids ${whose}`
+  const bonuses = entries.map((e) => `${e.bonus >= 0 ? '+' : ''}${e.bonus}`).join('/')
+  const steps = entries.map((e) => e.min).join(', ')
+  return `${bonuses} dégâts selon le poids ${whose} (${steps} kg)`
+}
+
 // Résumé textuel court des effets spéciaux d'une capacité (voir
 // autobattle_ability_rules) — une ligne par effet configuré, utilisé par les
 // écrans de sélection de capacité en Combat Auto (AutoBattleAbilityPicker,
@@ -384,7 +408,10 @@ export function describeAbilityRule(
       : ''
     const bonusLabel = rule.bonus_damage_type === 'multiply' ? `Dégâts ×${rule.bonus_damage_multiplier}`
       : rule.bonus_damage_type === 'flat' ? `+${rule.bonus_damage_flat} dégâts`
+      : rule.bonus_damage_type === 'weight_scale' ? describeWeightScale(rule)
       : `+${rule.bonus_damage_min}-${rule.bonus_damage_max} dégâts`
+    // L'échelle de poids peut se passer de condition (la seule qui le puisse) :
+    // conditionLabel est alors vide et la ligne se réduit au barème.
     lines.push(`${bonusLabel} ${conditionLabel}`.trim())
   }
   if (rule.prevention_duration_turns) {

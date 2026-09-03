@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { isPushSupported, isIOS, isStandalone, subscribeToPush, unsubscribeFromPush } from '../lib/pushNotifications'
+import { isPushSupported, isIOS, isStandalone, subscribeToPush, unsubscribeFromPush, getReadyRegistration } from '../lib/pushNotifications'
 
 export function usePushNotifications(playerId: number | null) {
   const supported = isPushSupported()
@@ -31,8 +31,8 @@ export function usePushNotifications(playerId: number | null) {
       return
     }
     try {
-      const registration = await navigator.serviceWorker.ready
-      const sub = await registration.pushManager.getSubscription()
+      const registration = await getReadyRegistration()
+      const sub = registration ? await registration.pushManager.getSubscription() : null
       if (!sub) {
         apply(perm, false)
         return
@@ -78,6 +78,11 @@ export function usePushNotifications(playerId: number | null) {
       setSubscribed(ok)
       setReady(true)
       return ok
+    } catch {
+      // subscribeToPush() avale déjà ses erreurs, mais on ne laisse jamais
+      // l'appelant face à une promesse rejetée : il en dépend pour refermer
+      // sa popup, sinon l'utilisateur reste bloqué dessus.
+      return false
     } finally {
       setLoading(false)
     }
@@ -89,6 +94,8 @@ export function usePushNotifications(playerId: number | null) {
       await unsubscribeFromPush()
       setSubscribed(false)
       if (supported) setPermission(Notification.permission)
+    } catch {
+      // idem : ne jamais rejeter, l'UI doit pouvoir se débloquer
     } finally {
       setLoading(false)
     }

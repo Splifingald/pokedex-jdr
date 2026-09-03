@@ -11,8 +11,11 @@ interface Props {
 
 export function NotificationPromptModal({ loading, onEnable, onClose }: Props) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-      <div className={`${PANEL_LG} max-w-xs w-full p-6 text-ink`}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+      onClick={onClose}
+    >
+      <div className={`${PANEL_LG} max-w-xs w-full p-6 text-ink`} onClick={(e) => e.stopPropagation()}>
         <div className="text-center mb-5">
           <div className="text-4xl mb-2">🔔</div>
           <h3 className="text-ink text-lg">Activer les notifications</h3>
@@ -24,10 +27,12 @@ export function NotificationPromptModal({ loading, onEnable, onClose }: Props) {
           </p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Jamais désactivé : la demande de permission du navigateur peut rester
+              sans réponse (UI silencieuse de Chrome, prompt système ignoré) et
+              l'utilisateur doit toujours pouvoir refermer cette popup. */}
           <button
             onClick={onClose}
-            disabled={loading}
-            className={`py-2.5 rounded text-sm font-bold ${BUTTON_STYLE.gray} disabled:opacity-60`}
+            className={`py-2.5 rounded text-sm font-bold ${BUTTON_STYLE.gray}`}
           >
             Plus tard
           </button>

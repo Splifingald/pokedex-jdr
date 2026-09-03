@@ -5,6 +5,7 @@ import type {
   AutoBattleStatModTarget, AutoBattleStatModDirection, AutoBattleStatModStat, AutoBattleStatModValueType, AutoBattleStatModDurationType,
   AutoBattleStatusEffect, AutoBattleKeepGoingBonusType, AutoBattleIgnoreStatusBlock,
   AutoBattleWeather, AutoBattleDotType, AutoBattleWeightTarget, AutoBattleWeightComparison,
+  AutoBattleWeightScaleEntry, AutoBattleWeightScaleOrder,
   AutoBattlePercentHpBasis,
 } from '../types'
 import { ALL_TYPES } from '../lib/typeChart'
@@ -17,7 +18,7 @@ import { TypeBadge } from './TypeBadge'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import { PIXEL_BORDER_SM } from '../lib/panelStyles'
 import { CloseIcon } from './icons/CloseIcon'
-import { STATUS_EFFECT_LABEL } from '../lib/autoBattle'
+import { STATUS_EFFECT_LABEL, sortedWeightScale } from '../lib/autoBattle'
 
 const TURN_EFFECT_LABEL: Record<AutoBattleTurnEffect, string> = {
   skip: 'Passe son tour',
@@ -60,6 +61,32 @@ const BONUS_DAMAGE_TYPE_LABEL: Record<AutoBattleBonusDamageType, string> = {
   multiply: 'Multiplicateur',
   flat: 'Montant fixe',
   range: 'Fourchette',
+  weight_scale: 'Échelle de poids',
+}
+
+// Barème proposé au premier choix de « Échelle de poids » — chaque palier vaut
+// à partir de son poids et jusqu'au suivant (le dernier est ouvert vers le
+// haut), voir autobattle_ability_rules.bonus_damage_weight_scale.
+const DEFAULT_WEIGHT_SCALE: AutoBattleWeightScaleEntry[] = [
+  { min: 0, bonus: 0 },
+  { min: 50, bonus: 3 },
+  { min: 100, bonus: 5 },
+  { min: 200, bonus: 7 },
+  { min: 300, bonus: 10 },
+]
+
+// Camp dont on lit le poids dans l'échelle ci-dessus (à ne pas confondre avec
+// WEIGHT_TARGET_LABEL, qui sert à la CONDITION de comparaison des deux poids).
+const WEIGHT_SCALE_TARGET_LABEL: Record<AutoBattleWeightTarget, string> = {
+  opponent: "Poids de l'adversaire",
+  self: "Poids de l'utilisateur de la capacité",
+}
+
+// Sens d'affichage du barème dans ce panneau — aucun effet en combat, le bonus
+// reste celui écrit en face de chaque palier (voir bonus_damage_weight_scale_order).
+const WEIGHT_SCALE_ORDER_LABEL: Record<AutoBattleWeightScaleOrder, string> = {
+  asc: 'Du plus léger au plus lourd',
+  desc: 'Du plus lourd au plus léger',
 }
 
 const BONUS_DAMAGE_CONDITION_LABEL: Record<AutoBattleBonusDamageCondition, string> = {
@@ -206,6 +233,7 @@ function emptyRule(attackNom: string): AutoBattleAbilityRule {
     bonus_damage_min: null, bonus_damage_max: null,
     bonus_damage_condition: null, bonus_damage_condition_dice_value: null, bonus_damage_status_filter: null,
     bonus_damage_weight_target: null, bonus_damage_weight_comparison: null, bonus_damage_weight_percent: null,
+    bonus_damage_weight_scale: null, bonus_damage_weight_scale_target: null, bonus_damage_weight_scale_order: null,
     stat_mod_target: null, stat_mod_direction: null, stat_mod_stat: null, stat_mod_value_type: null,
     stat_mod_flat: null, stat_mod_min: null, stat_mod_max: null, stat_mod_percent: null,
     stat_mod_duration_type: null, stat_mod_duration_turns: null, stat_mod_max_uses: null,
@@ -335,22 +363,74 @@ function AbilityRuleRow({
         bonus_damage_min: null, bonus_damage_max: null, bonus_damage_condition: null, bonus_damage_condition_dice_value: null,
         bonus_damage_status_filter: null,
         bonus_damage_weight_target: null, bonus_damage_weight_comparison: null, bonus_damage_weight_percent: null,
+        bonus_damage_weight_scale: null, bonus_damage_weight_scale_target: null, bonus_damage_weight_scale_order: null,
       })
       return
     }
+    if (value === 'weight_scale') {
+      // Seul type qui se passe de condition (voir la contrainte
+      // autobattle_ability_rules_bonus_damage_fields) : on garde celle déjà
+      // choisie si elle existe, sinon le bonus vaut à chaque coup réussi. Ses
+      // deux réglages obligatoires (barème non vide + camp regardé) sont posés
+      // d'un coup, avec le barème d'exemple.
+      onUpdate(rule.attack_nom, {
+        bonus_damage_type: 'weight_scale',
+        bonus_damage_multiplier: null, bonus_damage_flat: null, bonus_damage_min: null, bonus_damage_max: null,
+        bonus_damage_weight_scale: sortedWeightScale(rule.bonus_damage_weight_scale).length > 0
+          ? sortedWeightScale(rule.bonus_damage_weight_scale)
+          : DEFAULT_WEIGHT_SCALE,
+        bonus_damage_weight_scale_target: rule.bonus_damage_weight_scale_target ?? 'opponent',
+        bonus_damage_weight_scale_order: rule.bonus_damage_weight_scale_order ?? 'asc',
+      })
+      return
+    }
+    // Les autres types EXIGENT une condition : si on vient de l'échelle de
+    // poids, qui pouvait ne pas en avoir, on en repose une par défaut.
     const condition = rule.bonus_damage_condition ?? 'has_status'
     const diceValue = condition === 'dice_equals' ? (rule.bonus_damage_condition_dice_value ?? 6) : null
+    const clearScale = { bonus_damage_weight_scale: null, bonus_damage_weight_scale_target: null, bonus_damage_weight_scale_order: null }
     if (value === 'multiply') {
-      onUpdate(rule.attack_nom, { bonus_damage_type: 'multiply', bonus_damage_multiplier: rule.bonus_damage_multiplier ?? 1.5, bonus_damage_flat: null, bonus_damage_min: null, bonus_damage_max: null, bonus_damage_condition: condition, bonus_damage_condition_dice_value: diceValue })
+      onUpdate(rule.attack_nom, { bonus_damage_type: 'multiply', bonus_damage_multiplier: rule.bonus_damage_multiplier ?? 1.5, bonus_damage_flat: null, bonus_damage_min: null, bonus_damage_max: null, bonus_damage_condition: condition, bonus_damage_condition_dice_value: diceValue, ...clearScale })
     } else if (value === 'flat') {
-      onUpdate(rule.attack_nom, { bonus_damage_type: 'flat', bonus_damage_flat: rule.bonus_damage_flat ?? 10, bonus_damage_multiplier: null, bonus_damage_min: null, bonus_damage_max: null, bonus_damage_condition: condition, bonus_damage_condition_dice_value: diceValue })
+      onUpdate(rule.attack_nom, { bonus_damage_type: 'flat', bonus_damage_flat: rule.bonus_damage_flat ?? 10, bonus_damage_multiplier: null, bonus_damage_min: null, bonus_damage_max: null, bonus_damage_condition: condition, bonus_damage_condition_dice_value: diceValue, ...clearScale })
     } else {
-      onUpdate(rule.attack_nom, { bonus_damage_type: 'range', bonus_damage_min: rule.bonus_damage_min ?? 1, bonus_damage_max: rule.bonus_damage_max ?? 8, bonus_damage_multiplier: null, bonus_damage_flat: null, bonus_damage_condition: condition, bonus_damage_condition_dice_value: diceValue })
+      onUpdate(rule.attack_nom, { bonus_damage_type: 'range', bonus_damage_min: rule.bonus_damage_min ?? 1, bonus_damage_max: rule.bonus_damage_max ?? 8, bonus_damage_multiplier: null, bonus_damage_flat: null, bonus_damage_condition: condition, bonus_damage_condition_dice_value: diceValue, ...clearScale })
     }
   }
 
+  // Paliers du barème, toujours réécrits triés du plus léger au plus lourd et
+  // sans doublon de poids (deux paliers au même "min" rendraient le bonus
+  // ambigu côté SQL) — l'ordre d'AFFICHAGE, lui, est géré au rendu.
+  const weightScale = sortedWeightScale(rule.bonus_damage_weight_scale)
+  const commitWeightScale = (entries: AutoBattleWeightScaleEntry[]) => {
+    const deduped: AutoBattleWeightScaleEntry[] = []
+    for (const entry of sortedWeightScale(entries)) {
+      if (deduped.length > 0 && deduped[deduped.length - 1].min === entry.min) deduped[deduped.length - 1] = entry
+      else deduped.push(entry)
+    }
+    onUpdate(rule.attack_nom, { bonus_damage_weight_scale: deduped })
+  }
+  const handleWeightScaleAdd = () => {
+    // Nouveau palier 50 kg au-dessus du dernier, avec son bonus repris tel quel.
+    const last = weightScale[weightScale.length - 1]
+    commitWeightScale([...weightScale, { min: last ? last.min + 50 : 0, bonus: last ? last.bonus : 0 }])
+  }
+  const handleWeightScaleRemove = (index: number) => {
+    // Le barème ne peut pas devenir vide (contrainte ..._bonus_damage_weight_
+    // scale_check) : retirer le dernier palier revient à retirer l'effet.
+    if (weightScale.length <= 1) handleBonusTypeChange('')
+    else commitWeightScale(weightScale.filter((_, i) => i !== index))
+  }
+
   const handleBonusConditionChange = (value: string) => {
-    if (value === 'dice_equals') {
+    if (value === '') {
+      // « Aucune » n'est proposé que pour l'échelle de poids (voir le rendu) :
+      // le bonus s'applique alors à chaque coup réussi.
+      onUpdate(rule.attack_nom, {
+        bonus_damage_condition: null, bonus_damage_condition_dice_value: null, bonus_damage_status_filter: null,
+        bonus_damage_weight_target: null, bonus_damage_weight_comparison: null, bonus_damage_weight_percent: null,
+      })
+    } else if (value === 'dice_equals') {
       onUpdate(rule.attack_nom, { bonus_damage_condition: 'dice_equals', bonus_damage_condition_dice_value: rule.bonus_damage_condition_dice_value ?? 6, bonus_damage_status_filter: null, bonus_damage_weight_target: null, bonus_damage_weight_comparison: null, bonus_damage_weight_percent: null })
     } else if (value === 'has_status' || value === 'self_has_status') {
       // Les deux conditions de statut partagent bonus_damage_status_filter :
@@ -901,6 +981,69 @@ function AbilityRuleRow({
                 />
               </div>
             )}
+            {/* Échelle de poids : barème de dégâts par tranche de poids d'UN
+                SEUL des deux pokémon. Chaque palier court de son poids jusqu'au
+                suivant, le dernier est ouvert vers le haut — l'ordre ci-dessous
+                n'est qu'un sens d'affichage (voir bonus_damage_weight_scale). */}
+            {rule.bonus_damage_type === 'weight_scale' && (
+              <div className="flex flex-col gap-1 mt-1">
+                <select
+                  value={rule.bonus_damage_weight_scale_target ?? 'opponent'}
+                  onChange={(e) => onUpdate(rule.attack_nom, { bonus_damage_weight_scale_target: e.target.value as AutoBattleWeightTarget })}
+                  className={SELECT_CLASS}
+                >
+                  {(Object.keys(WEIGHT_SCALE_TARGET_LABEL) as AutoBattleWeightTarget[]).map((t) => (
+                    <option key={t} value={t}>{WEIGHT_SCALE_TARGET_LABEL[t]}</option>
+                  ))}
+                </select>
+                <select
+                  value={rule.bonus_damage_weight_scale_order ?? 'asc'}
+                  onChange={(e) => onUpdate(rule.attack_nom, { bonus_damage_weight_scale_order: e.target.value as AutoBattleWeightScaleOrder })}
+                  className={SELECT_CLASS}
+                >
+                  {(Object.keys(WEIGHT_SCALE_ORDER_LABEL) as AutoBattleWeightScaleOrder[]).map((o) => (
+                    <option key={o} value={o}>{WEIGHT_SCALE_ORDER_LABEL[o]}</option>
+                  ))}
+                </select>
+                {(rule.bonus_damage_weight_scale_order === 'desc' ? [...weightScale].reverse() : weightScale).map((entry) => {
+                  // Le palier suivant EN POIDS (pas à l'écran) borne la tranche.
+                  const index = weightScale.indexOf(entry)
+                  const next = weightScale[index + 1]
+                  return (
+                    <div key={index} className="flex items-center gap-2 flex-wrap">
+                      <NumberInput
+                        min={0}
+                        fallback={entry.min}
+                        value={entry.min}
+                        onCommit={(v) => commitWeightScale(weightScale.map((e, i) => (i === index ? { ...e, min: Math.max(0, v) } : e)))}
+                        className={NUM_CLASS_SM}
+                      />
+                      <span className="text-ink-muted-2 text-xs">
+                        {next ? `à ${next.min} kg` : 'kg et plus'}
+                      </span>
+                      <span className="text-ink-muted-2 text-xs">:</span>
+                      <NumberInput
+                        min={0}
+                        fallback={entry.bonus}
+                        value={entry.bonus}
+                        onCommit={(v) => commitWeightScale(weightScale.map((e, i) => (i === index ? { ...e, bonus: Math.max(0, v) } : e)))}
+                        className={NUM_CLASS_SM}
+                      />
+                      <span className="text-ink-muted-2 text-xs">dégâts</span>
+                      <button type="button" onClick={() => handleWeightScaleRemove(index)} className="text-ink-muted-2 text-xs underline">
+                        Retirer
+                      </button>
+                    </div>
+                  )
+                })}
+                <button type="button" onClick={handleWeightScaleAdd} className={`self-start text-xs px-2.5 py-1 rounded font-bold ${BUTTON_STYLE.gray}`}>
+                  + Ajouter un palier
+                </button>
+                <span className="text-ink-muted-2 text-[11px]">
+                  Un pokémon plus léger que le premier palier — ou dont le poids est inconnu — ne donne aucun bonus.
+                </span>
+              </div>
+            )}
             <div className="flex flex-col gap-1 mt-1">
               <span className="text-ink-muted-2 text-xs">Condition</span>
               <select
@@ -908,6 +1051,11 @@ function AbilityRuleRow({
                 onChange={(e) => handleBonusConditionChange(e.target.value)}
                 className={SELECT_CLASS}
               >
+                {/* Une condition reste obligatoire partout ailleurs : l'échelle
+                    de poids est le seul type qui puisse s'en passer. */}
+                {rule.bonus_damage_type === 'weight_scale' && (
+                  <option value="">Aucune — à chaque coup réussi</option>
+                )}
                 {(Object.keys(BONUS_DAMAGE_CONDITION_LABEL) as AutoBattleBonusDamageCondition[]).map((c) => (
                   <option key={c} value={c}>{BONUS_DAMAGE_CONDITION_LABEL[c]}</option>
                 ))}
