@@ -138,17 +138,25 @@ export const TILE_COLOR_LABEL: Record<string, string> = {
   pink: 'Rose',
 }
 
-/** Cases réellement atteignables en `steps` déplacements, en contournant les
- *  obstacles — contrairement à la portée d'une capacité, qui ignore le décor.
+/** Cases réellement atteignables en `steps` déplacements, en contournant le
+ *  décor — contrairement à la portée d'une capacité, qui l'ignore.
  *
  *  Un parcours en largeur, pas un losange : un Pokémon cerné n'a nulle part où
  *  aller, et le losange lui promettrait des cases inaccessibles. La case de
- *  départ n'est pas renvoyée (y rester n'est pas un déplacement). */
+ *  départ n'est pas renvoyée (y rester n'est pas un déplacement).
+ *
+ *  DEUX sortes d'obstacles, à ne pas confondre :
+ *  - `isWall` (case bloquée) : ni traversée, ni occupée ;
+ *  - `isOccupied` (un autre Pokémon debout) : on la TRAVERSE, on ne s'y arrête
+ *    pas. Elle coûte donc un point de déplacement comme n'importe quelle case,
+ *    mais ne sort pas dans le résultat. Un Pokémon peut ainsi passer derrière
+ *    une ligne alliée, ce qu'un mur lui interdirait. */
 export function reachableCells(
   origin: Cell,
   steps: number,
   grid: BoardGrid,
-  isObstacle: (cell: Cell) => boolean
+  isWall: (cell: Cell) => boolean,
+  isOccupied: (cell: Cell) => boolean
 ): Set<string> {
   const reached = new Set<string>()
   if (steps <= 0) return reached
@@ -165,14 +173,95 @@ export function reachableCells(
         const key = cellKey(candidate.col, candidate.row)
         if (visited.has(key)) continue
         visited.add(key)
-        // Un obstacle ne se traverse pas et ne s'occupe pas : on l'écarte
-        // sans l'ajouter au front.
-        if (isObstacle(candidate)) continue
-        reached.add(key)
+        // Un mur ne se traverse pas : on l'écarte sans l'ajouter au front.
+        if (isWall(candidate)) continue
+        // Une case occupée reste un passage : elle avance le front, mais on ne
+        // peut pas s'y arrêter.
+        if (!isOccupied(candidate)) reached.add(key)
         next.push(candidate)
       }
     }
     frontier = next
   }
   return reached
+}
+
+/** Teintes opaques, pour le TRAIT de contour d'une zone peinte : le remplissage
+ *  reste translucide (on doit voir le décor), mais sa bordure doit se lire. */
+export const TILE_OUTLINE_CSS: Record<string, string> = {
+  red: 'rgb(214, 69, 69)',
+  blue: 'rgb(74, 127, 214)',
+  green: 'rgb(76, 175, 107)',
+  orange: 'rgb(232, 147, 61)',
+  purple: 'rgb(138, 92, 214)',
+  pink: 'rgb(236, 72, 153)',
+}
+
+/** Un segment de contour, en unités de case : (0,0) est le coin haut-gauche de
+ *  la case (0,0), (cols,rows) le coin bas-droit de la dernière. */
+export interface OutlineSegment {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+}
+
+/** Fusionne les arêtes alignées et contiguës en un seul trait.
+ *  `line` = l'axe fixe (la ligne pour une arête horizontale, la colonne pour
+ *  une verticale), `at` = l'index de départ le long du trait. */
+function mergeRuns(edges: { line: number; at: number }[], horizontal: boolean): OutlineSegment[] {
+  const byLine = new Map<number, Set<number>>()
+  for (const e of edges) {
+    const set = byLine.get(e.line)
+    if (set) set.add(e.at)
+    else byLine.set(e.line, new Set([e.at]))
+  }
+  const runs: OutlineSegment[] = []
+  const push = (line: number, start: number, end: number) => {
+    runs.push(horizontal
+      ? { x1: start, y1: line, x2: end, y2: line }
+      : { x1: line, y1: start, x2: line, y2: end })
+  }
+  for (const [line, set] of byLine) {
+    const ats = [...set].sort((a, b) => a - b)
+    let start = ats[0]
+    let end = ats[0] + 1
+    for (let i = 1; i < ats.length; i++) {
+      if (ats[i] === end) { end++; continue }
+      push(line, start, end)
+      start = ats[i]
+      end = ats[i] + 1
+    }
+    push(line, start, end)
+  }
+  return runs
+}
+
+/** Contour « intelligent » d'une zone : seulement les arêtes qui la séparent de
+ *  l'extérieur, jamais les traits intérieurs entre deux cases voisines.
+ *
+ *  C'est ce qui distingue une ZONE d'un tas de cases : cinq cases bloquées
+ *  côte à côte donnent un seul rectangle cerné, pas cinq carrés. Les arêtes
+ *  alignées sont fusionnées en un trait continu, pour que le rendu ne trahisse
+ *  pas le découpage (les jointures de segments se voient aux angles). */
+export function regionOutline(cells: Iterable<string>): OutlineSegment[] {
+  const zone = cells instanceof Set ? cells : new Set(cells)
+  const inZone = (col: number, row: number) => zone.has(cellKey(col, row))
+  const horizontal: { line: number; at: number }[] = []
+  const vertical: { line: number; at: number }[] = []
+  for (const key of zone) {
+    const cell = parseCellKey(key)
+    if (!cell) continue
+    const { col, row } = cell
+    if (!inZone(col, row - 1)) horizontal.push({ line: row, at: col })
+    if (!inZone(col, row + 1)) horizontal.push({ line: row + 1, at: col })
+    if (!inZone(col - 1, row)) vertical.push({ line: col, at: row })
+    if (!inZone(col + 1, row)) vertical.push({ line: col + 1, at: row })
+  }
+  return [...mergeRuns(horizontal, true), ...mergeRuns(vertical, false)]
+}
+
+/** Chemin SVG d'un contour, dans un repère où 1 unité = 1 case. */
+export function outlinePath(segments: OutlineSegment[]): string {
+  return segments.map((s) => `M${s.x1} ${s.y1}L${s.x2} ${s.y2}`).join('')
 }

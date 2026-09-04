@@ -13,6 +13,10 @@
   --color-hp-orange: #e8933d;
   --color-hp-red: #d64545;
   --color-xp-blue: #4a7fd6;
+  /* Accent de SÉLECTION (contour du jeton actif, pastille de l'ordre du tour,
+     couleur retenue dans une palette…). Volontairement bleu et non rouge : le
+     rouge reste réservé au négatif (retirer, réinitialiser, camp ennemi). */
+  --color-select: #4a7fd6;
   --color-tabbar-bg: #1c1e38;
   --color-tabbar-inactive: #7a7c9a;
 

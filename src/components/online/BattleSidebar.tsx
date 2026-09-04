@@ -99,7 +99,7 @@ export function BattleSidebar({
                   key={pp.id}
                   // Un Pokémon déjà posé reste cliquable même quand le MJ a
                   // coupé le déplacement : on ouvre sa fiche, on ne le bouge pas.
-                  className={`relative rounded-[var(--radius-pixel-sm)] ${pendingPokemonId === pp.id ? 'ring-[3px] ring-shell' : ''} ${canPlace || placed ? '' : 'opacity-60 pointer-events-none'}`}
+                  className={`relative rounded-[var(--radius-pixel-sm)] ${pendingPokemonId === pp.id ? 'ring-[3px] ring-select' : ''} ${canPlace || placed ? '' : 'opacity-60 pointer-events-none'}`}
                 >
                   <PokemonOwnedCard
                     playerPokemon={pp}

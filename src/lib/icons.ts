@@ -58,9 +58,10 @@ export const CASINO_ICON = {
 export const CASINO_MASCOT_ICON = `${BASE}/icon_casino.png`
 
 export const DISPLAY_ICON = `${BASE}/icon_navbar_display.png`
-// Mode En ligne : pas d'icône dédiée pour l'instant, on réutilise celle du
-// combat — remplacer par un asset propre quand il existera.
-export const ONLINE_ICON = `${BASE}/icon_battle_game.png`
+/** Bouton « Afficher l'écran » de l'accueil : ouvre l'écran partagé. */
+export const DISPLAYER_ICON = `${BASE}/icon_displayer.png`
+/** Croix à quatre flèches posée sur la case de DÉPART pendant un déplacement. */
+export const BATTLE_MOVE_ICON = `${BASE}/icon_move_battle.png`
 
 export const DICE_ICON: Record<number, string> = {
   1: `${BASE}/Dice_1.png`,

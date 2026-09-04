@@ -149,7 +149,7 @@ export function BattlePokemonRecap({
                 <div
                   key={nom}
                   onClick={() => onSelectMove(active ? null : nom)}
-                  className={`${CARD} p-2 cursor-pointer hover:brightness-95 ${active ? 'ring-[3px] ring-shell' : ''}`}
+                  className={`${CARD} p-2 cursor-pointer hover:brightness-95 ${active ? 'ring-[3px] ring-select' : ''}`}
                 >
                   <div className="flex items-center gap-2 mb-1 min-w-0">
                     {attack && <TypeBadge type={attack.type} small />}

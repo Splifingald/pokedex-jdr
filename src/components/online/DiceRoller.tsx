@@ -1,5 +1,7 @@
-import { useState, useCallback } from 'react'
-import { DICE_SIDES, readHistory, pushHistory, rollDie } from '../../lib/diceRolls'
+import { useState, useCallback, useSyncExternalStore } from 'react'
+import {
+  DICE_SIDES, readHistory, pushHistory, rollDie, subscribeDiceHistory, getDiceHistoryVersion,
+} from '../../lib/diceRolls'
 import { DiceIcon } from '../icons/DiceIcon'
 import { PIXEL_BORDER_SM } from '../../lib/panelStyles'
 
@@ -11,11 +13,15 @@ interface Props {
 // Lanceur de dés, en bas à droite de l'écran partagé.
 //
 // Le résultat est strictement local : il s'affiche chez celui qui lance, et
-// l'historique des trois derniers résultats vit sur son appareil. Aucun échange
-// réseau, aucune écriture en base.
+// l'historique des trois derniers résultats vit en mémoire. Aucun échange
+// réseau, aucune écriture en base, et rien qui survive à un rechargement.
 export function DiceRoller({ onRoll }: Props) {
   const [open, setOpen] = useState(false)
   const [hovered, setHovered] = useState<number | null>(null)
+  // L'historique vit hors de React (module lib/diceRolls) : sans cet
+  // abonnement, une remise à zéro venue d'ailleurs — nouvelle bataille,
+  // plateau réinitialisé — laisserait les anciens résultats affichés.
+  useSyncExternalStore(subscribeDiceHistory, getDiceHistoryVersion)
 
   const roll = useCallback((sides: number) => {
     const value = rollDie(sides)

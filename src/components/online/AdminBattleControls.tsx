@@ -164,21 +164,21 @@ export function AdminBattleControls({
             <button
               onClick={() => onPaintColorChange('blocked')}
               title="Bloquée — case inaccessible aux Pokémon"
-              className={`w-8 h-8 rounded border-2 border-ink bg-black ${paintColor === 'blocked' ? 'ring-[3px] ring-shell' : ''}`}
+              className={`w-8 h-8 rounded border-2 border-ink bg-black ${paintColor === 'blocked' ? 'ring-[3px] ring-select' : ''}`}
             />
             {ONLINE_TILE_COLORS.map((c) => (
               <button
                 key={c}
                 onClick={() => onPaintColorChange(c)}
                 title={`${TILE_COLOR_LABEL[c]} — simple repère, ne bloque pas`}
-                className={`w-8 h-8 rounded border-2 border-ink ${paintColor === c ? 'ring-[3px] ring-shell' : ''}`}
+                className={`w-8 h-8 rounded border-2 border-ink ${paintColor === c ? 'ring-[3px] ring-select' : ''}`}
                 style={{ backgroundColor: TILE_COLOR_CSS[c] }}
               />
             ))}
             <button
               onClick={() => onPaintColorChange(null)}
               title="Gomme"
-              className={`w-8 h-8 rounded border-2 border-ink bg-cream text-ink text-sm ${paintColor === null ? 'ring-[3px] ring-shell' : ''}`}
+              className={`w-8 h-8 rounded border-2 border-ink bg-cream text-ink text-sm ${paintColor === null ? 'ring-[3px] ring-select' : ''}`}
             >
               ⌫
             </button>

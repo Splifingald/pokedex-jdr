@@ -4,12 +4,16 @@ import type { OnlineState } from '../../types'
 import type { ResolvedToken } from '../../lib/onlineTokens'
 import type { BoardPing } from '../../hooks/useOnlinePings'
 import type { Cell } from '../../lib/onlineBoard'
-import { cellKey, computeGrid, pointToCell, pointToNorm, reachableCells, TILE_COLOR_CSS } from '../../lib/onlineBoard'
+import {
+  cellKey, computeGrid, pointToCell, pointToNorm, reachableCells, TILE_COLOR_CSS, TILE_OUTLINE_CSS,
+} from '../../lib/onlineBoard'
+import { BATTLE_MOVE_ICON } from '../../lib/icons'
 import { useFittedBox } from '../../hooks/useFittedBox'
 import { useBoardZoom } from '../../hooks/useBoardZoom'
 import { BattleToken } from './BattleToken'
 import { BattleTokenInfo } from './BattleTokenInfo'
 import { BattlePingLayer } from './BattlePingLayer'
+import { BattleZoneOutlines, type OutlinedZone } from './BattleZoneOutlines'
 
 /** Ce que le spectateur a le droit de voir. Passé en props et jamais lu dans un
  *  contexte React : ce composant est aussi rendu par /display, monté HORS
@@ -41,6 +45,9 @@ interface Props {
   onCellActivate: (cell: Cell) => void
   /** Case peinte pendant un glissé (outil coloriage). */
   onCellPaint: (cell: Cell) => void
+  /** Un glissement de jeton vient de commencer : la portée de capacité en cours
+   *  est retirée, pour ne pas se superposer à l'aperçu de déplacement. */
+  onTokenDragStart?: () => void
   /** Le nombre de lignes découle de la forme de l'image, pas d'un réglage : on
    *  le remonte pour le mémoriser, afin que le serveur et le surlignage de
    *  portée travaillent sur la même grille. Absent en lecture seule. */
@@ -49,6 +56,14 @@ interface Props {
 
 const DRAG_THRESHOLD_PX = 5
 const DEFAULT_RATIO = 16 / 9
+
+/** Contour des cases inaccessibles : leur propre couleur, comme les zones peintes. */
+const BLOCKED_OUTLINE = '#0a0a0a'
+/** Contour des APERÇUS — portée d'une capacité et cases atteignables. Le même
+ *  pour les deux : ils ne peuvent plus se superposer, puisque saisir un jeton
+ *  retire la portée affichée. Valeur de --color-cream, en dur car var() n'est
+ *  pas résolu dans un attribut de présentation SVG. */
+const PREVIEW_OUTLINE = '#f2ecd6'
 
 // Plateau de bataille partagé.
 //
@@ -63,7 +78,8 @@ const DEFAULT_RATIO = 16 / 9
 // utilisé ailleurs dans le projet, ne fonctionne pas au tactile).
 export function BattleBoard({
   state, backgroundUrl, tokens, viewer, selectedTokenId, highlightedCells,
-  paintMode, readOnly, pings, canMoveToken, onSelectToken, onMoveToken, onCellActivate, onCellPaint, onRowsChange,
+  paintMode, readOnly, pings, canMoveToken, onSelectToken, onMoveToken, onCellActivate, onCellPaint,
+  onTokenDragStart, onRowsChange,
 }: Props) {
   const wrapperRef = useRef<HTMLDivElement>(null)
   const boardRef = useRef<HTMLDivElement>(null)
@@ -219,10 +235,11 @@ export function BattleBoard({
       if (!canMoveToken(token)) return
       movedRef.current = true
       setDragTokenId(token.token.id)
+      onTokenDragStart?.()
     }
     setDragPoint(pointToNorm(e.clientX, e.clientY, r))
     setDragCell(pointToCell(e.clientX, e.clientY, r, grid))
-  }, [readOnly, grid, canMoveToken, onCellPaint, zoom])
+  }, [readOnly, grid, canMoveToken, onCellPaint, onTokenDragStart, zoom])
 
   const endDrag = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     if (readOnly) return
@@ -286,12 +303,15 @@ export function BattleBoard({
   // Pokémon au-delà, c'est au MJ d'arbitrer.
   //
   // Contrairement à la portée d'une capacité, le déplacement contourne le
-  // décor : cases bloquées et Pokémon debout arrêtent la progression, si bien
-  // qu'un Pokémon cerné n'éclaire plus rien.
+  // décor — et les deux sortes d'obstacles ne se valent pas : une case bloquée
+  // est un mur, un Pokémon debout se traverse mais ne se remplace pas. On passe
+  // donc derrière une ligne alliée sans pouvoir s'arrêter dessus, et un Pokémon
+  // cerné de murs n'éclaire plus rien.
   const draggedToken = dragTokenId != null ? tokens.find((t) => t.token.id === dragTokenId) : undefined
   const moveCells = useMemo(() => {
     const distance = draggedToken?.species?.distance_deplacement ?? 0
     if (!draggedToken || distance <= 0) return new Set<string>()
+    // Un jeton à 0 PV reste visible mais libère sa case : il ne compte pas.
     const occupied = new Set(
       tokens
         .filter((t) => t.token.id !== draggedToken.token.id && !t.isKo)
@@ -301,12 +321,50 @@ export function BattleBoard({
       { col: draggedToken.token.cell_col, row: draggedToken.token.cell_row },
       distance,
       grid,
-      (cell) => {
-        const key = cellKey(cell.col, cell.row)
-        return blocked.has(key) || occupied.has(key)
-      }
+      (cell) => blocked.has(cellKey(cell.col, cell.row)),
+      (cell) => occupied.has(cellKey(cell.col, cell.row))
     )
   }, [draggedToken, tokens, grid, blocked])
+
+  // Croix à quatre flèches sur la case de DÉPART : pendant le glissement le
+  // jeton suit le pointeur et sa case paraît vide, on rappelle donc d'où il
+  // vient. Elle n'est jamais dans les cases atteignables — y rester n'est pas
+  // un déplacement — d'où son rendu à part.
+  const moveOriginKey = draggedToken
+    ? cellKey(draggedToken.token.cell_col, draggedToken.token.cell_row)
+    : null
+
+  // La portée d'une capacité est un losange qui ignore le décor : on en retire
+  // les cases inaccessibles avant de peindre ET de cerner, sinon le contour
+  // engloberait des cases que l'aperçu ne remplit pas.
+  const rangeVisible = useMemo(
+    () => new Set([...highlightedCells].filter((k) => !blocked.has(k))),
+    [highlightedCells, blocked]
+  )
+
+  // Mêmes règles de contour pour le décor posé par le MJ et pour les aperçus ;
+  // ces derniers passent en dernier, donc devant.
+  const outlinedZones = useMemo<OutlinedZone[]>(() => {
+    const zones: OutlinedZone[] = []
+    if (!bare) {
+      zones.push({ key: 'blocked', cells: blocked, stroke: BLOCKED_OUTLINE })
+      const byTint = new Map<string, Set<string>>()
+      for (const [key, tint] of Object.entries(state.colored_cells)) {
+        // Une case bloquée n'est jamais peinte (les deux outils s'excluent), mais
+        // un état venu du réseau peut porter les deux : le blocage prime.
+        if (blocked.has(key)) continue
+        const set = byTint.get(tint)
+        if (set) set.add(key)
+        else byTint.set(tint, new Set([key]))
+      }
+      for (const [tint, cells] of byTint) {
+        zones.push({ key: `tint-${tint}`, cells, stroke: TILE_OUTLINE_CSS[tint] })
+      }
+    }
+    zones.push({ key: 'move', cells: moveCells, stroke: PREVIEW_OUTLINE })
+    zones.push({ key: 'range', cells: rangeVisible, stroke: PREVIEW_OUTLINE })
+    return zones
+  }, [bare, blocked, state.colored_cells, moveCells, rangeVisible])
 
   const cells: { key: string; col: number; row: number }[] = []
   for (let row = 0; row < rows; row++) {
@@ -376,13 +434,20 @@ export function BattleBoard({
                 style={{ backgroundColor: !bare && tint ? TILE_COLOR_CSS[tint] : undefined }}
               >
                 {!bare && isBlocked && <div className="absolute inset-0 bg-black/35" />}
-                {/* Aperçus de zone : coloration seule, sans liseré — la grille
-                    porte déjà ses propres traits, en rajouter surcharge la carte. */}
-                {!isBlocked && moveCells.has(c.key) && (
-                  <div className="absolute inset-0 bg-white/12" />
-                )}
-                {!isBlocked && highlightedCells.has(c.key) && (
+                {/* Déplacement et portée : même remplissage, ils ne peuvent plus
+                    se superposer. Le contour est dessiné à part, par zone. */}
+                {(moveCells.has(c.key) || rangeVisible.has(c.key)) && (
                   <div className="absolute inset-0 bg-cream/20" />
+                )}
+                {moveOriginKey === c.key && (
+                  <img
+                    src={BATTLE_MOVE_ICON}
+                    alt=""
+                    draggable={false}
+                    // L'icône est quasi blanche : l'ombre portée la garde lisible
+                    // sur les terrains clairs.
+                    className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[62%] h-[62%] object-contain pixelated drop-shadow-[1px_1px_0_rgba(0,0,0,0.7)]"
+                  />
                 )}
                 {dragKey === c.key && (
                   <div className="absolute inset-0 bg-white/30 shadow-[inset_0_0_0_3px_#fff]" />
@@ -391,6 +456,10 @@ export function BattleBoard({
             )
           })}
         </div>
+
+        {/* Contours de zone, PAR-DESSUS le quadrillage et sous les jetons : sans
+            eux une flaque de cases bloquées se confond avec la grille. */}
+        <BattleZoneOutlines grid={grid} zones={outlinedZones} />
 
         <div className="absolute inset-0">
           {tokens.map((t) => (

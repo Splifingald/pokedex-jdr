@@ -14810,3 +14810,23 @@ ALTER TABLE online_state ADD COLUMN IF NOT EXISTS turn_order_position text NOT N
 ALTER TABLE online_state DROP CONSTRAINT IF EXISTS online_state_turn_order_position_check;
 ALTER TABLE online_state ADD CONSTRAINT online_state_turn_order_position_check
   CHECK (turn_order_position IN ('top', 'bottom', 'compact_top', 'compact_bottom', 'hidden'));
+
+
+-- ============================================================
+-- Paramètres d'administration en temps réel
+-- ------------------------------------------------------------
+-- src/hooks/useAdminParameters.ts s'abonne aux UPDATE de admin_parameters
+-- pour que les interrupteurs de fonctionnalités (Mode En ligne, Chat,
+-- Mini-Jeux, Pension, Safari…) prennent effet chez les joueurs sans qu'ils
+-- rechargent la page. Encore faut-il que la table soit publiée : sans cette
+-- ligne, l'abonnement attend dans le vide, sans erreur visible.
+-- ============================================================
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'admin_parameters'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE admin_parameters;
+  END IF;
+END $$;

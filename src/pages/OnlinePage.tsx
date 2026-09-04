@@ -27,6 +27,7 @@ import { EndgameRewardsModal } from '../components/online/EndgameRewardsModal'
 import { EndgameOverlay } from '../components/online/EndgameOverlay'
 import { EndgameAckPanel } from '../components/online/EndgameAckPanel'
 import { DiceResultOverlay, type DiceResult } from '../components/online/DiceResultOverlay'
+import { clearDiceHistory } from '../lib/diceRolls'
 import { BUTTON_STYLE } from '../lib/buttonStyles'
 import type { EndgameOutcome } from '../types'
 
@@ -75,6 +76,11 @@ export function OnlinePage() {
     if (diceTimerRef.current) clearTimeout(diceTimerRef.current)
     diceTimerRef.current = setTimeout(() => setDiceResult(null), 3000)
   }, [])
+  // Table rase des derniers résultats à chaque nouvelle bataille, sur tous les
+  // appareils à la fois : l'historique ne vit qu'en mémoire, et repartir avec
+  // les dés de la séance précédente n'a aucun sens.
+  const battleGeneration = online.state.battle_generation
+  useEffect(() => { clearDiceHistory() }, [battleGeneration])
 
   // ── Fin de partie ──
   const phase = online.state.endgame_phase
@@ -287,7 +293,7 @@ export function OnlinePage() {
           message="Tous les jetons, les cases bloquées, les cases coloriées, le fond et la taille de grille reviennent à zéro."
           confirmLabel="Réinitialiser"
           danger
-          onConfirm={() => { void tokensApi.resetBoard(); setConfirmingReset(false) }}
+          onConfirm={() => { void tokensApi.resetBoard(); clearDiceHistory(); setConfirmingReset(false) }}
           onCancel={() => setConfirmingReset(false)}
         />
       )}

@@ -57,7 +57,7 @@ export function TurnOrderBar({ ordered, activeTokenId, isAdmin, compact, onReord
 
   const tile = compact ? 'w-8 h-8' : 'w-16 h-16'
   const line = compact ? 'h-[18px]' : 'h-[30px]'
-  const ring = compact ? 'shadow-[0_0_0_2px_var(--color-shell)]' : 'shadow-[0_0_0_4px_var(--color-shell)]'
+  const ring = compact ? 'shadow-[0_0_0_2px_var(--color-select)]' : 'shadow-[0_0_0_4px_var(--color-select)]'
 
   return (
     <div className={`relative flex items-center ${compact ? 'gap-1 px-2' : 'gap-2 px-3'}`}>
@@ -110,7 +110,7 @@ export function TurnOrderBar({ ordered, activeTokenId, isAdmin, compact, onReord
               {/* Flèche pointant vers le haut, sous le Pokémon dont c'est le tour */}
               {active && (
                 <span
-                  className={`absolute left-1/2 -translate-x-1/2 w-0 h-0 border-l-transparent border-r-transparent border-b-shell
+                  className={`absolute left-1/2 -translate-x-1/2 w-0 h-0 border-l-transparent border-r-transparent border-b-select
                     ${compact
                       ? '-bottom-1.5 border-l-[5px] border-r-[5px] border-b-[6px]'
                       : '-bottom-3 border-l-[8px] border-r-[8px] border-b-[10px]'}`}

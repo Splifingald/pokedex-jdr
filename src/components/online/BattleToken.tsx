@@ -56,7 +56,7 @@ export function BattleToken({
     >
       {/* Disque de fond : uniquement là pour détacher le sprite du décor */}
       <div
-        className={`absolute w-[82%] h-[82%] rounded-full bg-black/50 ${selected ? 'shadow-[0_0_0_3px_var(--color-cream),0_0_0_6px_var(--color-shell)]' : ''} ${interactive ? 'cursor-grab active:cursor-grabbing touch-none' : ''}`}
+        className={`absolute w-[82%] h-[82%] rounded-full bg-black/50 ${selected ? 'shadow-[0_0_0_3px_var(--color-cream),0_0_0_6px_var(--color-select)]' : ''} ${interactive ? 'cursor-grab active:cursor-grabbing touch-none' : ''}`}
       />
 
       {species?.image_miniature ? (

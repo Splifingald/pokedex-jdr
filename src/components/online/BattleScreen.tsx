@@ -234,6 +234,10 @@ export function BattleScreen({
 
   // Cliquer un Pokémon de l'équipe : s'il est déjà sur le plateau, on ouvre sa
   // fiche et on le sélectionne plutôt que de redemander où le poser.
+  // Amorcer une pose, c'est désigner une case au clic suivant : rester sur
+  // l'outil « Colorier » peindrait cette case au lieu d'y poser le Pokémon.
+  const armPlacement = useCallback(() => setTool('ping'), [])
+
   const handlePickFromTeam = useCallback((pp: PlayerPokemon, owner: Player) => {
     const placed = tokens.find((t) => t.token.player_pokemon_id === pp.id)
     setPendingFree(null)
@@ -245,7 +249,8 @@ export function BattleScreen({
       return
     }
     setPendingPokemon({ pp, owner })
-  }, [tokens])
+    armPlacement()
+  }, [tokens, armPlacement])
 
   const handleSelectToken = useCallback((t: ResolvedToken) => {
     // Un jeton qu'on n'a pas le droit d'inspecter (celui d'un autre joueur)
@@ -286,7 +291,7 @@ export function BattleScreen({
       isAlly={isAlly}
       onToggleAlly={(id) => setAllyFlags((prev) => ({ ...prev, [id]: !isAlly(id) }))}
       pokemonCatalog={pokemonList}
-      onPlaceFreeSpecies={(species, maxHp, damage, label) => setPendingFree({ species, maxHp, damage, label })}
+      onPlaceFreeSpecies={(species, maxHp, damage, label) => { setPendingFree({ species, maxHp, damage, label }); armPlacement() }}
       tool={tool}
       onToolChange={setTool}
       paintColor={paintColor}
@@ -339,6 +344,10 @@ export function BattleScreen({
             onMoveToken={handleMoveToken}
             onCellActivate={handleCellActivate}
             onCellPaint={handleCellPaint}
+            // Saisir un jeton désélectionne la capacité en cours : sa portée et
+            // l'aperçu de déplacement se superposeraient sinon, deux zones de
+            // même teinte dont on ne saurait plus laquelle dit quoi.
+            onTokenDragStart={() => setSelectedMove(null)}
             onRowsChange={isAdmin ? (rows) => void updateOnlineState({ grid_rows: rows }) : undefined}
           />
 
